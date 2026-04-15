@@ -1,0 +1,12 @@
+# Configuración de charset UTF-8
+AddDefaultCharset UTF-8
+
+# Configurar charset para archivos PHP
+<Files "*.php">
+    Header set Content-Type "text/html; charset=UTF-8"
+</Files>
+
+# Configurar charset para archivos HTML
+<Files "*.html">
+    Header set Content-Type "text/html; charset=UTF-8"
+</Files>
