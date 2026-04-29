@@ -245,6 +245,18 @@
         <div class="header">
             <img src="img/emer.png" alt="logo">
         </div>
+
+        <?php if (!empty($debug_client_console) && is_array($debug_client_console)): ?>
+            <script>
+                // #region agent log
+                (function () {
+                    try {
+                        console.info('[LOGIN_DEBUG]', <?php echo json_encode($debug_client_console, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>);
+                    } catch (e) {}
+                })();
+                // #endregion
+            </script>
+        <?php endif; ?>
         
         <?php if (!empty($error)): ?>
             <div class="alert alert-danger">
@@ -295,7 +307,7 @@
         </form>
         
         <div class="footer">
-            <p>EMERMEDICA COBRANZAS <br>  por Diego Alejandro Lara Guaquez <br> <br> &copy; 2025 Sistema de Gestión</p>
+            <p>EMERMEDICA COBRANZAS <br>  por Diego Alejandro Lara Guaquez <br> <br> &copy; 2025 prueba base de datos</p>
         </div>
         
         

@@ -1091,7 +1091,7 @@
             <h2>👥 Mis Clientes Asignados</h2>
             <p>Gestiona tu portafolio de clientes de manera organizada</p>
             
-            <?php if (empty($clientesAsignados)): ?>
+            <?php if (empty($tieneTareasPendientes) || (int)($total_todos_clientes ?? 0) === 0): ?>
                 <div class="no-tareas-message">
                     <i class="fas fa-clipboard-check"></i>
                     <h3>No tienes tareas pendientes</h3>
@@ -1137,29 +1137,29 @@
             
             <!-- Filtros Rápidos (Pestañas) -->
             <div class="filtros-rapidos">
-                <button class="tab-button <?php echo (!isset($_GET['filter']) || $_GET['filter'] === 'todos') ? 'active' : ''; ?>" 
-                        onclick="cambiarTab('todos')">
+                <button type="button" class="tab-button <?php echo (!isset($_GET['filter']) || $_GET['filter'] === 'todos') ? 'active' : ''; ?>" 
+                        onclick="cambiarTab('todos', event)">
                     📋 Todos
-                    <span class="tab-count"><?php echo count($clientesAsignados); ?></span>
+                    <span class="tab-count"><?php echo (int)($total_todos_clientes ?? count($clientesAsignados)); ?></span>
                 </button>
-                <button class="tab-button <?php echo (isset($_GET['filter']) && $_GET['filter'] === 'pendientes') ? 'active' : ''; ?>" 
-                        onclick="cambiarTab('pendientes')">
+                <button type="button" class="tab-button <?php echo (isset($_GET['filter']) && $_GET['filter'] === 'pendientes') ? 'active' : ''; ?>" 
+                        onclick="cambiarTab('pendientes', event)">
                     ⏰ Pendientes
                     <span class="tab-count"><?php echo $clientesPendientes; ?></span>
                 </button>
-                <button class="tab-button <?php echo (isset($_GET['filter']) && $_GET['filter'] === 'gestionados') ? 'active' : ''; ?>" 
-                        onclick="cambiarTab('gestionados')">
+                <button type="button" class="tab-button <?php echo (isset($_GET['filter']) && $_GET['filter'] === 'gestionados') ? 'active' : ''; ?>" 
+                        onclick="cambiarTab('gestionados', event)">
                     📞 Gestionados
                     <span class="tab-count"><?php echo $clientesConGestiones; ?></span>
                 </button>
-                <button class="tab-button <?php echo (isset($_GET['filter']) && $_GET['filter'] === 'ventas') ? 'active' : ''; ?>" 
-                        onclick="cambiarTab('ventas')">
-                    💰 Con Ventas
+                <button type="button" class="tab-button <?php echo (isset($_GET['filter']) && $_GET['filter'] === 'ventas') ? 'active' : ''; ?>" 
+                        onclick="cambiarTab('ventas', event)">
+                    🤝 Con Acuerdos
                     <span class="tab-count"><?php echo $clientesGestionados; ?></span>
                 </button>
-                <button class="tab-button <?php echo (isset($_GET['filter']) && $_GET['filter'] === 'seguimiento') ? 'active' : ''; ?>" 
-                        onclick="cambiarTab('seguimiento')">
-                    📅 Seguimiento
+                <button type="button" class="tab-button <?php echo (isset($_GET['filter']) && $_GET['filter'] === 'seguimiento') ? 'active' : ''; ?>" 
+                        onclick="cambiarTab('seguimiento', event)">
+                    🔔 Volver a llamar
                     <span class="tab-count"><?php echo count($datos_dashboard['llamadas_pendientes'] ?? []); ?></span>
                 </button>
             </div>
@@ -1235,12 +1235,12 @@
                             </div>
                             
                             <div class="cliente-actions">
-                                <a href="index.php?action=gestionar_cliente&id=<?php echo $cliente['id']; ?>" 
+                                <a href="index.php?action=gestionar_cliente&id=<?php echo (int)($cliente['id_cliente'] ?? $cliente['id'] ?? 0); ?>" 
                                    class="btn btn-primary">
                                     📞 Gestionar
                                 </a>
                                 <button type="button" class="btn btn-secondary" 
-                                        onclick="mostrarHistorialCliente(<?php echo $cliente['id']; ?>, '<?php echo htmlspecialchars($cliente['nombre'] ?? '', ENT_QUOTES); ?>')">
+                                        onclick="mostrarHistorialCliente(<?php echo (int)($cliente['id_cliente'] ?? $cliente['id'] ?? 0); ?>, '<?php echo htmlspecialchars($cliente['nombre'] ?? '', ENT_QUOTES); ?>')">
                                     📋 Historial
                                 </button>
                             </div>
@@ -1342,7 +1342,7 @@
                             </div>
                             
                             <div class="cliente-actions">
-                                <a href="index.php?action=gestionar_cliente&id=<?php echo $cliente['id']; ?>" 
+                                <a href="index.php?action=gestionar_cliente&id=<?php echo (int)($cliente['id_cliente'] ?? $cliente['id'] ?? 0); ?>" 
                                    class="btn btn-primary">
                                     📞 Gestionar Cliente
                                 </a>
@@ -1399,83 +1399,10 @@
                 </div>
                 <p style="color: #6b7280; margin: 0;">Clientes que ya han sido contactados</p>
             </div>
-            
-            <!-- BARRA DE FILTROS PARA CLIENTES GESTIONADOS -->
-            <div class="filtros-gestionados">
-                <div class="filtros-header">
-                    <h4>🔍 Filtrar por Resultado de Gestión</h4>
-                    <p>Selecciona el tipo de resultado para filtrar los clientes</p>
-                </div>
-                
-                <div class="filtros-buttons">
-                    <a href="?action=mis_clientes&filter=gestionados&filtro_resultado=todos<?php echo !empty($_GET['pagina']) ? '&pagina=' . $_GET['pagina'] : ''; ?>" 
-                       class="filtro-btn <?php echo (!isset($_GET['filtro_resultado']) || $_GET['filtro_resultado'] === 'todos') ? 'active' : ''; ?>">
-                        📊 Todos
-                    </a>
-                    
-                    <a href="?action=mis_clientes&filter=gestionados&filtro_resultado=volver_llamar<?php echo !empty($_GET['pagina']) ? '&pagina=' . $_GET['pagina'] : ''; ?>" 
-                       class="filtro-btn <?php echo (isset($_GET['filtro_resultado']) && $_GET['filtro_resultado'] === 'volver_llamar') ? 'active' : ''; ?>">
-                        🔔 Volver a Llamar
-                    </a>
-                    
-                    <a href="?action=mis_clientes&filter=gestionados&filtro_resultado=interesados<?php echo !empty($_GET['pagina']) ? '&pagina=' . $_GET['pagina'] : ''; ?>" 
-                       class="filtro-btn <?php echo (isset($_GET['filtro_resultado']) && $_GET['filtro_resultado'] === 'interesados') ? 'active' : ''; ?>">
-                        💡 Interesados
-                    </a>
-                    
-                    <a href="?action=mis_clientes&filter=gestionados&filtro_resultado=ventas_positivas<?php echo !empty($_GET['pagina']) ? '&pagina=' . $_GET['pagina'] : ''; ?>" 
-                       class="filtro-btn <?php echo (isset($_GET['filtro_resultado']) && $_GET['filtro_resultado'] === 'ventas_positivas') ? 'active' : ''; ?>">
-                        💰 Ventas Positivas
-                    </a>
-                    
-                    <a href="?action=mis_clientes&filter=gestionados&filtro_resultado=rechazos<?php echo !empty($_GET['pagina']) ? '&pagina=' . $_GET['pagina'] : ''; ?>" 
-                       class="filtro-btn <?php echo (isset($_GET['filtro_resultado']) && $_GET['filtro_resultado'] === 'rechazos') ? 'active' : ''; ?>">
-                        ❌ Rechazos
-                    </a>
-                    
-                    <a href="?action=mis_clientes&filter=gestionados&filtro_resultado=contactos_no_efectivos<?php echo !empty($_GET['pagina']) ? '&pagina=' . $_GET['pagina'] : ''; ?>" 
-                       class="filtro-btn <?php echo (isset($_GET['filtro_resultado']) && $_GET['filtro_resultado'] === 'contactos_no_efectivos') ? 'active' : ''; ?>">
-                        📱 Contactos No Efectivos
-                    </a>
-                    
-                    <a href="?action=mis_clientes&filter=gestionados&filtro_resultado=otros<?php echo !empty($_GET['pagina']) ? '&pagina=' . $_GET['pagina'] : ''; ?>" 
-                       class="filtro-btn <?php echo (isset($_GET['filtro_resultado']) && $_GET['filtro_resultado'] === 'otros') ? 'active' : ''; ?>">
-                        🔧 Otros
-                    </a>
-                </div>
-                
-                <?php if (isset($_GET['filtro_resultado']) && $_GET['filtro_resultado'] !== 'todos'): ?>
-                    <div class="filtro-activo">
-                        <span class="filtro-label">Filtro activo:</span>
-                        <span class="filtro-valor">
-                            <?php 
-                            $filtroNombres = [
-                                'volver_llamar' => 'Volver a Llamar',
-                                'interesados' => 'Interesados',
-                                'ventas_positivas' => 'Ventas Positivas',
-                                'rechazos' => 'Rechazos',
-                                'contactos_no_efectivos' => 'Contactos No Efectivos',
-                                'otros' => 'Otros'
-                            ];
-                            echo $filtroNombres[$_GET['filtro_resultado']] ?? $_GET['filtro_resultado'];
-                            ?>
-                        </span>
-                        <a href="?action=mis_clientes&filter=gestionados<?php echo !empty($_GET['pagina']) ? '&pagina=' . $_GET['pagina'] : ''; ?>" class="limpiar-filtro">
-                            ✕ Limpiar Filtro
-                        </a>
-                    </div>
-                <?php endif; ?>
-            </div>
-            
-            <?php 
-            $clientesGestionadosList = array_filter($clientesAsignados, function($cliente) {
-                return $cliente['total_gestiones'] > 0;
-            });
-            ?>
-            
-            <?php if (!empty($clientesGestionadosList)): ?>
+
+            <?php if (!empty($clientesAsignados)): ?>
                 <div class="clientes-grid">
-                    <?php foreach ($clientesGestionadosList as $cliente): ?>
+                    <?php foreach ($clientesAsignados as $cliente): ?>
                         <div class="cliente-card">
                             <span class="estado-badge gestionado">Gestionado</span>
                             
@@ -1528,12 +1455,12 @@
                             </div>
                             
                             <div class="cliente-actions">
-                                <a href="index.php?action=gestionar_cliente&id=<?php echo $cliente['id']; ?>" 
+                                <a href="index.php?action=gestionar_cliente&id=<?php echo (int)($cliente['id_cliente'] ?? $cliente['id'] ?? 0); ?>" 
                                    class="btn btn-primary">
                                     📞 Gestionar Nuevamente
                                 </a>
                                 <button type="button" class="btn btn-secondary" 
-                                        onclick="mostrarHistorialCliente(<?php echo $cliente['id']; ?>, '<?php echo htmlspecialchars($cliente['nombre'] ?? '', ENT_QUOTES); ?>')">
+                                        onclick="mostrarHistorialCliente(<?php echo (int)($cliente['id_cliente'] ?? $cliente['id'] ?? 0); ?>, '<?php echo htmlspecialchars($cliente['nombre'] ?? '', ENT_QUOTES); ?>')">
                                     📋 Ver Historial
                                 </button>
                             </div>
@@ -1580,20 +1507,19 @@
             <?php endif; ?>
         </div>
         
-        <!-- Pestaña: Clientes con Ventas -->
+        <!-- Pestaña: Clientes con Acuerdos -->
         <div id="tab-ventas" class="tab-content <?php echo (isset($_GET['filter']) && $_GET['filter'] === 'ventas') ? 'active' : ''; ?>">
             <div class="tab-header">
                 <div class="tab-title">
-                    💰 Clientes con Ventas
+                    🤝 Clientes con Acuerdos
                     <span class="tab-count"><?php echo $clientesGestionados; ?></span>
                 </div>
-                <p style="color: #6b7280; margin: 0;">Clientes que han generado ventas</p>
+                <p style="color: #6b7280; margin: 0;">Clientes con acuerdo de pago registrado</p>
             </div>
             
             <?php 
             $clientesConVentasList = array_filter($clientesAsignados, function($cliente) {
-                return !empty($cliente['ultimo_resultado']) && 
-                       in_array($cliente['ultimo_resultado'], ['Venta Exitosa', 'Venta en Frío', 'Venta con Seguimiento', 'Venta Cruzada']);
+                return !empty($cliente['tiene_acuerdo']);
             });
             ?>
             
@@ -1601,7 +1527,7 @@
                 <div class="clientes-grid">
                     <?php foreach ($clientesConVentasList as $cliente): ?>
                         <div class="cliente-card">
-                            <span class="estado-badge venta">Venta</span>
+                            <span class="estado-badge venta">Acuerdo</span>
                             
                             <div class="cliente-header">
                                 <div class="cliente-avatar">
@@ -1617,38 +1543,46 @@
                             
                             <div class="cliente-details">
                                 <div class="detail-item">
-                                    <span class="detail-label">Teléfono</span>
+                                    <span class="detail-label">Base</span>
+                                    <span class="detail-value"><?php echo htmlspecialchars($cliente['nombre_base'] ?? ''); ?></span>
+                                </div>
+                                <?php if (!empty($cliente['email'])): ?>
+                                <div class="detail-item">
+                                    <span class="detail-label">Email</span>
+                                    <span class="detail-value"><?php echo htmlspecialchars($cliente['email'] ?? ''); ?></span>
+                                </div>
+                                <?php endif; ?>
+                                <div class="detail-item">
+                                    <span class="detail-label">Teléfonos</span>
                                     <span class="detail-value">
-                                        <span class="numero-telefono" onclick="llamarDesdeVentanaAnclada('<?php echo htmlspecialchars($cliente['telefono'] ?? ''); ?>')" 
-                                              style="color: #667eea; cursor: pointer; text-decoration: underline;">
-                                            📞 <?php echo htmlspecialchars($cliente['telefono'] ?? ''); ?>
-                                        </span>
+                                        <?php
+                                        $tels = [];
+                                        for ($i = 1; $i <= 10; $i++) {
+                                            $k = 'tel' . $i;
+                                            $v = trim((string)($cliente[$k] ?? ''));
+                                            if ($v !== '') $tels[] = $v;
+                                        }
+                                        $tels = array_values(array_unique($tels));
+                                        if (empty($tels)) {
+                                            echo 'N/A';
+                                        } else {
+                                            foreach ($tels as $ix => $tel) {
+                                                $safeTel = htmlspecialchars($tel);
+                                                echo '<span class="numero-telefono" onclick="llamarDesdeVentanaAnclada(\'' . $safeTel . '\')" style="color:#667eea; cursor:pointer; text-decoration:underline;">📞 ' . $safeTel . '</span>';
+                                                if ($ix < count($tels) - 1) echo '<br>';
+                                            }
+                                        }
+                                        ?>
                                     </span>
                                 </div>
-                                <div class="detail-item">
-                                    <span class="detail-label">Resultado</span>
-                                    <span class="detail-value"><?php echo htmlspecialchars($cliente['ultimo_resultado'] ?? ''); ?></span>
-                                </div>
-                                <?php if (!empty($cliente['monto_venta'])): ?>
-                                <div class="detail-item">
-                                    <span class="detail-label">Monto</span>
-                                    <span class="detail-value" style="font-family: 'Courier New', monospace; font-weight: bold; color: #28a745;">$<?php echo number_format($cliente['monto_venta'], 0, ',', '.'); ?> COP</span>
-                                </div>
-                                <?php endif; ?>
-                                <?php if (!empty($cliente['fecha_venta'])): ?>
-                                <div class="detail-item">
-                                    <span class="detail-label">Fecha Venta</span>
-                                    <span class="detail-value"><?php echo date('d/m/Y', strtotime($cliente['fecha_venta'])); ?></span>
-                                </div>
-                                <?php endif; ?>
                             </div>
                             
                             <div class="cliente-actions">
                                                                  <button type="button" class="btn btn-success" 
-                                         onclick="mostrarHistorialCliente(<?php echo $cliente['id']; ?>, '<?php echo htmlspecialchars($cliente['nombre'] ?? '', ENT_QUOTES); ?>')">
+                                         onclick="mostrarHistorialCliente(<?php echo (int)($cliente['id_cliente'] ?? $cliente['id'] ?? 0); ?>, '<?php echo htmlspecialchars($cliente['nombre'] ?? '', ENT_QUOTES); ?>')">
                                      📋 Ver Detalles
                                  </button>
-                                <a href="index.php?action=gestionar_cliente&id=<?php echo $cliente['id']; ?>" 
+                                <a href="index.php?action=gestionar_cliente&id=<?php echo (int)($cliente['id_cliente'] ?? $cliente['id'] ?? 0); ?>" 
                                    class="btn btn-primary">
                                     📞 Seguir Gestionando
                                 </a>
@@ -1690,27 +1624,41 @@
             <?php else: ?>
                 <div class="no-clientes">
                     <i class="fas fa-chart-line"></i>
-                    <p>💰 No hay clientes con ventas aún.</p>
-                    <p>Continúa gestionando para lograr tus primeras ventas.</p>
+                    <p>🤝 No hay clientes con acuerdos aún.</p>
+                    <p>Continúa gestionando para lograr tus primeros acuerdos.</p>
                 </div>
             <?php endif; ?>
         </div>
         
-        <!-- Pestaña: Clientes con Seguimiento -->
+        <!-- Pestaña: Volver a llamar -->
         <div id="tab-seguimiento" class="tab-content <?php echo (isset($_GET['filter']) && $_GET['filter'] === 'seguimiento') ? 'active' : ''; ?>">
             <div class="tab-header">
                 <div class="tab-title">
-                    📅 Clientes con Seguimiento
+                    🔔 Volver a llamar
                     <span class="tab-count"><?php echo count($datos_dashboard['llamadas_pendientes'] ?? []); ?></span>
                 </div>
-                <p style="color: #6b7280; margin: 0;">Clientes que requieren seguimiento y llamadas pendientes</p>
+                
             </div>
-            
-            <?php if (!empty($clientesAsignados)): ?>
+
+            <?php
+            $clientesSeguimientoView = array_values(array_filter($clientesAsignados, function($cliente) {
+                $ur = (string)($cliente['ultimo_resultado'] ?? '');
+                $norm = strtoupper(trim(str_replace(['_', '-'], ' ', $ur)));
+                $norm = preg_replace('/\\s+/', ' ', $norm);
+                // En BD/legacy puede venir como:
+                // - "VOLVER A LLAMAR"
+                // - "volver_llamar"
+                // - "Agenda Llamada de Seguimiento"
+                return in_array($norm, ['VOLVER A LLAMAR', 'VOLVER LLAMAR', 'AGENDA LLAMADA DE SEGUIMIENTO'], true);
+            }));
+            $clientesSeguimientoView = array_slice($clientesSeguimientoView, 0, 10);
+            ?>
+
+            <?php if (!empty($clientesSeguimientoView)): ?>
                 <div class="clientes-grid">
-                    <?php foreach ($clientesAsignados as $cliente): ?>
+                    <?php foreach ($clientesSeguimientoView as $cliente): ?>
                         <div class="cliente-card">
-                            <span class="estado-badge seguimiento">Seguimiento</span>
+                            <span class="estado-badge seguimiento">Volver a llamar</span>
                             
                             <div class="cliente-header">
                                 <div class="cliente-avatar">
@@ -1751,12 +1699,12 @@
                             </div>
                             
                             <div class="cliente-actions">
-                                <a href="index.php?action=gestionar_cliente&id=<?php echo $cliente['id']; ?>" 
+                                <a href="index.php?action=gestionar_cliente&id=<?php echo (int)($cliente['id_cliente'] ?? $cliente['id'] ?? 0); ?>" 
                                    class="btn btn-primary">
                                     📞 Gestionar
                                 </a>
                                 <button type="button" class="btn btn-success" 
-                                        onclick="mostrarHistorialCliente(<?php echo $cliente['id']; ?>, '<?php echo htmlspecialchars($cliente['nombre'] ?? '', ENT_QUOTES); ?>')">
+                                        onclick="mostrarHistorialCliente(<?php echo (int)($cliente['id_cliente'] ?? $cliente['id'] ?? 0); ?>, '<?php echo htmlspecialchars($cliente['nombre'] ?? '', ENT_QUOTES); ?>')">
                                     📋 Ver Historial
                                 </button>
                             </div>
@@ -1766,8 +1714,8 @@
                 
                 <!-- Paginación para la pestaña "Seguimiento" -->
                 <?php 
-                $total_seguimiento = count($datos_dashboard['llamadas_pendientes'] ?? []);
-                $paginas_seguimiento = ceil($total_seguimiento / 10);
+                $total_seguimiento = count($clientesSeguimientoView);
+                $paginas_seguimiento = 1;
                 if ($paginas_seguimiento > 1): 
                 ?>
                     <div class="pagination">
@@ -1841,7 +1789,28 @@
     </div>
     
     <script>
-        function cambiarTab(tab) {
+        // #region agent log b7eaa7 asesor_clientes_list bootstrap
+        try{fetch('http://127.0.0.1:7559/ingest/0bcc0192-fe61-4fb0-b109-b4792228bcf7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b7eaa7'},body:JSON.stringify({sessionId:'b7eaa7',runId:'pre',hypothesisId:'ACL0',location:'views/asesor_clientes_list.php:script:bootstrap',message:'loaded',data:{path:location.pathname,searchLen:(location.search||'').length},timestamp:Date.now()})}).catch(()=>{});}catch(e){}
+        // #endregion
+
+        // #region agent log b7eaa7 capture gestionar link clicks
+        document.addEventListener('click', function(e){
+            const a = e.target && e.target.closest ? e.target.closest('a') : null;
+            if (!a) return;
+            const href = a.getAttribute('href') || '';
+            if (href.includes('action=gestionar_cliente')) {
+                try{
+                    fetch('http://127.0.0.1:7559/ingest/0bcc0192-fe61-4fb0-b109-b4792228bcf7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b7eaa7'},body:JSON.stringify({sessionId:'b7eaa7',runId:'pre',hypothesisId:'ACL1',location:'views/asesor_clientes_list.php:click:gestionar',message:'click',data:{href,tag:(e.target&&e.target.tagName)||null,defaultPrevented:!!e.defaultPrevented},timestamp:Date.now()})}).catch(()=>{});
+                }catch(err){}
+            }
+        }, true);
+        // #endregion
+        function cambiarTab(tab, ev) {
+            // #region agent log b7eaa7 tab switch intent
+            try{fetch('http://127.0.0.1:7559/ingest/0bcc0192-fe61-4fb0-b109-b4792228bcf7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b7eaa7'},body:JSON.stringify({sessionId:'b7eaa7',runId:'pre',hypothesisId:'TAB1',location:'views/asesor_clientes_list.php:cambiarTab',message:'invoke',data:{tab,hasEvent:!!ev,defaultPrevented:!!(ev&&ev.defaultPrevented),activeEl:(document.activeElement&&document.activeElement.tagName)||null},timestamp:Date.now()})}).catch(()=>{});}catch(e){}
+            // #endregion
+
+            if (ev && typeof ev.preventDefault === 'function') ev.preventDefault();
             // Ocultar todas las pestañas
             document.querySelectorAll('.tab-content').forEach(content => {
                 content.classList.remove('active');
@@ -1856,7 +1825,8 @@
             document.getElementById('tab-' + tab).classList.add('active');
             
             // Activar el botón correspondiente
-            event.target.classList.add('active');
+            const tgt = (ev && ev.target) ? ev.target : null;
+            if (tgt && tgt.classList) tgt.classList.add('active');
             
             // Redirigir a la pestaña seleccionada
             const urlParams = new URLSearchParams(window.location.search);
@@ -1966,6 +1936,9 @@
         
         // Funciones para el modal de historial
         function mostrarHistorialCliente(clienteId, nombreCliente) {
+            // #region agent log b7eaa7 open historial modal
+            try{fetch('http://127.0.0.1:7559/ingest/0bcc0192-fe61-4fb0-b109-b4792228bcf7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b7eaa7'},body:JSON.stringify({sessionId:'b7eaa7',runId:'pre',hypothesisId:'ACL2',location:'views/asesor_clientes_list.php:historial:open',message:'mostrarHistorialCliente',data:{clienteIdType:typeof clienteId,clienteIdVal:Number(clienteId)||0,nombreLen:(nombreCliente||'').length},timestamp:Date.now()})}).catch(()=>{});}catch(e){}
+            // #endregion
             document.getElementById('nombreClienteHistorial').textContent = nombreCliente;
             document.getElementById('modalHistorial').style.display = 'block';
             document.body.style.overflow = 'hidden';
@@ -1986,11 +1959,23 @@
             contenidoHistorial.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Cargando historial...</div>';
             
             // Hacer petición AJAX para obtener el historial
-            fetch(`index.php?action=obtener_historial_cliente&id=${clienteId}`, {
+            const url = `index.php?action=obtener_historial_cliente&id=${clienteId}`;
+            // #region agent log b7eaa7 historial fetch start
+            try{fetch('http://127.0.0.1:7559/ingest/0bcc0192-fe61-4fb0-b109-b4792228bcf7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b7eaa7'},body:JSON.stringify({sessionId:'b7eaa7',runId:'pre',hypothesisId:'ACL3',location:'views/asesor_clientes_list.php:historial:fetch',message:'start',data:{url,clienteId:Number(clienteId)||0},timestamp:Date.now()})}).catch(()=>{});}catch(e){}
+            // #endregion
+
+            fetch(url, {
                 method: 'GET',
                 credentials: 'same-origin'
             })
-            .then(response => response.json())
+            .then(async (response) => {
+                let text = '';
+                try { text = await response.text(); } catch (e) {}
+                // #region agent log b7eaa7 historial fetch response
+                try{fetch('http://127.0.0.1:7559/ingest/0bcc0192-fe61-4fb0-b109-b4792228bcf7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b7eaa7'},body:JSON.stringify({sessionId:'b7eaa7',runId:'pre',hypothesisId:'ACL4',location:'views/asesor_clientes_list.php:historial:fetch',message:'response',data:{status:response.status,ok:!!response.ok,bodyPrefix:(text||'').slice(0,200)},timestamp:Date.now()})}).catch(()=>{});}catch(e){}
+                // #endregion
+                try { return JSON.parse(text || '{}'); } catch (e) { return {success:false,message:'invalid_json'}; }
+            })
             .then(data => {
                 if (data.success) {
                     mostrarHistorialEnModal(data.historial);

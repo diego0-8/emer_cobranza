@@ -1,4 +1,12 @@
 <?php
+/**
+ * Modelo de tareas adaptado al dump `emermedica_cobranza.sql`.
+ *
+ * Tablas:
+ * - `tareas`
+ * - `detalle_tareas`
+ * - `base_clientes` (equivalente a cargas)
+ */
 class TareaModel {
     private $pdo;
 
@@ -6,444 +14,496 @@ class TareaModel {
         $this->pdo = $pdo;
     }
 
-    /**
-     * Crear una nueva tarea para un asesor
-     */
-    public function crearTarea($datos) {
-        $this->pdo->beginTransaction();
-        try {
-            $sql = "INSERT INTO tareas_asesor (asesor_id, carga_id, cliente_ids, descripcion, fecha_vencimiento, coordinador_id, prioridad) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?)";
-            $stmt = $this->pdo->prepare($sql);
-            
-            $resultado = $stmt->execute([
-                $datos['asesor_id'],
-                $datos['carga_id'],
-                json_encode($datos['cliente_ids']),
-                $datos['descripcion'] ?? null,
-                $datos['fecha_vencimiento'] ?? null,
-                $datos['coordinador_id'],
-                $datos['prioridad'] ?? 'media'
-            ]);
-            
-            if ($resultado) {
-                $tareaId = $this->pdo->lastInsertId();
-                
-                // Registrar en historial
-                $this->registrarHistorial($tareaId, 'creada', 'Tarea creada', $datos['coordinador_id']);
-                
-                $this->pdo->commit();
-                return $tareaId;
-            }
-            
-            $this->pdo->rollBack();
-            return false;
-        } catch (Exception $e) {
-            $this->pdo->rollBack();
-            error_log("Error al crear tarea: " . $e->getMessage());
-            return false;
-        }
+    private function mapEstadoTareaDbToUi(string $estadoDb): string {
+        $estadoDb = trim($estadoDb);
+        // DB enum: 'pendiente','en progreso','completa','cancelada'
+        if ($estadoDb === 'en progreso') return 'en_proceso';
+        if ($estadoDb === 'completa') return 'completada';
+        return $estadoDb;
     }
 
-    /**
-     * Obtener tareas de un asesor
-     */
+    private function mapEstadoTareaUiToDb(string $estadoUi): string {
+        $estadoUi = trim($estadoUi);
+        if ($estadoUi === 'en_proceso') return 'en progreso';
+        if ($estadoUi === 'completada') return 'completa';
+        return $estadoUi;
+    }
+
+    public function crearTarea($datos) {
+        $clienteIds = $datos['cliente_ids'] ?? [];
+        if (!is_array($clienteIds)) $clienteIds = [];
+
+        // Nota: en dump el campo es `obligaciones_asignadas`. Lo dejamos NULL por ahora.
+
+        $stmt = $this->pdo->prepare("
+            INSERT INTO tareas (nombre_tarea, base_id, coordinador_cedula, asesor_cedula, estado, clientes_asignados, obligaciones_asignadas, fecha_creacion, fecha_completa)
+            VALUES (?, ?, ?, ?, 'pendiente', ?, NULL, NOW(), NOW())
+        ");
+
+        $nombre = (string)($datos['nombre_tarea'] ?? ($datos['descripcion'] ?? 'Tarea'));
+        $baseId = (int)($datos['carga_id'] ?? $datos['base_id'] ?? 0);
+        $coordinador = (string)($datos['coordinador_id'] ?? $datos['coordinador_cedula'] ?? '');
+        $asesor = (string)($datos['asesor_id'] ?? $datos['asesor_cedula'] ?? '');
+
+        // #region agent log b7eaa7 tareaModel crearTarea before execute
+        try { @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode([
+            'sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'TM1',
+            'location'=>'models/TareaModel.php:crearTarea:before',
+            'message'=>'insert_prepare',
+            'data'=>[
+                'baseId'=>(int)$baseId,
+                'coordinadorLen'=>strlen((string)$coordinador),
+                'asesorLen'=>strlen((string)$asesor),
+                'nombreLen'=>strlen((string)$nombre),
+                'clienteIdsCount'=>is_array($clienteIds)?count($clienteIds):-1
+            ],
+            'timestamp'=>(int) round(microtime(true)*1000)
+        ], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
+        // #endregion
+
+        $ok = $stmt->execute([$nombre, $baseId, $coordinador, $asesor, json_encode(array_values($clienteIds))]);
+        if (!$ok) return false;
+
+        $tareaId = (int)$this->pdo->lastInsertId();
+        // #region agent log b7eaa7 tareaModel crearTarea after execute
+        try { @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode([
+            'sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'TM2',
+            'location'=>'models/TareaModel.php:crearTarea:after',
+            'message'=>'insert_ok',
+            'data'=>['tareaId'=>(int)$tareaId],
+            'timestamp'=>(int) round(microtime(true)*1000)
+        ], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
+        // #endregion
+
+        // Poblar detalle_tareas (opcional)
+        if (!empty($clienteIds)) {
+            $stmtDet = $this->pdo->prepare("INSERT INTO detalle_tareas (tarea_id, cliente_id, gestionado) VALUES (?, ?, 'no')");
+            foreach ($clienteIds as $cid) {
+                $stmtDet->execute([$tareaId, (int)$cid]);
+            }
+        }
+
+        return $tareaId;
+    }
+
     public function getTareasByAsesor($asesorId, $estado = null) {
-        $sql = "SELECT t.*, c.nombre_cargue, u.nombre_completo as coordinador_nombre
-                FROM tareas_asesor t
-                JOIN cargas_excel c ON t.carga_id = c.id
-                JOIN usuarios u ON t.coordinador_id = u.id
-                WHERE t.asesor_id = ?";
-        
-        $params = [$asesorId];
-        
+        $sql = "
+            SELECT t.*, b.nombre as nombre_cargue, u.nombre as coordinador_nombre
+            FROM tareas t
+            JOIN base_clientes b ON t.base_id = b.id_base
+            LEFT JOIN usuarios u ON t.coordinador_cedula = u.cedula
+            WHERE t.asesor_cedula = ?
+        ";
+        $params = [(string)$asesorId];
+
         if ($estado) {
             $sql .= " AND t.estado = ?";
-            $params[] = $estado;
+            $params[] = (string)$estado;
         }
-        
+
         $sql .= " ORDER BY t.fecha_creacion DESC";
-        
+
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
         $tareas = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        // Decodificar los IDs de clientes
-        foreach ($tareas as &$tarea) {
-            $tarea['cliente_ids'] = json_decode($tarea['cliente_ids'], true);
-            $tarea['total_clientes'] = count($tarea['cliente_ids']);
+
+        foreach ($tareas as &$t) {
+            $t['id'] = $t['id_tarea'];
+            $t['carga_id'] = $t['base_id'];
+            $t['cliente_ids'] = json_decode((string)($t['clientes_asignados'] ?? '[]'), true) ?: [];
+            $t['total_clientes'] = is_array($t['cliente_ids']) ? count($t['cliente_ids']) : 0;
         }
-        
+
         return $tareas;
     }
 
-    /**
-     * Obtener tareas pendientes de un asesor
-     */
     public function getTareasPendientesByAsesor($asesorId) {
         return $this->getTareasByAsesor($asesorId, 'pendiente');
     }
 
-    /**
-     * Obtener clientes de una tarea específica
-     */
-    public function getClientesByTarea($tareaId) {
-        $sql = "SELECT t.cliente_ids, c.nombre_cargue
-                FROM tareas_asesor t
-                JOIN cargas_excel c ON t.carga_id = c.id
-                WHERE t.id = ?";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$tareaId]);
-        $tarea = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        if (!$tarea) {
-            return [];
-        }
-        
-        $clienteIds = json_decode($tarea['cliente_ids'], true);
-        
-        if (empty($clienteIds)) {
-            return [];
-        }
-        
-        // Obtener información de los clientes
-        $placeholders = str_repeat('?,', count($clienteIds) - 1) . '?';
-        $sql = "SELECT * FROM clientes WHERE id IN ($placeholders) ORDER BY nombre ASC";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($clienteIds);
-        
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    /**
-     * Actualizar estado de una tarea
-     */
     public function actualizarEstadoTarea($tareaId, $nuevoEstado, $usuarioId) {
-        $this->pdo->beginTransaction();
-        try {
-            $sql = "UPDATE tareas_asesor SET estado = ? WHERE id = ?";
-            $stmt = $this->pdo->prepare($sql);
-            $resultado = $stmt->execute([$nuevoEstado, $tareaId]);
-            
-            if ($resultado) {
-                $this->registrarHistorial($tareaId, 'estado_cambiado', "Estado cambiado a: $nuevoEstado", $usuarioId);
-                $this->pdo->commit();
-                return true;
-            }
-            
-            $this->pdo->rollBack();
-            return false;
-        } catch (Exception $e) {
-            $this->pdo->rollBack();
-            error_log("Error al actualizar estado de tarea: " . $e->getMessage());
-            return false;
-        }
+        $estadoDb = $this->mapEstadoTareaUiToDb((string)$nuevoEstado);
+        $stmt = $this->pdo->prepare("UPDATE tareas SET estado = ?, fecha_completa = NOW() WHERE id_tarea = ?");
+        return $stmt->execute([(string)$estadoDb, (int)$tareaId]);
     }
 
-    /**
-     * Verificar si un asesor tiene tareas pendientes
-     */
     public function tieneTareasPendientes($asesorId) {
-        $sql = "SELECT COUNT(*) as total FROM tareas_asesor WHERE asesor_id = ? AND estado = 'pendiente'";
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId]);
-        $resultado = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        return $resultado['total'] > 0;
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) as total FROM tareas WHERE asesor_cedula = ? AND estado = 'pendiente'");
+        $stmt->execute([(string)$asesorId]);
+        return ((int)($stmt->fetch(PDO::FETCH_ASSOC)['total'] ?? 0)) > 0;
     }
 
-    /**
-     * Obtener bases asignadas a un asesor (acceso completo).
-     * Solo devuelve bases HABILITADAS: las bases inactivas no aparecen y el asesor pierde todo acceso a ellas.
-     */
-    public function getBasesAsignadasByAsesor($asesorId) {
-        $sql = "SELECT aba.*, c.nombre_cargue, c.fecha_cargue, u.nombre_completo as coordinador_nombre
-                FROM asignaciones_base_asesor aba
-                JOIN cargas_excel c ON aba.carga_id = c.id
-                JOIN usuarios u ON aba.coordinador_id = u.id
-                WHERE aba.asesor_id = ? AND aba.estado = 'activa' AND aba.acceso_completo = 1
-                  AND (c.estado_habilitado = 'habilitado' OR c.estado_habilitado IS NULL)
-                ORDER BY aba.fecha_asignacion DESC";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    public function getClientesByTarea($tareaId) {
+        $stmt = $this->pdo->prepare("
+            SELECT
+                c.*,
+                dt.gestionado,
+                b.nombre as nombre_base
+            FROM detalle_tareas dt
+            JOIN clientes c ON c.id_cliente = dt.cliente_id
+            JOIN base_clientes b ON b.id_base = c.base_id
+            WHERE dt.tarea_id = ?
+            ORDER BY c.nombre ASC
+        ");
+        $stmt->execute([(int)$tareaId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
-    /**
-     * Asignar base completa a un asesor
-     */
-    public function asignarBaseCompleta($cargaId, $asesorId, $coordinadorId) {
-        $this->pdo->beginTransaction();
-        try {
-            // Verificar si ya existe la asignación
-            $sql = "SELECT id FROM asignaciones_base_asesor WHERE carga_id = ? AND asesor_id = ?";
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([$cargaId, $asesorId]);
-            
-            if ($stmt->fetch()) {
-                // Actualizar asignación existente
-                $sql = "UPDATE asignaciones_base_asesor 
-                        SET estado = 'activa', acceso_completo = 1, tipo_asignacion = 'base_completa', fecha_asignacion = NOW()
-                        WHERE carga_id = ? AND asesor_id = ?";
-                $stmt = $this->pdo->prepare($sql);
-                $stmt->execute([$cargaId, $asesorId]);
-            } else {
-                // Crear nueva asignación
-                $sql = "INSERT INTO asignaciones_base_asesor (carga_id, asesor_id, coordinador_id, acceso_completo, tipo_asignacion) 
-                        VALUES (?, ?, ?, 1, 'base_completa')";
-                $stmt = $this->pdo->prepare($sql);
-                $stmt->execute([$cargaId, $asesorId, $coordinadorId]);
-            }
-            
-            $this->pdo->commit();
-            return true;
-        } catch (Exception $e) {
-            $this->pdo->rollBack();
-            error_log("Error al asignar base completa: " . $e->getMessage());
-            return false;
+    public function getTareaByIdAndCoordinador($tareaId, $coordinadorCedula) {
+        $stmt = $this->pdo->prepare("
+            SELECT
+                t.*,
+                b.nombre as nombre_cargue,
+                u.nombre as asesor_nombre
+            FROM tareas t
+            JOIN base_clientes b ON t.base_id = b.id_base
+            LEFT JOIN usuarios u ON t.asesor_cedula = u.cedula
+            WHERE t.id_tarea = ?
+              AND t.coordinador_cedula = ?
+            LIMIT 1
+        ");
+        $stmt->execute([(int)$tareaId, (string)$coordinadorCedula]);
+        $t = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        if (!$t) return null;
+        $t['id'] = $t['id_tarea'];
+        $t['carga_id'] = $t['base_id'];
+        $t['estado_ui'] = $this->mapEstadoTareaDbToUi((string)($t['estado'] ?? ''));
+
+        // Conteos desde detalle_tareas (fuente de verdad)
+        $stmt2 = $this->pdo->prepare("
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN gestionado = 'si' THEN 1 ELSE 0 END) AS gestionados
+            FROM detalle_tareas
+            WHERE tarea_id = ?
+        ");
+        $stmt2->execute([(int)$tareaId]);
+        $row = $stmt2->fetch(PDO::FETCH_ASSOC) ?: [];
+        $t['total_clientes'] = (int)($row['total'] ?? 0);
+        $t['clientes_gestionados'] = (int)($row['gestionados'] ?? 0);
+        return $t;
+    }
+
+    public function getTareasByCoordinador($coordinadorCedula) {
+        $sql = "
+            SELECT
+                t.*,
+                b.nombre as nombre_cargue,
+                u.nombre as asesor_nombre,
+                (SELECT COUNT(*) FROM detalle_tareas dt WHERE dt.tarea_id = t.id_tarea) AS total_clientes,
+                (SELECT SUM(CASE WHEN dt.gestionado = 'si' THEN 1 ELSE 0 END) FROM detalle_tareas dt WHERE dt.tarea_id = t.id_tarea) AS clientes_gestionados
+            FROM tareas t
+            JOIN base_clientes b ON t.base_id = b.id_base
+            LEFT JOIN usuarios u ON t.asesor_cedula = u.cedula
+            WHERE t.coordinador_cedula = ?
+            ORDER BY t.fecha_creacion DESC
+        ";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([(string)$coordinadorCedula]);
+        $tareas = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        foreach ($tareas as &$t) {
+            $t['id'] = $t['id_tarea'];
+            $t['carga_id'] = $t['base_id'];
+            $t['estado'] = $this->mapEstadoTareaDbToUi((string)($t['estado'] ?? ''));
+            // Mantener compatibilidad, aunque la fuente real ahora es detalle_tareas:
+            $t['cliente_ids'] = json_decode((string)($t['clientes_asignados'] ?? '[]'), true) ?: [];
+            $t['total_clientes'] = (int)($t['total_clientes'] ?? 0);
+            $t['clientes_gestionados'] = (int)($t['clientes_gestionados'] ?? 0);
         }
-    }
-
-    /**
-     * Liberar base de un asesor
-     */
-    public function liberarBase($cargaId, $asesorId) {
-        $this->pdo->beginTransaction();
-        try {
-            $sql = "UPDATE asignaciones_base_asesor SET estado = 'inactiva' WHERE carga_id = ? AND asesor_id = ?";
-            $stmt = $this->pdo->prepare($sql);
-            $resultado = $stmt->execute([$cargaId, $asesorId]);
-            
-            $this->pdo->commit();
-            return $resultado;
-        } catch (Exception $e) {
-            $this->pdo->rollBack();
-            error_log("Error al liberar base: " . $e->getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Registrar acción en historial
-     */
-    private function registrarHistorial($tareaId, $accion, $descripcion, $usuarioId) {
-        $sql = "INSERT INTO historial_tareas (tarea_id, accion, descripcion, usuario_id) VALUES (?, ?, ?, ?)";
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$tareaId, $accion, $descripcion, $usuarioId]);
-    }
-
-    /**
-     * Obtener estadísticas de tareas para coordinador
-     */
-    public function getEstadisticasTareas($coordinadorId) {
-        $sql = "SELECT 
-                    COUNT(*) as total_tareas,
-                    SUM(CASE WHEN estado = 'pendiente' THEN 1 ELSE 0 END) as pendientes,
-                    SUM(CASE WHEN estado = 'en_proceso' THEN 1 ELSE 0 END) as en_proceso,
-                    SUM(CASE WHEN estado = 'completadas' THEN 1 ELSE 0 END) as completadas,
-                    SUM(CASE WHEN estado = 'canceladas' THEN 1 ELSE 0 END) as canceladas
-                FROM tareas_asesor 
-                WHERE coordinador_id = ?";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$coordinadorId]);
-        return $stmt->fetch(PDO::FETCH_ASSOC);
-    }
-
-    /**
-     * Obtener todas las tareas de un coordinador
-     */
-    public function getTareasByCoordinador($coordinadorId, $estado = null) {
-        $sql = "SELECT t.*, c.nombre_cargue, u.nombre_completo as asesor_nombre
-                FROM tareas_asesor t
-                JOIN cargas_excel c ON t.carga_id = c.id
-                JOIN usuarios u ON t.asesor_id = u.id
-                WHERE t.coordinador_id = ?";
-        
-        $params = [$coordinadorId];
-        
-        if ($estado) {
-            $sql .= " AND t.estado = ?";
-            $params[] = $estado;
-        }
-        
-        $sql .= " ORDER BY t.fecha_creacion DESC";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-        $tareas = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        // Decodificar los IDs de clientes
-        foreach ($tareas as &$tarea) {
-            $tarea['cliente_ids'] = json_decode($tarea['cliente_ids'], true);
-            $tarea['total_clientes'] = count($tarea['cliente_ids']);
-        }
-        
+        unset($t);
         return $tareas;
     }
 
+    public function getEstadisticasTareas($coordinadorCedula) {
+        $sql = "
+            SELECT
+                COUNT(*) as total_tareas,
+                SUM(CASE WHEN estado = 'pendiente' THEN 1 ELSE 0 END) as pendientes,
+                SUM(CASE WHEN estado = 'en progreso' THEN 1 ELSE 0 END) as en_proceso,
+                SUM(CASE WHEN estado = 'completa' THEN 1 ELSE 0 END) as completadas,
+                SUM(CASE WHEN estado = 'cancelada' THEN 1 ELSE 0 END) as canceladas
+            FROM tareas
+            WHERE coordinador_cedula = ?
+        ";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([(string)$coordinadorCedula]);
+        $r = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        return [
+            'total_tareas' => (int)($r['total_tareas'] ?? 0),
+            'pendientes' => (int)($r['pendientes'] ?? 0),
+            'en_proceso' => (int)($r['en_proceso'] ?? 0),
+            'completadas' => (int)($r['completadas'] ?? 0),
+            'canceladas' => (int)($r['canceladas'] ?? 0),
+        ];
+    }
+
     /**
-     * Buscar cliente por cédula en las bases asignadas al asesor
+     * Marca como gestionado='si' cualquier cliente de detalle_tareas cuando ya exista al menos una gestión.
+     * Se usa después de insertar en historial_gestiones.
      */
-    public function buscarClienteEnBasesAsignadas($asesorId, $cedula) {
-        // Obtener bases asignadas al asesor
-        $bases = $this->getBasesAsignadasByAsesor($asesorId);
-        
-        if (empty($bases)) {
+    public function marcarClienteGestionadoEnTareas($asesorCedula, $clienteId): void {
+        try {
+            $stmt = $this->pdo->prepare("
+                UPDATE detalle_tareas dt
+                JOIN tareas t ON t.id_tarea = dt.tarea_id
+                SET dt.gestionado = 'si'
+                WHERE t.asesor_cedula = ?
+                  AND t.estado IN ('pendiente','en progreso')
+                  AND dt.cliente_id = ?
+            ");
+            $stmt->execute([(string)$asesorCedula, (int)$clienteId]);
+        } catch (Throwable $e) {
+            // Silencioso: no debe romper el flujo de guardado de gestión.
+        }
+    }
+
+    public function getBasesAsignadasByAsesor($asesorId) {
+        // En el dump, las asignaciones de base están en `asignacion_base_asesores`.
+        $stmt = $this->pdo->prepare("
+            SELECT
+                aba.*,
+                b.nombre as nombre_cargue,
+                b.fecha_actualizacion as fecha_cargue,
+                b.estado as estado_base,
+                u.nombre as coordinador_nombre
+            FROM asignacion_base_asesores aba
+            JOIN base_clientes b ON aba.base_id = b.id_base
+            LEFT JOIN usuarios u ON b.creado_por = u.cedula
+            WHERE aba.asesor_cedula = ?
+              AND aba.estado = 'activa'
+              AND b.estado = 'activo'
+            ORDER BY aba.fecha_asignacion DESC
+        ");
+        $stmt->execute([(string)$asesorId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as &$r) {
+            $r['carga_id'] = $r['base_id'];
+        }
+        return $rows;
+    }
+
+    /**
+     * Buscar un cliente por cédula dentro de las bases asignadas al asesor.
+     * Devuelve filas compatibles con el frontend (id_cliente como id).
+     */
+    public function buscarClienteEnBasesAsignadas($asesorCedula, $cedula) {
+        $bases = $this->getBasesAsignadasByAsesor($asesorCedula);
+        $baseIds = array_values(array_filter(array_map(function ($b) {
+            return (int)($b['base_id'] ?? $b['carga_id'] ?? 0);
+        }, $bases)));
+
+        if (empty($baseIds)) {
             return [];
         }
-        
-        $cargaIds = array_column($bases, 'carga_id');
-        $placeholders = str_repeat('?,', count($cargaIds) - 1) . '?';
-        
-        $sql = "SELECT c.*, ce.nombre_cargue
-                FROM clientes c
-                JOIN cargas_excel ce ON c.carga_excel_id = ce.id
-                WHERE c.cedula = ? AND c.carga_excel_id IN ($placeholders)
-                ORDER BY c.nombre ASC";
-        
-        $params = array_merge([$cedula], $cargaIds);
-        
+
+        $placeholders = implode(',', array_fill(0, count($baseIds), '?'));
+        $sql = "
+            SELECT
+                c.id_cliente as id,
+                c.id_cliente,
+                c.base_id as carga_excel_id,
+                c.base_id,
+                c.cedula,
+                c.nombre,
+                c.email,
+                c.ciudad,
+                c.tel1 as telefono,
+                c.tel2 as celular2,
+                c.tel3 as cel3,
+                c.tel4 as cel4,
+                c.tel5 as cel5,
+                c.tel6 as cel6,
+                c.tel7 as cel7,
+                c.tel8 as cel8,
+                c.tel9 as cel9,
+                c.tel10 as cel10,
+                c.estado as estado_cliente,
+                b.nombre as nombre_cargue
+            FROM clientes c
+            JOIN base_clientes b ON c.base_id = b.id_base
+            WHERE c.cedula = ?
+              AND c.base_id IN ($placeholders)
+            ORDER BY c.nombre ASC
+            LIMIT 50
+        ";
+
+        $params = array_merge([(string)$cedula], $baseIds);
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
-        
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
-    
+
     /**
-     * Buscar clientes por término general (nombre, cédula, teléfono) en bases asignadas
+     * Buscar clientes por término (nombre/cedula/teléfono) dentro de las bases asignadas al asesor.
      */
-    public function buscarClientesPorTermino($asesorId, $termino, $limit = 20) {
-        try {
-            // Obtener bases asignadas al asesor
-            $bases = $this->getBasesAsignadasByAsesor($asesorId);
-            
-            if (empty($bases)) {
-                return [];
-            }
-            
-            $cargaIds = array_column($bases, 'carga_id');
-            
-            if (empty($cargaIds)) {
-                return [];
-            }
-            
-            $placeholders = str_repeat('?,', count($cargaIds) - 1) . '?';
-            $terminoLimpio = trim($termino);
-            $terminoBusqueda = '%' . $terminoLimpio . '%';
-            
-            // Construir SQL con búsqueda flexible
-            // Nota: LIMIT no puede usar placeholder en algunas versiones de MySQL, usar directamente el valor
-            $limitInt = (int)$limit;
-            // Solo devolvemos las columnas que realmente usa el front
-            // (id, nombre, cédula, teléfonos y nombre de la base) para reducir E/S
-            $sql = "SELECT 
-                        c.id,
-                        c.nombre,
-                        c.cedula,
-                        c.telefono,
-                        c.celular2,
-                        c.carga_excel_id,
-                        ce.nombre_cargue
-                    FROM clientes c
-                    JOIN cargas_excel ce ON c.carga_excel_id = ce.id
-                    WHERE c.carga_excel_id IN ($placeholders)
-                    AND (
-                        c.nombre LIKE ? OR
-                        c.cedula LIKE ? OR
-                        c.cedula = ? OR
-                        c.telefono LIKE ? OR
-                        c.telefono = ? OR
-                        c.celular2 LIKE ? OR
-                        c.celular2 = ?
-                    )
-                    ORDER BY 
-                        CASE 
-                            WHEN c.cedula = ? THEN 1
-                            WHEN c.telefono = ? THEN 2
-                            WHEN c.nombre LIKE ? THEN 3
-                            ELSE 4
-                        END,
-                        c.nombre ASC
-                    LIMIT $limitInt";
-            
-            // Construir parámetros (sin LIMIT)
-            $params = array_merge(
-                $cargaIds,                                    // carga_excel_id IN (...)
-                [$terminoBusqueda],                          // nombre LIKE
-                [$terminoBusqueda],                          // cedula LIKE
-                [$terminoLimpio],                            // cedula = (exacto)
-                [$terminoBusqueda],                          // telefono LIKE
-                [$terminoLimpio],                            // telefono = (exacto)
-                [$terminoBusqueda],                          // celular2 LIKE
-                [$terminoLimpio],                            // celular2 = (exacto)
-                [$terminoLimpio],                            // ORDER BY: cedula =
-                [$terminoLimpio],                            // ORDER BY: telefono =
-                [$terminoLimpio . '%']                       // ORDER BY: nombre LIKE
-            );
-            
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute($params);
-            
-            $resultados = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            return $resultados;
-            
-        } catch (PDOException $e) {
-            error_log("Error en buscarClientesPorTermino (PDO): " . $e->getMessage());
-            error_log("SQL: " . ($sql ?? 'N/A'));
-            error_log("Params count: " . (isset($params) ? count($params) : 0));
-            return [];
-        } catch (Exception $e) {
-            error_log("Error en buscarClientesPorTermino: " . $e->getMessage());
+    public function buscarClientesPorTermino($asesorCedula, $termino, $limit = 20) {
+        $bases = $this->getBasesAsignadasByAsesor($asesorCedula);
+        $baseIds = array_values(array_filter(array_map(function ($b) {
+            return (int)($b['base_id'] ?? $b['carga_id'] ?? 0);
+        }, $bases)));
+
+        if (empty($baseIds)) {
             return [];
         }
-    }
 
-    /**
-     * Obtener asesores asignados a una base específica
-     */
-    public function getAsesoresByBase($cargaId) {
-        $sql = "SELECT DISTINCT u.id, u.nombre_completo, u.usuario
-                FROM usuarios u
-                JOIN asignaciones_base_asesor ab ON u.id = ab.asesor_id
-                WHERE ab.carga_id = ? AND u.rol = 'asesor' AND ab.estado = 'activa'
-                ORDER BY u.nombre_completo ASC";
+        $limit = max(1, min(200, (int)$limit));
+        $termino = trim((string)$termino);
+        if ($termino === '') return [];
+
+        $placeholders = implode(',', array_fill(0, count($baseIds), '?'));
+
+        // Buscar por cedula exacta si es numérico
+        if (ctype_digit($termino)) {
+            $sql = "
+                SELECT
+                    c.id_cliente as id,
+                    c.id_cliente,
+                    c.base_id as carga_excel_id,
+                    c.base_id,
+                    c.cedula,
+                    c.nombre,
+                    c.email,
+                    c.ciudad,
+                    c.tel1 as telefono,
+                    c.tel2 as celular2,
+                    c.estado as estado_cliente,
+                    b.nombre as nombre_cargue
+                FROM clientes c
+                JOIN base_clientes b ON c.base_id = b.id_base
+                WHERE c.base_id IN ($placeholders)
+                  AND (c.cedula = ? OR c.tel1 = ? OR c.tel2 = ? OR c.tel3 = ? OR c.tel4 = ?)
+                ORDER BY c.nombre ASC
+                LIMIT $limit
+            ";
+            $params = array_merge($baseIds, [$termino, $termino, $termino, $termino, $termino]);
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            if (!empty($rows)) return $rows;
+        }
+
+        $like = '%' . $termino . '%';
+        $sql = "
+            SELECT
+                c.id_cliente as id,
+                c.id_cliente,
+                c.base_id as carga_excel_id,
+                c.base_id,
+                c.cedula,
+                c.nombre,
+                c.email,
+                c.ciudad,
+                c.tel1 as telefono,
+                c.tel2 as celular2,
+                c.estado as estado_cliente,
+                b.nombre as nombre_cargue
+            FROM clientes c
+            JOIN base_clientes b ON c.base_id = b.id_base
+            WHERE c.base_id IN ($placeholders)
+              AND (
+                c.nombre LIKE ?
+                OR c.cedula LIKE ?
+                OR c.tel1 LIKE ?
+                OR c.tel2 LIKE ?
+                OR c.email LIKE ?
+              )
+            ORDER BY c.nombre ASC
+            LIMIT $limit
+        ";
+        $params = array_merge($baseIds, [$like, $like, $like, $like, $like]);
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$cargaId]);
+        $stmt->execute($params);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    /**
-     * Obtener estadísticas de clientes en una base
-     */
-    public function getEstadisticasClientesBase($cargaId) {
-        $sql = "SELECT 
-                    COUNT(*) as total_clientes,
-                    COUNT(CASE WHEN c.asesor_id IS NULL THEN 1 END) as total_no_gestionados
-                FROM clientes c
-                WHERE c.carga_excel_id = ?";
+    public function getAsesoresByBase($baseId) {
+        $sql = "
+            SELECT
+                u.cedula as id,
+                u.cedula,
+                u.nombre as nombre_completo,
+                u.nombre,
+                aba.estado,
+                aba.fecha_asignacion
+            FROM asignacion_base_asesores aba
+            JOIN usuarios u ON aba.asesor_cedula = u.cedula
+            WHERE aba.base_id = ?
+              AND aba.estado = 'activa'
+              AND u.rol = 'asesor'
+            ORDER BY u.nombre ASC
+        ";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$cargaId]);
-        return $stmt->fetch(PDO::FETCH_ASSOC);
+        $stmt->execute([(int)$baseId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    /**
-     * Obtener clientes no gestionados de una base (para asignar a tareas)
-     */
-    public function getClientesNoGestionadosBase($cargaId, $cantidad) {
-        $sql = "SELECT c.id, c.nombre, c.cedula, c.telefono
-                FROM clientes c
-                WHERE c.carga_excel_id = ? 
-                AND c.asesor_id IS NULL
-                ORDER BY RAND()
-                LIMIT " . intval($cantidad);
+    public function getClientesNoGestionadosBase($baseId, $limit = 100) {
+        $limit = max(1, min(500, (int)$limit));
+        $sql = "
+            SELECT
+                c.id_cliente as id,
+                c.id_cliente,
+                c.base_id,
+                c.cedula,
+                c.nombre,
+                c.email,
+                c.ciudad,
+                c.tel1 as telefono,
+                c.tel2 as celular2,
+                c.estado as estado_cliente
+            FROM clientes c
+            LEFT JOIN historial_gestiones hg ON hg.cliente_id = c.id_cliente
+            WHERE c.base_id = ?
+              AND hg.id_gestion IS NULL
+            ORDER BY c.id_cliente ASC
+            LIMIT $limit
+        ";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$cargaId]);
+        $stmt->execute([(int)$baseId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function getEstadisticasClientesBase($baseId) {
+        $sql = "
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN hg.id_gestion IS NULL THEN 1 ELSE 0 END) as sin_gestion,
+                SUM(CASE WHEN hg.id_gestion IS NOT NULL THEN 1 ELSE 0 END) as con_gestion
+            FROM clientes c
+            LEFT JOIN historial_gestiones hg ON hg.cliente_id = c.id_cliente
+            WHERE c.base_id = ?
+        ";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([(int)$baseId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        return [
+            'total' => (int)($row['total'] ?? 0),
+            'con_gestion' => (int)($row['con_gestion'] ?? 0),
+            'sin_gestion' => (int)($row['sin_gestion'] ?? 0),
+        ];
+    }
+
+    public function asignarBaseCompleta($cargaId, $asesorId, $coordinadorId) {
+        // Delegar en CargaExcelModel en el flujo actual; aquí sólo devolvemos true si ya existe o se insertó.
+        $baseId = (int)$cargaId;
+        $asesorCedula = (string)$asesorId;
+
+        $stmt = $this->pdo->prepare("SELECT id_base_asesor FROM asignacion_base_asesores WHERE base_id = ? AND asesor_cedula = ? LIMIT 1");
+        $stmt->execute([$baseId, $asesorCedula]);
+        $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($existing) {
+            $stmt = $this->pdo->prepare("UPDATE asignacion_base_asesores SET estado = 'activa', fecha_actualizacion = CURRENT_TIMESTAMP WHERE id_base_asesor = ?");
+            return $stmt->execute([(int)$existing['id_base_asesor']]);
+        }
+
+        $stmt = $this->pdo->prepare("INSERT INTO asignacion_base_asesores (base_id, asesor_cedula, estado, fecha_asignacion) VALUES (?, ?, 'activa', CURRENT_TIMESTAMP)");
+        return $stmt->execute([$baseId, $asesorCedula]);
+    }
+
+    public function liberarBase($cargaId, $asesorId) {
+        $stmt = $this->pdo->prepare("UPDATE asignacion_base_asesores SET estado = 'inactiva', fecha_actualizacion = CURRENT_TIMESTAMP WHERE base_id = ? AND asesor_cedula = ?");
+        return $stmt->execute([(int)$cargaId, (string)$asesorId]);
     }
 }
-?>
+

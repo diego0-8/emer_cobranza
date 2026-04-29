@@ -35,7 +35,7 @@ define('ALLOWED_FILE_TYPES', ['xlsx', 'xls', 'csv']);
 define('DB_HOST', 'localhost');
 define('DB_USER', 'root');
 define('DB_PASS', '');
-define('DB_NAME', 'emermedica_cobranza');
+define('DB_NAME', 'emermedica_db');
 
 // Configuración de errores
 error_reporting(E_ALL);

@@ -6,48 +6,8 @@ class AdminController extends BaseController {
         parent::__construct($pdo);
     }
     
-    /**
-     * Crea la tabla de sesiones de trabajo si no existe
-     */
-    private function crearTablaSesionesTrabajoSiNoExiste() {
-        try {
-            // Verificar si la tabla ya existe con la estructura correcta
-            $sqlCheck = "SHOW TABLES LIKE 'sesiones_trabajo'";
-            $stmtCheck = $this->pdo->query($sqlCheck);
-            
-            if ($stmtCheck->rowCount() > 0) {
-                // La tabla existe, no hacer nada
-                return;
-            }
-            
-            // Si no existe, crear con la estructura correcta (usa asesor_id)
-            $sql = "CREATE TABLE IF NOT EXISTS sesiones_trabajo (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                asesor_id INT NOT NULL,
-                fecha_inicio DATETIME NOT NULL,
-                fecha_fin DATETIME NULL,
-                tiempo_total_segundos INT(11) NULL,
-                tiempo_total_minutos DECIMAL(10,2) NULL,
-                tiempo_productivo_minutos DECIMAL(10,2) NULL,
-                tiempo_breaks_minutos DECIMAL(10,2) NULL,
-                estado ENUM('activa', 'finalizada', 'abandonada') DEFAULT 'activa',
-                ip_address VARCHAR(45) NULL,
-                user_agent TEXT NULL,
-                observaciones TEXT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                INDEX idx_asesor (asesor_id),
-                INDEX idx_fecha_inicio (fecha_inicio),
-                INDEX idx_fecha_fin (fecha_fin),
-                INDEX idx_estado (estado),
-                FOREIGN KEY (asesor_id) REFERENCES usuarios(id) ON DELETE CASCADE
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
-            
-            $this->pdo->exec($sql);
-        } catch (Exception $e) {
-            error_log("Error al crear tabla sesiones_trabajo: " . $e->getMessage());
-        }
-    }
+    // Nota: La nueva BD usa `tiempos` para sesiones/breaks. La persistencia de sesión
+    // en BD se migrará a ese esquema; por ahora la sesión se maneja solo en PHP.
 
     public function login() {
         $page_title = "Login";
@@ -80,13 +40,61 @@ class AdminController extends BaseController {
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $usuario = trim($_POST['usuario'] ?? '');
             $contrasena = trim($_POST['contrasena'] ?? '');
+
+            $agentLogPath = __DIR__ . '/../debug-a2fdce.log';
+            // #region agent log
+            @file_put_contents($agentLogPath, json_encode([
+                'sessionId' => 'a2fdce',
+                'runId' => 'pre-fix',
+                'hypothesisId' => 'L1',
+                'location' => 'controllers/adminController.php:processLogin',
+                'message' => 'Login attempt received',
+                'data' => [
+                    'usuarioLen' => strlen((string)$usuario),
+                    'contrasenaLen' => strlen((string)$contrasena),
+                    'hasSessionAlready' => isset($_SESSION['user_id']),
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+            // #endregion
+
+            // #region agent log
+            // Respaldo vía error_log (si Apache/PHP no permite escribir archivos en el CWD esperado)
+            error_log('[AGENTLOG a2fdce L1] processLogin received usuarioLen=' . strlen((string)$usuario) . ' contrasenaLen=' . strlen((string)$contrasena));
+            // #endregion
             
             // Validar que los campos no estén vacíos
             if (empty($usuario) || empty($contrasena)) {
                 $error = "Por favor, completa todos los campos.";
+                $debug_client_console = [
+                    'stage' => 'validate',
+                    'reason' => 'empty_fields',
+                    'usuarioLen' => strlen((string)$usuario),
+                    'contrasenaLen' => strlen((string)$contrasena),
+                ];
             } else {
                 // Intentar autenticar al usuario
                 $user = $this->usuarioModel->authenticateUser($usuario, $contrasena);
+
+                // #region agent log
+                @file_put_contents($agentLogPath, json_encode([
+                    'sessionId' => 'a2fdce',
+                    'runId' => 'pre-fix',
+                    'hypothesisId' => 'L1',
+                    'location' => 'controllers/adminController.php:processLogin',
+                    'message' => 'authenticateUser result',
+                    'data' => [
+                        'authenticated' => $user ? true : false,
+                        'hasCedula' => is_array($user) && !empty($user['cedula']),
+                        'role' => is_array($user) ? ($user['rol'] ?? null) : null,
+                    ],
+                    'timestamp' => (int) round(microtime(true) * 1000),
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+                // #endregion
+
+                // #region agent log
+                error_log('[AGENTLOG a2fdce L1] authenticateUser authenticated=' . ($user ? '1' : '0') . ' hasCedula=' . ((is_array($user) && !empty($user['cedula'])) ? '1' : '0'));
+                // #endregion
                 
                 if ($user) {
                     // Usuario autenticado correctamente
@@ -94,7 +102,8 @@ class AdminController extends BaseController {
                     if (session_status() === PHP_SESSION_ACTIVE) {
                         session_regenerate_id(true);
                     }
-                    $_SESSION['user_id'] = $user['id'];
+                    // En el nuevo esquema, el identificador es la cédula (varchar).
+                    $_SESSION['user_id'] = $user['cedula'];
                     $_SESSION['user_role'] = $user['rol'];
                     $_SESSION['user_name'] = $user['nombre_completo'];
                     
@@ -102,47 +111,8 @@ class AdminController extends BaseController {
                     $login_time = time();
                     $_SESSION['login_time'] = $login_time;
                     
-                    // Guardar tiempo de inicio de sesión en la base de datos para persistencia
-                    // Esto permite que el tiempo se mantenga incluso si la sesión PHP se pierde
-                    try {
-                        // Crear tabla si no existe
-                        $this->crearTablaSesionesTrabajoSiNoExiste();
-                        
-                        // SIEMPRE crear una nueva sesión de trabajo al iniciar sesión
-                        // Esto asegura que el cronómetro empiece desde 0
-                        // Primero, finalizar cualquier sesión activa previa (por si acaso)
-                        // Nota: La tabla usa 'asesor_id' no 'usuario_id'
-                        $sql = "UPDATE sesiones_trabajo 
-                                SET fecha_fin = NOW(),
-                                    tiempo_total_segundos = TIMESTAMPDIFF(SECOND, fecha_inicio, NOW()),
-                                    tiempo_total_minutos = TIMESTAMPDIFF(SECOND, fecha_inicio, NOW()) / 60.0,
-                                    estado = 'finalizada',
-                                    updated_at = NOW()
-                                WHERE asesor_id = ? AND (fecha_fin IS NULL OR estado = 'activa')";
-                        $stmt = $this->pdo->prepare($sql);
-                        $stmt->execute([$user['id']]);
-                        $finalizadas = $stmt->rowCount();
-                        if ($finalizadas > 0) {
-                            error_log("Se finalizaron $finalizadas sesión(es) activa(s) previa(s) al iniciar sesión");
-                        }
-                        
-                        // Crear nueva sesión de trabajo (siempre nueva, nunca reanudar)
-                        // Nota: La tabla usa 'asesor_id' no 'usuario_id'
-                        $sql = "INSERT INTO sesiones_trabajo (asesor_id, fecha_inicio, estado) 
-                                VALUES (?, NOW(), 'activa')";
-                        $stmt = $this->pdo->prepare($sql);
-                        $stmt->execute([$user['id']]);
-                        $sesionId = $this->pdo->lastInsertId();
-                        $_SESSION['sesion_trabajo_id'] = $sesionId;
-                        
-                        error_log("Nueva sesión de trabajo creada - ID: $sesionId, Usuario: {$user['id']}, Login time: $login_time");
-                    } catch (Exception $e) {
-                        // Si la tabla no existe o hay error, solo usar sesión PHP
-                        error_log("Advertencia: No se pudo guardar/recuperar sesión en BD: " . $e->getMessage());
-                    }
-                    
                     // Log de acceso exitoso
-                    error_log("Login exitoso - Usuario: {$usuario}, Rol: {$user['rol']}, ID: {$user['id']}, Login time: {$login_time}");
+                    error_log("Login exitoso - Usuario: {$usuario}, Rol: {$user['rol']}, Cédula: {$user['cedula']}, Login time: {$login_time}");
                     
                     // Redirigir al dashboard correspondiente
                     header('Location: index.php?action=dashboard');
@@ -154,11 +124,26 @@ class AdminController extends BaseController {
                     if ($userExists) {
                         if ($userExists['estado'] === 'Inactivo') {
                             $error = "Tu cuenta está inactiva. Contacta al administrador.";
+                            $debug_client_console = [
+                                'stage' => 'auth',
+                                'reason' => 'inactive_user',
+                                'usuarioLen' => strlen((string)$usuario),
+                            ];
                         } else {
                             $error = "Contraseña incorrecta. Verifica tu contraseña.";
+                            $debug_client_console = [
+                                'stage' => 'auth',
+                                'reason' => 'bad_password_or_hash',
+                                'usuarioLen' => strlen((string)$usuario),
+                            ];
                         }
                     } else {
                         $error = "Usuario no encontrado. Verifica tu nombre de usuario.";
+                        $debug_client_console = [
+                            'stage' => 'auth',
+                            'reason' => 'user_not_found',
+                            'usuarioLen' => strlen((string)$usuario),
+                        ];
                     }
                     
                     // Log de intento fallido
@@ -167,8 +152,14 @@ class AdminController extends BaseController {
             }
             
             // Si hay error, redirigir al login con el error en la sesión
-            $_SESSION['login_error'] = $error;
-            header('Location: index.php?action=login');
+            // #region agent log
+            error_log('[AGENTLOG a2fdce L3] setting login_error len=' . strlen((string)$error));
+            // #endregion
+            // Renderizar el login directamente para que el usuario vea el error
+            // incluso si hay problemas con cookies/sesión o redirects.
+            $page_title = "Login";
+            $success = '';
+            require __DIR__ . '/../views/login_form.php';
             exit;
         } else {
             // Si no es POST, redirigir al login
@@ -178,41 +169,6 @@ class AdminController extends BaseController {
     }
 
     public function logout() {
-        // Finalizar sesión activa en la BD antes de destruir la sesión PHP
-        try {
-            $usuarioId = $_SESSION['user_id'] ?? null;
-            $sesionTrabajoId = $_SESSION['sesion_trabajo_id'] ?? null;
-            
-            if ($usuarioId) {
-                // Verificar si existe la tabla
-                $sqlCheck = "SHOW TABLES LIKE 'sesiones_trabajo'";
-                $stmtCheck = $this->pdo->query($sqlCheck);
-                
-                if ($stmtCheck->rowCount() > 0) {
-                    // Finalizar todas las sesiones activas del usuario
-                    // Nota: La tabla usa 'asesor_id' no 'usuario_id'
-                    $sql = "UPDATE sesiones_trabajo 
-                            SET fecha_fin = NOW(),
-                                tiempo_total_segundos = TIMESTAMPDIFF(SECOND, fecha_inicio, NOW()),
-                                tiempo_total_minutos = TIMESTAMPDIFF(SECOND, fecha_inicio, NOW()) / 60.0,
-                                estado = 'finalizada',
-                                updated_at = NOW()
-                            WHERE asesor_id = ? AND (fecha_fin IS NULL OR estado = 'activa')";
-                    
-                    $stmt = $this->pdo->prepare($sql);
-                    $stmt->execute([$usuarioId]);
-                    $finalizadas = $stmt->rowCount();
-                    
-                    if ($finalizadas > 0) {
-                        error_log("Sesión de trabajo finalizada para usuario ID: $usuarioId (sesiones finalizadas: $finalizadas)");
-                    }
-                }
-            }
-        } catch (Exception $e) {
-            error_log("Error al finalizar sesión de trabajo en logout: " . $e->getMessage());
-            // Continuar con el logout aunque haya error
-        }
-        
         // Destruir sesión PHP
         session_destroy();
         session_start();
@@ -248,6 +204,25 @@ class AdminController extends BaseController {
         }
 
         try {
+            $agentLogPath = __DIR__ . '/../debug-d200d9.log';
+            // #region agent log
+            @file_put_contents($agentLogPath, json_encode([
+                'sessionId' => 'd200d9',
+                'runId' => 'pre-fix',
+                'hypothesisId' => 'B1',
+                'location' => 'controllers/adminController.php:procesarCargaBash',
+                'message' => 'Inicio carga masiva bash',
+                'data' => [
+                    'hasFile' => isset($_FILES['archivo_bash']) ? 1 : 0,
+                    'fileError' => (int)($_FILES['archivo_bash']['error'] ?? -999),
+                    'fileName' => (string)($_FILES['archivo_bash']['name'] ?? ''),
+                    'fileSize' => (int)($_FILES['archivo_bash']['size'] ?? -1),
+                    'cargaId' => (int)($_POST['carga_id'] ?? 0),
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+            // #endregion
+
             if (empty($_POST['carga_id']) || !is_numeric($_POST['carga_id'])) {
                 throw new Exception('Debes seleccionar una base activa.');
             }
@@ -275,6 +250,67 @@ class AdminController extends BaseController {
             $registros = $this->leerArchivoCargaBash($_FILES['archivo_bash']['tmp_name']);
             if (empty($registros)) {
                 throw new Exception('El archivo no contiene registros válidos para importar.');
+            }
+
+            // #region agent log
+            $primero = $registros[0] ?? [];
+            @file_put_contents($agentLogPath, json_encode([
+                'sessionId' => 'd200d9',
+                'runId' => 'pre-fix',
+                'hypothesisId' => 'B2',
+                'location' => 'controllers/adminController.php:procesarCargaBash',
+                'message' => 'CSV leído (muestra 1er registro)',
+                'data' => [
+                    'totalRegistros' => is_array($registros) ? count($registros) : -1,
+                    'firstLinea' => (int)($primero['linea'] ?? 0),
+                    'firstFecha' => (string)($primero['fecha_gestion'] ?? ''),
+                    'firstAsesor' => (string)($primero['asesor'] ?? ''),
+                    'firstCedula' => (string)($primero['cedula_cliente'] ?? ''),
+                    'firstCanal' => (string)($primero['canal_contacto'] ?? ''),
+                    'firstTipo' => (string)($primero['tipo_contacto'] ?? ''),
+                    'firstResultado' => (string)($primero['resultado_contacto'] ?? ''),
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+            // #endregion
+
+            // Detectar CSV con columna "asesor" mal exportada (trae fecha/hora).
+            $muestras = array_slice($registros, 0, 10);
+            $matchesFecha = 0;
+            $evaluadas = 0;
+            foreach ($muestras as $m) {
+                $aRaw = trim((string)($m['asesor'] ?? ''));
+                $fRaw = trim((string)($m['fecha_gestion'] ?? ''));
+                if ($aRaw === '' || $fRaw === '') continue;
+                $aParsed = $this->parsearFechaFlexibleImportacion($aRaw);
+                if ($aParsed === false) continue;
+                $tsA = strtotime((string)$aParsed);
+                $tsF = strtotime((string)$fRaw);
+                if ($tsA === false || $tsF === false) continue;
+                $evaluadas++;
+                if (abs($tsA - $tsF) <= 120) {
+                    $matchesFecha++;
+                }
+            }
+            if ($evaluadas >= 3 && $matchesFecha / max(1, $evaluadas) >= 0.8) {
+                // #region agent log
+                @file_put_contents($agentLogPath, json_encode([
+                    'sessionId' => 'd200d9',
+                    'runId' => 'pre-fix',
+                    'hypothesisId' => 'B5',
+                    'location' => 'controllers/adminController.php:procesarCargaBash',
+                    'message' => 'CSV inválido: columna asesor parece fecha',
+                    'data' => [
+                        'evaluadas' => (int)$evaluadas,
+                        'matchesFecha' => (int)$matchesFecha,
+                        'firstAsesor' => (string)($primero['asesor'] ?? ''),
+                        'firstFecha' => (string)($primero['fecha_gestion'] ?? ''),
+                    ],
+                    'timestamp' => (int) round(microtime(true) * 1000),
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+                // #endregion
+
+                throw new Exception('El archivo CSV parece mal exportado: la columna "asesor" contiene fechas/horas. Debe contener el nombre/usuario o cédula del asesor.');
             }
 
             usort($registros, function ($a, $b) {
@@ -307,43 +343,57 @@ class AdminController extends BaseController {
                     $facturaNormalizada = $this->normalizarTextoImportacion($facturaReferencia);
 
                     if ($facturaReferencia !== '' && !in_array($facturaNormalizada, ['ninguna', 'na', 'sin_factura'], true)) {
-                        $factura = $this->facturacionModel->getFacturaByNumeroAndCliente($facturaReferencia, $cliente['id']);
+                        $clienteIdRes = (int) ($cliente['id'] ?? $cliente['id_cliente'] ?? 0);
+                        $factura = $this->facturacionModel->getFacturaByNumeroAndCliente($facturaReferencia, $clienteIdRes);
                         if (!$factura) {
                             throw new Exception('No se encontró la factura indicada para la cédula y la base seleccionadas.');
                         }
                     }
 
-                    $asignacionId = $this->obtenerOCrearAsignacionHistorica(
-                        (int) $asesor['id'],
-                        (int) $cliente['id'],
-                        $registro['fecha_gestion']
-                    );
+                    $clienteIdRes = (int) ($cliente['id'] ?? $cliente['id_cliente'] ?? 0);
+                    $obligacion = $factura;
+                    if (!$obligacion) {
+                        $obligacion = $this->facturacionModel->getPrimeraObligacionClienteEnBase($clienteIdRes, $cargaId);
+                    }
+                    if (!$obligacion) {
+                        throw new Exception('El cliente no tiene obligaciones en la base seleccionada; no se puede registrar la gestión.');
+                    }
+                    $obligacionId = (int) ($obligacion['id_obligacion'] ?? 0);
+                    if ($obligacionId <= 0) {
+                        throw new Exception('Obligación inválida para el cliente en esta base.');
+                    }
 
                     $observaciones = trim((string) ($registro['observaciones'] ?? ''));
                     if ($observaciones === '') {
                         $observaciones = 'Gestión importada desde carga masiva del administrador.';
                     }
 
-                    $resultadoContacto = trim((string) ($registro['resultado_contacto'] ?? ''));
-                    $razonEspecifica = trim((string) ($registro['razon_especifica'] ?? ''));
+                    $tipoContactoCsv = trim((string) ($registro['tipo_contacto'] ?? ''));
+                    $resultadoContactoCsv = trim((string) ($registro['resultado_contacto'] ?? ''));
+                    $razonEspecificaCsv = trim((string) ($registro['razon_especifica'] ?? ''));
                     $telefonoContacto = $this->normalizarTelefonoContactoImportacion($registro['telefono_contacto'] ?? '');
+                    $formaContacto = $this->normalizarCanalContactoImportacion($registro['canal_contacto'] ?? '');
+
+                    $tipoContacto = $tipoContactoCsv !== '' ? $tipoContactoCsv : 'contacto_exitoso';
+                    $resultadoContacto = $resultadoContactoCsv !== '' ? $resultadoContactoCsv : 'localizado_sin_acuerdo';
+                    $razonEspecifica = $razonEspecificaCsv !== '' ? $razonEspecificaCsv : 'no_informa';
+
+                    $asesorCedula = (string) ($asesor['cedula'] ?? $asesor['id'] ?? '');
 
                     $gestionData = [
-                        'asignacion_id' => $asignacionId,
-                        'fecha_gestion' => $registro['fecha_gestion'],
-                        'tipo_gestion' => $resultadoContacto !== '' ? $resultadoContacto : 'GESTIÓN IMPORTADA',
-                        'comentarios' => $observaciones,
-                        'resultado' => $razonEspecifica !== '' ? $razonEspecifica : $resultadoContacto,
-                        'forma_contacto' => $this->normalizarCanalContactoImportacion($registro['canal_contacto'] ?? ''),
-                        'telefono_contacto' => $telefonoContacto,
-                        'factura_gestionar' => $factura ? 'factura_individual' : ($facturaNormalizada === 'ninguna' ? 'ninguna' : null),
-                        'obligacion_id' => $factura['id'] ?? null,
-                        'numero_obligacion' => $factura['numero_factura'] ?? null,
-                        'monto_obligacion' => $factura['saldo'] ?? null,
-                        'estado_obligacion' => $factura['estado_factura'] ?? null,
-                        'producto_gestionado' => $factura['numero_contrato'] ?? null,
+                        'asesor_cedula' => $asesorCedula,
+                        'cliente_id' => $clienteIdRes,
+                        'obligacion_id' => $obligacionId,
+                        'tipo_contacto' => $tipoContacto,
+                        'resultado_contacto' => $resultadoContacto,
+                        'razon_especifica' => $razonEspecifica,
+                        'forma_contacto' => $formaContacto,
+                        'telefono_contacto' => $telefonoContacto !== null && $telefonoContacto !== '' ? $telefonoContacto : '',
+                        'observaciones' => $observaciones,
+                        // Usar la fecha del CSV como fecha_creacion en historial_gestiones.
+                        'fecha_creacion' => $registro['fecha_gestion'] ?? null,
                         'fecha_acuerdo' => $registro['fecha_pago'] ?: null,
-                        'monto_acuerdo' => $this->parsearValorMonetarioImportacion($registro['valor_cuota'] ?? '')
+                        'monto_acuerdo' => $this->parsearValorMonetarioImportacion($registro['valor_cuota'] ?? ''),
                     ];
 
                     $gestionId = $this->gestionModel->crearGestion($gestionData);
@@ -354,11 +404,12 @@ class AdminController extends BaseController {
                     }
 
                     if ($factura) {
+                        $facturaPk = (int) ($factura['id_obligacion'] ?? $factura['id'] ?? 0);
                         $this->actualizarFacturaImportada(
-                            (int) $factura['id'],
+                            $facturaPk,
                             $factura['estado_factura'] ?? 'pendiente',
-                            $resultadoContacto,
-                            $razonEspecifica,
+                            $resultadoContactoCsv,
+                            $razonEspecificaCsv,
                             $registro['fecha_pago'] ?: null
                         );
                     }
@@ -368,8 +419,46 @@ class AdminController extends BaseController {
                     $this->pdo->exec("ROLLBACK TO SAVEPOINT {$savepoint}");
                     $totalErrores++;
                     $errores[] = 'Línea ' . $registro['linea'] . ': ' . $e->getMessage();
+
+                    // #region agent log
+                    if ($totalErrores <= 5) {
+                        @file_put_contents($agentLogPath, json_encode([
+                            'sessionId' => 'd200d9',
+                            'runId' => 'pre-fix',
+                            'hypothesisId' => 'B3',
+                            'location' => 'controllers/adminController.php:procesarCargaBash',
+                            'message' => 'Fila con error (muestra primeras 5)',
+                            'data' => [
+                                'linea' => (int)($registro['linea'] ?? 0),
+                                'asesor' => (string)($registro['asesor'] ?? ''),
+                                'cedula' => (string)($registro['cedula_cliente'] ?? ''),
+                                'tipo_contacto' => (string)($registro['tipo_contacto'] ?? ''),
+                                'resultado_contacto' => (string)($registro['resultado_contacto'] ?? ''),
+                                'error' => $e->getMessage(),
+                            ],
+                            'timestamp' => (int) round(microtime(true) * 1000),
+                        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+                    }
+                    // #endregion
                 }
             }
+
+            // #region agent log
+            @file_put_contents($agentLogPath, json_encode([
+                'sessionId' => 'd200d9',
+                'runId' => 'pre-fix',
+                'hypothesisId' => 'B4',
+                'location' => 'controllers/adminController.php:procesarCargaBash',
+                'message' => 'Resumen carga masiva bash (antes de commit/rollback final)',
+                'data' => [
+                    'totalProcesados' => (int)$totalProcesados,
+                    'totalImportados' => (int)$totalImportados,
+                    'totalErrores' => (int)$totalErrores,
+                    'erroresSample' => array_slice($errores, 0, 5),
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+            // #endregion
 
             if ($totalImportados > 0) {
                 $this->pdo->commit();
@@ -422,6 +511,7 @@ class AdminController extends BaseController {
             'telefono de contacto',
             'franja de cliente',
             'canal de contacto',
+            'tipo de contacto',
             'resultado del contacto',
             'razón especifica',
             'fecha de pago',
@@ -438,8 +528,9 @@ class AdminController extends BaseController {
             '3001234567',
             'BLOQUEADO',
             'llamada',
-            'ACUERDO DE PAGO',
-            'ya_pago',
+            'contacto_exitoso',
+            'acuerdo_pago',
+            'no_informa',
             '2026-03-15',
             '250000',
             'FAC-10001',
@@ -499,11 +590,12 @@ class AdminController extends BaseController {
 
             $cedulaCliente = trim((string) ($fila[$indices['cedula_cliente']] ?? ''));
             $asesor = trim((string) ($fila[$indices['asesor']] ?? ''));
+            $tipoContacto = trim((string) ($fila[$indices['tipo_contacto']] ?? ''));
             $resultadoContacto = trim((string) ($fila[$indices['resultado_contacto']] ?? ''));
 
-            if ($cedulaCliente === '' || $asesor === '' || $resultadoContacto === '') {
+            if ($cedulaCliente === '' || $asesor === '' || $tipoContacto === '' || $resultadoContacto === '') {
                 fclose($handle);
-                throw new Exception("La línea {$linea} no contiene los campos mínimos obligatorios (fecha, asesor, cédula, resultado).");
+                throw new Exception("La línea {$linea} no contiene los campos mínimos obligatorios (fecha, asesor, cédula, tipo de contacto, resultado).");
             }
 
             $idxNombreBase = $indices['nombre_base'] ?? null;
@@ -516,6 +608,7 @@ class AdminController extends BaseController {
                 'telefono_contacto' => trim((string) ($fila[$indices['telefono_contacto']] ?? '')),
                 'franja_cliente' => trim((string) ($fila[$indices['franja_cliente']] ?? '')),
                 'canal_contacto' => trim((string) ($fila[$indices['canal_contacto']] ?? '')),
+                'tipo_contacto' => $tipoContacto,
                 'resultado_contacto' => $resultadoContacto,
                 'razon_especifica' => trim((string) ($fila[$indices['razon_especifica']] ?? '')),
                 'fecha_pago' => $this->parsearFechaFlexibleImportacion($fila[$indices['fecha_pago']] ?? '', true),
@@ -552,6 +645,7 @@ class AdminController extends BaseController {
                 'telefono_contacto' => ['telefono_de_contacto', 'telefono_contacto'],
                 'franja_cliente' => ['franja_de_cliente', 'franja_de_clietne', 'franja_del_cliente', 'franja_cliente'],
                 'canal_contacto' => ['canal_de_contacto', 'canal_contacto'],
+                'tipo_contacto' => ['tipo_de_contacto', 'tipo_contacto'],
                 'resultado_contacto' => ['resultado_del_contacto', 'resultado_contacto'],
                 'razon_especifica' => ['razon_especifica', 'razon_especifica_'],
                 'fecha_pago' => ['fecha_de_pago', 'fecha_pago'],
@@ -576,6 +670,7 @@ class AdminController extends BaseController {
             'telefono_contacto',
             'franja_cliente',
             'canal_contacto',
+            'tipo_contacto',
             'resultado_contacto',
             'razon_especifica',
             'fecha_pago',
@@ -594,14 +689,19 @@ class AdminController extends BaseController {
     }
 
     private function construirIndiceAsesoresImportacion() {
-        $stmt = $this->pdo->query("SELECT id, nombre_completo, usuario, estado FROM usuarios WHERE rol = 'asesor'");
+        $stmt = $this->pdo->query("
+            SELECT u.cedula AS id, u.cedula, u.nombre AS nombre_completo, u.usuario, u.estado
+            FROM usuarios u
+            WHERE u.rol = 'asesor' AND u.estado = 'activo'
+        ");
         $asesores = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $indice = [];
 
         foreach ($asesores as $asesor) {
             $claves = [
                 $this->normalizarTextoImportacion($asesor['nombre_completo'] ?? ''),
-                $this->normalizarTextoImportacion($asesor['usuario'] ?? '')
+                $this->normalizarTextoImportacion($asesor['usuario'] ?? ''),
+                $this->normalizarTextoImportacion((string) ($asesor['cedula'] ?? '')),
             ];
 
             foreach ($claves as $clave) {
@@ -632,54 +732,13 @@ class AdminController extends BaseController {
         return $indiceAsesores[$clave][0];
     }
 
-    private function obtenerOCrearAsignacionHistorica($asesorId, $clienteId, $fechaGestion) {
-        $stmt = $this->pdo->prepare("
-            SELECT id
-            FROM asignaciones_clientes
-            WHERE asesor_id = ? AND cliente_id = ?
-            ORDER BY id DESC
-            LIMIT 1
-        ");
-        $stmt->execute([$asesorId, $clienteId]);
-        $asignacion = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        if ($asignacion) {
-            return (int) $asignacion['id'];
-        }
-
-        $stmt = $this->pdo->prepare("
-            INSERT INTO asignaciones_clientes (asesor_id, cliente_id, estado, fecha_asignacion)
-            VALUES (?, ?, 'liberado', ?)
-        ");
-        $stmt->execute([$asesorId, $clienteId, $fechaGestion]);
-
-        return (int) $this->pdo->lastInsertId();
-    }
-
     private function actualizarFacturaImportada($facturaId, $estadoActual, $resultadoContacto, $razonEspecifica, $fechaPago = null) {
-        $nuevoEstado = $this->determinarEstadoFacturaImportada($estadoActual, $resultadoContacto, $razonEspecifica);
-
-        $stmt = $this->pdo->prepare("
-            UPDATE facturas
-            SET estado_factura = ?,
-                fecha_pago = COALESCE(?, fecha_pago),
-                fecha_actualizacion = CURRENT_TIMESTAMP
-            WHERE id = ?
-        ");
-        $stmt->execute([$nuevoEstado, $fechaPago, $facturaId]);
+        // En la nueva BD (`obligaciones`) no existe `estado_factura`/`fecha_pago`.
+        // La importación de gestiones queda registrada en `historial_gestiones` + `acuerdos` (si aplica).
+        return;
     }
 
     private function determinarEstadoFacturaImportada($estadoActual, $resultadoContacto, $razonEspecifica) {
-        $valor = $this->normalizarTextoImportacion($resultadoContacto . ' ' . $razonEspecifica);
-
-        if (strpos($valor, 'ya_pago') !== false) {
-            return 'pagada';
-        }
-
-        if ($estadoActual === 'pagada') {
-            return 'pagada';
-        }
-
         return 'gestionada';
     }
 

@@ -136,20 +136,24 @@
         <!-- Métricas principales -->
         <div class="metrics-grid">
             <div class="metric-card">
-                <div class="metric-value"><?php echo $datos_dashboard['total_clientes'] ?? 0; ?></div>
-                <div class="metric-label">Total Clientes</div>
+                <div class="metric-value"><?php echo (int)($datos_dashboard['gestiones_mes_actual'] ?? 0); ?></div>
+                <div class="metric-label">Gestiones en el mes</div>
             </div>
             <div class="metric-card">
                 <div class="metric-value"><?php echo $datos_dashboard['gestiones_hoy'] ?? 0; ?></div>
                 <div class="metric-label">Gestiones Hoy</div>
             </div>
             <div class="metric-card">
-                <div class="metric-value"><?php echo $datos_dashboard['contactos_efectivos_hoy'] ?? 0; ?></div>
-                <div class="metric-label">Contactos Efectivos</div>
-            </div>
-            <div class="metric-card">
                 <div class="metric-value"><?php echo $datos_dashboard['acuerdos_hoy'] ?? 0; ?></div>
                 <div class="metric-label">Acuerdos Hoy</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">$<?php echo number_format((float)($datos_dashboard['recaudo_acuerdos_dia'] ?? 0), 0, ',', '.'); ?></div>
+                <div class="metric-label">Recaudo hoy</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">$<?php echo number_format((float)($datos_dashboard['recaudo_acuerdos_mes'] ?? 0), 0, ',', '.'); ?></div>
+                <div class="metric-label">Recaudo del mes</div>
             </div>
         </div>
 
@@ -185,6 +189,54 @@
         
         // Esperar a que el DOM esté completamente cargado
         document.addEventListener('DOMContentLoaded', function() {
+            // #region agent log d54ef5 asesor dashboard JS boot
+            (function(){
+                try {
+                    const tipLabels = <?php echo json_encode(array_column($tipificaciones ?? [], 'resultado')); ?>;
+                    const tipData = <?php echo json_encode(array_column($tipificaciones ?? [], 'cantidad')); ?>;
+                    const gLabels = <?php echo json_encode(array_column($gestionesPorDia ?? [], 'fecha')); ?>;
+                    const gData = <?php echo json_encode(array_column($gestionesPorDia ?? [], 'cantidad')); ?>;
+                    fetch('index.php?action=client_debug_log_d54ef5', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            sessionId: 'd54ef5',
+                            runId: 'pre',
+                            hypothesisId: 'H2',
+                            location: 'views/asesor_dashboard.php:DOMContentLoaded',
+                            message: 'chart_inputs',
+                            data: {
+                                hasChart: (typeof Chart !== 'undefined') ? 1 : 0,
+                                tipLabelsLen: Array.isArray(tipLabels) ? tipLabels.length : -1,
+                                tipDataLen: Array.isArray(tipData) ? tipData.length : -1,
+                                gestLabelsLen: Array.isArray(gLabels) ? gLabels.length : -1,
+                                gestDataLen: Array.isArray(gData) ? gData.length : -1,
+                                firstTipLabel: String((tipLabels && tipLabels[0]) || ''),
+                                firstGestLabel: String((gLabels && gLabels[0]) || '')
+                            },
+                            timestamp: Date.now()
+                        })
+                    }).catch(()=>{});
+                } catch (e) {
+                    try {
+                        fetch('index.php?action=client_debug_log_d54ef5', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                sessionId: 'd54ef5',
+                                runId: 'pre',
+                                hypothesisId: 'H2',
+                                location: 'views/asesor_dashboard.php:DOMContentLoaded',
+                                message: 'chart_inputs_exception',
+                                data: { msg: String(e && e.message || e) },
+                                timestamp: Date.now()
+                            })
+                        }).catch(()=>{});
+                    } catch(_) {}
+                }
+            })();
+            // #endregion
+
             // Verificar que Chart.js esté disponible
             if (typeof Chart === 'undefined') {
                 console.error('Chart.js no está cargado');

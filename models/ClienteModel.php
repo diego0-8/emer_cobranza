@@ -6,9 +6,42 @@ class ClienteModel {
         $this->pdo = $pdo;
     }
 
+    /**
+     * Aliases para compatibilidad con el backend/vistas existentes:
+     * - id_cliente -> id
+     * - base_id -> carga_excel_id
+     * - tel1..tel10 -> telefono/celular2/cel3..cel10
+     * - estado -> estado_cliente
+     */
+    private function selectClienteCompatFields(): string {
+        return "c.id_cliente AS id,
+                c.id_cliente,
+                c.base_id,
+                c.base_id AS carga_excel_id,
+                c.cedula,
+                c.nombre,
+                c.email,
+                c.ciudad,
+                c.tel1 AS telefono,
+                c.tel2 AS celular2,
+                c.tel3 AS cel3,
+                c.tel4 AS cel4,
+                c.tel5 AS cel5,
+                c.tel6 AS cel6,
+                c.tel7 AS cel7,
+                c.tel8 AS cel8,
+                c.tel9 AS cel9,
+                c.tel10 AS cel10,
+                NULL AS cel11,
+                c.estado,
+                c.estado AS estado_cliente,
+                c.fecha_creacion,
+                c.fecha_actualizacion";
+    }
+
     public function getClientsByCargaId($cargaId, $limit = null, $offset = null) {
-        $sql = "SELECT * FROM clientes WHERE carga_excel_id = ?";
-        $params = [$cargaId];
+        $sql = "SELECT " . $this->selectClienteCompatFields() . " FROM clientes c WHERE c.base_id = ?";
+        $params = [(int)$cargaId];
         
         if ($limit !== null && $offset !== null) {
             $sql .= " LIMIT " . (int)$limit . " OFFSET " . (int)$offset;
@@ -25,9 +58,9 @@ class ClienteModel {
      * @return int El número total de clientes.
      */
     public function getTotalClientsByCargaId($cargaId) {
-        $sql = "SELECT COUNT(*) AS total FROM clientes WHERE carga_excel_id = ?";
+        $sql = "SELECT COUNT(*) AS total FROM clientes WHERE base_id = ?";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$cargaId]);
+        $stmt->execute([(int)$cargaId]);
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
         return $result['total'] ?? 0;
     }
@@ -36,10 +69,11 @@ class ClienteModel {
      * Obtiene clientes por carga ID filtrando solo los del coordinador específico
      */
     public function getClientsByCargaIdAndCoordinador($cargaId, $coordinadorId, $limit = null, $offset = null) {
-        $sql = "SELECT c.* FROM clientes c 
-                JOIN cargas_excel ce ON c.carga_excel_id = ce.id 
-                WHERE c.carga_excel_id = ? AND ce.usuario_coordinador_id = ?";
-        $params = [$cargaId, $coordinadorId];
+        $sql = "SELECT " . $this->selectClienteCompatFields() . "
+                FROM clientes c
+                JOIN base_clientes b ON c.base_id = b.id_base
+                WHERE c.base_id = ? AND b.creado_por = ?";
+        $params = [(int)$cargaId, (string)$coordinadorId];
         
         if ($limit !== null && $offset !== null) {
             $sql .= " LIMIT " . (int)$limit . " OFFSET " . (int)$offset;
@@ -54,11 +88,11 @@ class ClienteModel {
      * Obtiene el total de clientes por carga filtrando solo los del coordinador específico
      */
     public function getTotalClientsByCargaIdAndCoordinador($cargaId, $coordinadorId) {
-        $sql = "SELECT COUNT(*) AS total FROM clientes c 
-                JOIN cargas_excel ce ON c.carga_excel_id = ce.id 
-                WHERE c.carga_excel_id = ? AND ce.usuario_coordinador_id = ?";
+        $sql = "SELECT COUNT(*) AS total FROM clientes c
+                JOIN base_clientes b ON c.base_id = b.id_base
+                WHERE c.base_id = ? AND b.creado_por = ?";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$cargaId, $coordinadorId]);
+        $stmt->execute([(int)$cargaId, (string)$coordinadorId]);
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
         return $result['total'] ?? 0;
     }
@@ -67,11 +101,10 @@ class ClienteModel {
      * Obtiene el total de clientes asignados por carga filtrando solo los del coordinador específico
      */
     public function getTotalClientsAsignadosByCargaIdAndCoordinador($cargaId, $coordinadorId) {
-        $sql = "SELECT COUNT(*) AS total FROM clientes c 
-                JOIN cargas_excel ce ON c.carga_excel_id = ce.id 
-                WHERE c.carga_excel_id = ? AND ce.usuario_coordinador_id = ? AND c.asesor_id IS NOT NULL";
+        // En el esquema nuevo no hay `asesor_id` en clientes. Mantener compatibilidad con 0.
+        $sql = "SELECT 0 AS total";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$cargaId, $coordinadorId]);
+        $stmt->execute();
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
         return $result['total'] ?? 0;
     }
@@ -81,17 +114,15 @@ class ClienteModel {
      * EXCLUYE clientes que ya fueron gestionados previamente (tienen historial de gestiones)
      */
     public function getUnassignedClientsByCargaAndCoordinador($cargaId, $coordinadorId) {
-        $stmt = $this->pdo->prepare("SELECT c.* FROM clientes c 
-                                    JOIN cargas_excel ce ON c.carga_excel_id = ce.id 
-                                    WHERE c.carga_excel_id = ? 
-                                    AND ce.usuario_coordinador_id = ? 
-                                    AND c.asesor_id IS NULL
-                                    AND NOT EXISTS (
-                                        SELECT 1 FROM asignaciones_clientes ac
-                                        JOIN historial_gestion hg ON ac.id = hg.asignacion_id
-                                        WHERE ac.cliente_id = c.id
-                                    )");
-        $stmt->execute([$cargaId, $coordinadorId]);
+        // En el esquema nuevo no existe asignación por cliente.
+        // Consideramos "no asignados" = todos los clientes de la base.
+        $stmt = $this->pdo->prepare("
+            SELECT " . $this->selectClienteCompatFields() . "
+            FROM clientes c
+            JOIN base_clientes b ON c.base_id = b.id_base
+            WHERE c.base_id = ? AND b.creado_por = ?
+        ");
+        $stmt->execute([(int)$cargaId, (string)$coordinadorId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
     
@@ -99,21 +130,8 @@ class ClienteModel {
      * Obtiene clientes liberados que pueden ser reasignados (sin historial de gestiones)
      */
     public function getLiberatedClientsAvailableForReassignment($cargaId, $coordinadorId) {
-        $stmt = $this->pdo->prepare("SELECT c.*, ac.asesor_id as asesor_original, ac.fecha_asignacion as fecha_liberacion
-                                    FROM clientes c 
-                                    JOIN cargas_excel ce ON c.carga_excel_id = ce.id 
-                                    JOIN asignaciones_clientes ac ON c.id = ac.cliente_id
-                                    WHERE c.carga_excel_id = ? 
-                                    AND ce.usuario_coordinador_id = ? 
-                                    AND c.asesor_id IS NULL
-                                    AND ac.estado = 'liberado'
-                                    AND NOT EXISTS (
-                                        SELECT 1 FROM historial_gestion hg 
-                                        WHERE hg.asignacion_id = ac.id
-                                    )
-                                    ORDER BY ac.fecha_asignacion DESC");
-        $stmt->execute([$cargaId, $coordinadorId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        // No aplica en el esquema nuevo (sin asignación por cliente).
+        return [];
     }
     
     /**
@@ -144,107 +162,66 @@ class ClienteModel {
         if (!is_numeric($cargaId) || !is_numeric($coordinadorId)) {
             return [];
         }
-        
-        // Si es un número (cédula o teléfono), buscar exacto primero
-        if (is_numeric($searchTerm)) {
-            $sql = "SELECT c.* FROM clientes c 
-                    JOIN cargas_excel ce ON c.carga_excel_id = ce.id 
-                    WHERE c.carga_excel_id = ? 
-                    AND ce.usuario_coordinador_id = ?
-                    AND (c.cedula = ? OR c.telefono = ? OR c.celular2 = ?)
-                    ORDER BY 
-                        CASE 
-                            WHEN c.cedula = ? THEN 1
-                            WHEN c.telefono = ? THEN 2
-                            WHEN c.celular2 = ? THEN 3
-                            ELSE 4
-                        END,
-                        c.nombre ASC
-                    LIMIT 100";
-            
+
+        // Esquema real: clientes.base_id, base_clientes.creado_por y teléfonos en tel1..tel10
+        $termLike = '%' . $searchTerm . '%';
+
+        // Si es numérico, priorizar coincidencias exactas en cédula y teléfonos.
+        if (ctype_digit($searchTerm)) {
+            $sql = "
+                SELECT " . $this->selectClienteCompatFields() . "
+                FROM clientes c
+                JOIN base_clientes b ON c.base_id = b.id_base
+                WHERE c.base_id = ?
+                  AND b.creado_por = ?
+                  AND (
+                    c.cedula = ?
+                    OR c.tel1 = ? OR c.tel2 = ? OR c.tel3 = ? OR c.tel4 = ? OR c.tel5 = ?
+                    OR c.tel6 = ? OR c.tel7 = ? OR c.tel8 = ? OR c.tel9 = ? OR c.tel10 = ?
+                  )
+                ORDER BY CASE WHEN c.cedula = ? THEN 0 ELSE 1 END, c.nombre ASC
+                LIMIT 200
+            ";
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute([
-                $cargaId, 
-                $coordinadorId, 
-                $searchTerm, 
-                $searchTerm, 
+                (int)$cargaId,
+                (string)$coordinadorId,
                 $searchTerm,
-                $searchTerm,
-                $searchTerm,
+                $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm,
+                $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm,
                 $searchTerm
             ]);
-            
-            $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            // Si encontramos resultados exactos, devolverlos
-            if (!empty($results)) {
-                return $results;
-            }
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            if (!empty($rows)) return $rows;
         }
-        
-        // Búsqueda con LIKE para texto parcial
-        $searchTermLike = '%' . $searchTerm . '%';
-        
-        // Usar FULLTEXT search si el término tiene más de 2 caracteres
-        if (strlen($searchTerm) > 2) {
-            $sql = "SELECT c.*, 
-                           MATCH(c.nombre, c.cedula, c.telefono, c.celular2, c.email) 
-                           AGAINST(? IN NATURAL LANGUAGE MODE) as relevance
-                    FROM clientes c 
-                    JOIN cargas_excel ce ON c.carga_excel_id = ce.id 
-                    WHERE c.carga_excel_id = ? 
-                    AND ce.usuario_coordinador_id = ?
-                    AND MATCH(c.nombre, c.cedula, c.telefono, c.celular2, c.email) 
-                        AGAINST(? IN NATURAL LANGUAGE MODE)
-                    ORDER BY relevance DESC, c.nombre ASC
-                    LIMIT 1000";
-            
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([$searchTerm, $cargaId, $coordinadorId, $searchTerm]);
-            $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            // Si encontramos resultados con FULLTEXT, devolverlos
-            if (!empty($results)) {
-                return $results;
-            }
-        }
-        
-        // Fallback a búsqueda LIKE tradicional
-        $sql = "SELECT c.* FROM clientes c 
-                JOIN cargas_excel ce ON c.carga_excel_id = ce.id 
-                WHERE c.carga_excel_id = ? 
-                AND ce.usuario_coordinador_id = ?
-                AND (c.nombre LIKE ? 
-                     OR c.cedula LIKE ? 
-                     OR c.telefono LIKE ? 
-                     OR c.celular2 LIKE ? 
-                     OR c.email LIKE ?)
-                ORDER BY 
-                    CASE 
-                        WHEN c.cedula LIKE ? THEN 1
-                        WHEN c.nombre LIKE ? THEN 2
-                        WHEN c.telefono LIKE ? THEN 3
-                        WHEN c.celular2 LIKE ? THEN 4
-                        ELSE 5
-                    END,
-                    c.nombre ASC
-                LIMIT 1000";
-        
+
+        // Búsqueda flexible (por cedula o teléfonos o nombre/email)
+        $sql = "
+            SELECT " . $this->selectClienteCompatFields() . "
+            FROM clientes c
+            JOIN base_clientes b ON c.base_id = b.id_base
+            WHERE c.base_id = ?
+              AND b.creado_por = ?
+              AND (
+                c.nombre LIKE ?
+                OR c.cedula LIKE ?
+                OR c.email LIKE ?
+                OR c.tel1 LIKE ? OR c.tel2 LIKE ? OR c.tel3 LIKE ? OR c.tel4 LIKE ? OR c.tel5 LIKE ?
+                OR c.tel6 LIKE ? OR c.tel7 LIKE ? OR c.tel8 LIKE ? OR c.tel9 LIKE ? OR c.tel10 LIKE ?
+              )
+            ORDER BY c.nombre ASC
+            LIMIT 1000
+        ";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([
-            $cargaId, 
-            $coordinadorId, 
-            $searchTermLike, 
-            $searchTermLike, 
-            $searchTermLike, 
-            $searchTermLike, 
-            $searchTermLike,
-            $searchTermLike,
-            $searchTermLike,
-            $searchTermLike,
-            $searchTermLike
+            (int)$cargaId,
+            (string)$coordinadorId,
+            $termLike,
+            $termLike,
+            $termLike,
+            $termLike, $termLike, $termLike, $termLike, $termLike,
+            $termLike, $termLike, $termLike, $termLike, $termLike
         ]);
-        
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
     
@@ -258,18 +235,27 @@ class ClienteModel {
     public function saveClientsFromExcel($cargaId, $clientes) {
         $this->pdo->beginTransaction();
         try {
-            $sql = "INSERT INTO clientes (nombre, cedula, telefono, celular2, ciudad, carga_excel_id) 
-                    VALUES (?, ?, ?, ?, ?, ?)";
+            $sql = "INSERT INTO clientes (base_id, cedula, nombre, email, ciudad, tel1, tel2, tel3, tel4, tel5, tel6, tel7, tel8, tel9, tel10, estado)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo')";
             $stmt = $this->pdo->prepare($sql);
             
             foreach ($clientes as $cliente) {
                 $stmt->execute([
-                    $cliente['nombre'], 
-                    $cliente['cedula'], 
-                    $cliente['telefono'], 
-                    $cliente['celular2'], 
-                    $cliente['ciudad'], 
-                    $cargaId
+                    (int)$cargaId,
+                    (string)($cliente['cedula'] ?? ''),
+                    (string)($cliente['nombre'] ?? ''),
+                    (string)($cliente['email'] ?? ''),
+                    (string)($cliente['ciudad'] ?? ''),
+                    (string)($cliente['telefono'] ?? $cliente['tel1'] ?? ''),
+                    (string)($cliente['celular2'] ?? $cliente['tel2'] ?? ''),
+                    (string)($cliente['cel3'] ?? $cliente['tel3'] ?? ''),
+                    (string)($cliente['cel4'] ?? $cliente['tel4'] ?? ''),
+                    (string)($cliente['cel5'] ?? $cliente['tel5'] ?? ''),
+                    (string)($cliente['cel6'] ?? $cliente['tel6'] ?? ''),
+                    (string)($cliente['cel7'] ?? $cliente['tel7'] ?? ''),
+                    (string)($cliente['cel8'] ?? $cliente['tel8'] ?? ''),
+                    (string)($cliente['cel9'] ?? $cliente['tel9'] ?? ''),
+                    (string)($cliente['cel10'] ?? $cliente['tel10'] ?? '')
                 ]);
             }
             $this->pdo->commit();
@@ -282,8 +268,9 @@ class ClienteModel {
     }
 
     public function getUnassignedClientsByCarga($cargaId) {
-        $stmt = $this->pdo->prepare("SELECT * FROM clientes WHERE carga_excel_id = ? AND asesor_id IS NULL");
-        $stmt->execute([$cargaId]);
+        // Sin asignación por cliente en el esquema nuevo: devolver todos.
+        $stmt = $this->pdo->prepare("SELECT " . $this->selectClienteCompatFields() . " FROM clientes c WHERE c.base_id = ?");
+        $stmt->execute([(int)$cargaId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -320,11 +307,9 @@ class ClienteModel {
     }
 
     public function getClienteById($clienteId) {
-        // Seleccionar explícitamente todas las columnas incluyendo cel3-cel11 para asegurar que estén presentes
-        $sql = "SELECT *, telefono, celular2, cel3, cel4, cel5, cel6, cel7, cel8, cel9, cel10, cel11 
-                FROM clientes WHERE id = ?";
+        $sql = "SELECT " . $this->selectClienteCompatFields() . " FROM clientes c WHERE c.id_cliente = ?";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$clienteId]);
+        $stmt->execute([(int)$clienteId]);
         $cliente = $stmt->fetch(PDO::FETCH_ASSOC);
         
         // Asegurar que todas las columnas de teléfono existan en el array (incluso si son NULL)
@@ -341,52 +326,27 @@ class ClienteModel {
     }
 
     public function getAssignedClientsForAsesor($asesorId) {
-        // Primero intentar obtener de asignaciones_clientes (método nuevo)
-        $sql = "SELECT 
-                    c.*, 
-                    a.id as asignacion_id, 
-                    a.estado as estado_gestion,
-                    a.fecha_asignacion,
-                    (SELECT COUNT(*) FROM historial_gestion hg WHERE hg.asignacion_id = a.id) as total_gestiones,
-                    (SELECT MAX(hg.fecha_gestion) FROM historial_gestion hg WHERE hg.asignacion_id = a.id) as ultima_gestion,
-                    (SELECT hg.resultado FROM historial_gestion hg WHERE hg.asignacion_id = a.id ORDER BY hg.fecha_gestion DESC LIMIT 1) as ultimo_resultado,
-                    (SELECT hg.monto_venta FROM historial_gestion hg WHERE hg.asignacion_id = a.id ORDER BY hg.fecha_gestion DESC LIMIT 1) as monto_venta
-                FROM asignaciones_clientes a
-                JOIN clientes c ON a.cliente_id = c.id
-                WHERE a.asesor_id = ? AND a.estado = 'asignado'
-                ORDER BY a.fecha_asignacion DESC";
+        // Esquema actual (emermedica_cobranza.sql):
+        // - tareas.asesor_cedula, tareas.id_tarea
+        // - detalle_tareas.tarea_id, detalle_tareas.cliente_id
+        // - clientes.id_cliente
+        //
+        // Un "cliente asignado" para asesor = cliente presente en detalle_tareas de una tarea del asesor.
+        $sql = "
+            SELECT DISTINCT
+                " . $this->selectClienteCompatFields() . ",
+                t.id_tarea AS tarea_id,
+                t.estado AS estado_tarea,
+                dt.gestionado AS gestionado
+            FROM tareas t
+            JOIN detalle_tareas dt ON dt.tarea_id = t.id_tarea
+            JOIN clientes c ON c.id_cliente = dt.cliente_id
+            WHERE t.asesor_cedula = ?
+            ORDER BY c.nombre ASC
+        ";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId]);
-        $clientesAsignaciones = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        // Si no hay clientes en asignaciones_clientes, buscar directamente en clientes
-        if (empty($clientesAsignaciones)) {
-            $sql = "SELECT 
-                        c.*, 
-                        NULL as asignacion_id, 
-                        c.estado_cliente as estado_gestion,
-                        c.fecha_creacion as fecha_asignacion,
-                        (SELECT COUNT(*) FROM historial_gestion hg 
-                         INNER JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                         WHERE ac.cliente_id = c.id) as total_gestiones,
-                        (SELECT MAX(hg.fecha_gestion) FROM historial_gestion hg 
-                         INNER JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                         WHERE ac.cliente_id = c.id) as ultima_gestion,
-                        (SELECT hg.resultado FROM historial_gestion hg 
-                         INNER JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                         WHERE ac.cliente_id = c.id ORDER BY hg.fecha_gestion DESC LIMIT 1) as ultimo_resultado,
-                        (SELECT hg.monto_venta FROM historial_gestion hg 
-                         INNER JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                         WHERE ac.cliente_id = c.id ORDER BY hg.fecha_gestion DESC LIMIT 1) as monto_venta
-                    FROM clientes c
-                    WHERE c.asesor_id = ?
-                    ORDER BY c.fecha_creacion DESC";
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([$asesorId]);
-            return $stmt->fetchAll(PDO::FETCH_ASSOC);
-        }
-        
-        return $clientesAsignaciones;
+        $stmt->execute([(string)$asesorId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /**
@@ -404,10 +364,18 @@ class ClienteModel {
     }
     
     public function getTotalClientesByAsesor($asesorId) {
-        $stmt = $this->pdo->prepare("SELECT COUNT(*) as total FROM clientes WHERE asesor_id = ?");
-        $stmt->execute([$asesorId]);
+        // En el esquema emermedica_cobranza no existe clientes.asesor_id; el asesor se relaciona por cédula
+        // en asignacion_base_asesores sobre las bases donde hay clientes.
+        $sql = "SELECT COUNT(DISTINCT c.id_cliente) AS total
+                FROM clientes c
+                INNER JOIN base_clientes b ON b.id_base = c.base_id AND b.estado = 'activo'
+                INNER JOIN asignacion_base_asesores aba
+                    ON aba.base_id = c.base_id AND aba.estado = 'activa' AND aba.asesor_cedula = ?
+                WHERE c.estado = 'activo'";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([(string)$asesorId]);
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $result['total'] ?? 0;
+        return (int)($result['total'] ?? 0);
     }
     
     /**
@@ -524,11 +492,12 @@ class ClienteModel {
      * Esto asegura que cada cliente esté ligado a su base específica
      */
     public function getClienteByCedulaYCarga($cedula, $cargaId) {
-        // Seleccionar explícitamente todas las columnas incluyendo cel3-cel11
-        $sql = "SELECT *, telefono, celular2, cel3, cel4, cel5, cel6, cel7, cel8, cel9, cel10, cel11 
-                FROM clientes WHERE cedula = ? AND carga_excel_id = ? LIMIT 1";
+        $sql = "SELECT " . $this->selectClienteCompatFields() . "
+                FROM clientes c
+                WHERE c.cedula = ? AND c.base_id = ?
+                LIMIT 1";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$cedula, $cargaId]);
+        $stmt->execute([(string)$cedula, (int)$cargaId]);
         $cliente = $stmt->fetch(PDO::FETCH_ASSOC);
         
         // Asegurar que todas las columnas de teléfono existan en el array (incluso si son NULL)
@@ -548,9 +517,9 @@ class ClienteModel {
      * Verifica si un cliente ya está en una carga específica
      */
     public function clienteYaEnCarga($clienteId, $cargaId) {
-        $sql = "SELECT id FROM clientes WHERE id = ? AND carga_excel_id = ? LIMIT 1";
+        $sql = "SELECT id_cliente FROM clientes WHERE id_cliente = ? AND base_id = ? LIMIT 1";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$clienteId, $cargaId]);
+        $stmt->execute([(int)$clienteId, (int)$cargaId]);
         return $stmt->fetch(PDO::FETCH_ASSOC) !== false;
     }
 
@@ -563,33 +532,90 @@ class ClienteModel {
         // DEPRECADO: Este método mueve clientes, causando que las facturas se mezclen
         // En su lugar, crear un NUEVO cliente con la misma cédula pero diferente carga_excel_id
         error_log("ADVERTENCIA: agregarClienteACarga() está deprecado. No mover clientes entre bases.");
-        $sql = "UPDATE clientes SET carga_excel_id = ? WHERE id = ?";
+        $sql = "UPDATE clientes SET base_id = ? WHERE id_cliente = ?";
         $stmt = $this->pdo->prepare($sql);
-        return $stmt->execute([$cargaId, $clienteId]);
+        return $stmt->execute([(int)$cargaId, (int)$clienteId]);
     }
 
     /**
      * Crea un nuevo cliente
      */
     public function crearCliente($datos) {
-        $sql = "INSERT INTO clientes (nombre, cedula, telefono, celular2, email, direccion, ciudad, carga_excel_id, otros_datos_json, fecha_creacion) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())";
+        // En el dump: email/ciudad/tel1..tel10 son NOT NULL.
+        $sql = "INSERT INTO clientes (base_id, cedula, nombre, email, ciudad, tel1, tel2, tel3, tel4, tel5, tel6, tel7, tel8, tel9, tel10, estado)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo')";
         $stmt = $this->pdo->prepare($sql);
-        
-        if ($stmt->execute([
-            $datos['nombre'],
-            $datos['cedula'],
-            $datos['telefono'],
-            $datos['celular2'] ?? null,
-            $datos['email'] ?? null,
-            $datos['direccion'] ?? null,
-            $datos['ciudad'] ?? null,
-            $datos['carga_excel_id'] ?? null,
-            $datos['otros_datos_json'] ?? null
-        ])) {
-            return $this->pdo->lastInsertId();
+
+        $agentLogPath = __DIR__ . '/../debug-a2fdce.log';
+
+        $baseId = (int)($datos['carga_excel_id'] ?? $datos['base_id'] ?? 0);
+        $cedula = (string)($datos['cedula'] ?? '');
+        $nombre = trim((string)($datos['nombre'] ?? ''));
+        if ($nombre === '') $nombre = 'SIN NOMBRE';
+
+        $email = trim((string)($datos['email'] ?? ''));
+        if ($email === '') $email = 'sin-email@local';
+
+        $ciudad = trim((string)($datos['ciudad'] ?? ''));
+        if ($ciudad === '') $ciudad = 'N/A';
+
+        // Teléfonos NOT NULL: usar '' si no hay.
+        $tel1 = (string)($datos['telefono'] ?? $datos['tel1'] ?? '');
+        $tel2 = (string)($datos['celular2'] ?? $datos['tel2'] ?? $datos['telefono2'] ?? '');
+        $tel3 = (string)($datos['cel3'] ?? $datos['tel3'] ?? $datos['telefonos_3'] ?? '');
+        $tel4 = (string)($datos['cel4'] ?? $datos['tel4'] ?? '');
+        $tel5 = (string)($datos['cel5'] ?? $datos['tel5'] ?? '');
+        $tel6 = (string)($datos['cel6'] ?? $datos['tel6'] ?? '');
+        $tel7 = (string)($datos['cel7'] ?? $datos['tel7'] ?? '');
+        $tel8 = (string)($datos['cel8'] ?? $datos['tel8'] ?? '');
+        $tel9 = (string)($datos['cel9'] ?? $datos['tel9'] ?? '');
+        $tel10 = (string)($datos['cel10'] ?? $datos['tel10'] ?? '');
+
+        try {
+            $ok = $stmt->execute([
+                $baseId,
+                $cedula,
+                $nombre,
+                $email,
+                $ciudad,
+                $tel1,
+                $tel2,
+                $tel3,
+                $tel4,
+                $tel5,
+                $tel6,
+                $tel7,
+                $tel8,
+                $tel9,
+                $tel10
+            ]);
+            if ($ok) {
+                return $this->pdo->lastInsertId();
+            }
+            return false;
+        } catch (Throwable $e) {
+            // #region agent log
+            @file_put_contents($agentLogPath, json_encode([
+                'sessionId' => 'a2fdce',
+                'runId' => 'pre-fix',
+                'hypothesisId' => 'IC1',
+                'location' => 'models/ClienteModel.php:crearCliente:catch',
+                'message' => 'crearCliente exception',
+                'data' => [
+                    'type' => get_class($e),
+                    'code' => (int)$e->getCode(),
+                    'message' => substr((string)$e->getMessage(), 0, 300),
+                    'baseId' => $baseId,
+                    'cedulaLen' => strlen($cedula),
+                    'emailWasDefault' => $email === 'sin-email@local',
+                    'ciudadWasDefault' => $ciudad === 'N/A',
+                    'tel1Len' => strlen($tel1),
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+            // #endregion
+            throw $e;
         }
-        return false;
     }
 
     /**
@@ -684,21 +710,71 @@ class ClienteModel {
      * Obtiene el siguiente cliente no gestionado del asesor
      */
     public function getSiguienteClienteAsesor($asesorId) {
-        $sql = "SELECT c.*, ac.id as asignacion_id
-                FROM clientes c 
-                JOIN asignaciones_clientes ac ON c.id = ac.cliente_id
-                WHERE ac.asesor_id = ? 
-                AND ac.estado = 'asignado'
-                AND NOT EXISTS (
-                    SELECT 1 FROM historial_gestion hg 
-                    WHERE hg.asignacion_id = ac.id
-                )
-                ORDER BY ac.fecha_asignacion ASC
-                LIMIT 1";
-        
+        // #region agent log b7eaa7 ClienteModel getSiguienteClienteAsesor entry
+        try { @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode([
+            'sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'NX5',
+            'location'=>'models/ClienteModel.php:getSiguienteClienteAsesor:entry',
+            'message'=>'enter',
+            'data'=>[
+                'asesorIdType'=>gettype($asesorId),
+                'asesorIdLen'=>strlen((string)$asesorId),
+            ],
+            'timestamp'=>(int) round(microtime(true)*1000)
+        ], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
+        // #endregion
+
+        // Esquema actual (nuevo): tareas + detalle_tareas es la fuente de asignación.
+        // Tarea "activa": la más reciente en estado pendiente para este asesor.
+        $sql = "
+            SELECT
+                c.id_cliente,
+                c.cedula,
+                c.nombre,
+                c.email,
+                c.tel1,
+                c.tel2,
+                c.base_id,
+                dt.tarea_id
+            FROM tareas t
+            JOIN detalle_tareas dt ON dt.tarea_id = t.id_tarea
+            JOIN clientes c ON c.id_cliente = dt.cliente_id
+            WHERE t.id_tarea = (
+                SELECT tt.id_tarea
+                FROM tareas tt
+                WHERE tt.asesor_cedula = ?
+                  AND tt.estado = 'pendiente'
+                ORDER BY tt.fecha_creacion DESC, tt.id_tarea DESC
+                LIMIT 1
+            )
+              AND dt.gestionado = 'no'
+            ORDER BY dt.id_detalle ASC
+            LIMIT 1
+        ";
+
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId]);
-        return $stmt->fetch(PDO::FETCH_ASSOC);
+        $stmt->execute([(string)$asesorId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+
+        // #region agent log b7eaa7 ClienteModel getSiguienteClienteAsesor result
+        try { @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode([
+            'sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'NX6',
+            'location'=>'models/ClienteModel.php:getSiguienteClienteAsesor:result',
+            'message'=>'db_row',
+            'data'=>[
+                'hasRow'=>$row?1:0,
+                'keys'=>is_array($row)?array_slice(array_keys($row),0,20):[],
+            ],
+            'timestamp'=>(int) round(microtime(true)*1000)
+        ], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
+        // #endregion
+
+        // Normalizar claves esperadas por el frontend
+        if (is_array($row)) {
+            $row['id'] = (int)($row['id_cliente'] ?? 0);
+            $row['telefono'] = (string)($row['tel1'] ?? '');
+        }
+
+        return $row;
     }
     
     /**
@@ -722,13 +798,22 @@ class ClienteModel {
         $valores = [];
         
         foreach ($datos as $campo => $valor) {
+            if ($campo === 'estado_cliente') {
+                $campo = 'estado';
+            }
+            if ($campo === 'telefono') {
+                $campo = 'tel1';
+            }
+            if ($campo === 'celular2') {
+                $campo = 'tel2';
+            }
             $campos[] = "$campo = ?";
             $valores[] = $valor;
         }
         
         $valores[] = $clienteId;
         
-        $sql = "UPDATE clientes SET " . implode(", ", $campos) . " WHERE id = ?";
+        $sql = "UPDATE clientes SET " . implode(", ", $campos) . " WHERE id_cliente = ?";
         $stmt = $this->pdo->prepare($sql);
         return $stmt->execute($valores);
     }
@@ -837,9 +922,9 @@ class ClienteModel {
      * Obtiene un cliente por cédula en una carga específica
      */
     public function getClienteByCedulaAndCarga($cedula, $cargaId) {
-        $sql = "SELECT * FROM clientes WHERE cedula = ? AND carga_excel_id = ?";
+        $sql = "SELECT " . $this->selectClienteCompatFields() . " FROM clientes c WHERE c.cedula = ? AND c.base_id = ? LIMIT 1";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$cedula, $cargaId]);
+        $stmt->execute([(string)$cedula, (int)$cargaId]);
         return $stmt->fetch(PDO::FETCH_ASSOC);
     }
 
@@ -847,18 +932,38 @@ class ClienteModel {
      * Obtiene todas las cargas del coordinador con filtro por estado habilitado
      */
     public function getCargasByCoordinador($coordinadorId, $soloHabilitadas = true) {
-        $sql = "SELECT ce.*,
-                (SELECT COUNT(*) FROM clientes WHERE carga_excel_id = ce.id) AS total_clientes
-                FROM cargas_excel ce
-                WHERE ce.usuario_coordinador_id = ?";
+        // Nuevo esquema: base_clientes (PK id_base) y clientes.base_id
+        // Aliases compat para no tocar vistas/controladores:
+        // - id_base -> id
+        // - nombre -> nombre_cargue
+        // - creado_por -> usuario_coordinador_id
+        // - fecha_actualizacion -> fecha_cargue
+        // - estado -> estado_habilitado
+        // Nota: `base_clientes.total_clientes/total_obligaciones` puede quedar desactualizado.
+        // Para mostrar información real en UI, contamos desde `clientes` y `obligaciones`.
+        $sql = "SELECT
+                    b.id_base AS id,
+                    b.id_base AS id_base,
+                    b.nombre AS nombre_cargue,
+                    b.nombre AS nombre,
+                    b.creado_por AS usuario_coordinador_id,
+                    b.creado_por AS creado_por,
+                    b.fecha_actualizacion AS fecha_cargue,
+                    b.fecha_actualizacion AS fecha_actualizacion,
+                    b.estado AS estado_habilitado,
+                    b.estado AS estado,
+                    (SELECT COUNT(*) FROM clientes c WHERE c.base_id = b.id_base) AS total_clientes,
+                    (SELECT COUNT(*) FROM obligaciones o WHERE o.base_id = b.id_base) AS total_obligaciones
+                FROM base_clientes b
+                WHERE b.creado_por = ?";
         $params = [$coordinadorId];
-        
+
         if ($soloHabilitadas) {
-            $sql .= " AND ce.estado_habilitado = 'habilitado'";
+            $sql .= " AND b.estado = 'activo'";
         }
-        
-        $sql .= " ORDER BY ce.fecha_cargue DESC";
-        
+
+        $sql .= " ORDER BY b.fecha_actualizacion DESC";
+
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -868,7 +973,8 @@ class ClienteModel {
      * Cambia el estado de una carga (habilitar/deshabilitar)
      */
     public function cambiarEstadoCarga($cargaId, $nuevoEstado) {
-        $sql = "UPDATE cargas_excel SET estado_habilitado = ? WHERE id = ?";
+        // Nuevo esquema: base_clientes.estado enum('activo','inactivo')
+        $sql = "UPDATE base_clientes SET estado = ? WHERE id_base = ?";
         $stmt = $this->pdo->prepare($sql);
         return $stmt->execute([$nuevoEstado, $cargaId]);
     }
@@ -877,18 +983,30 @@ class ClienteModel {
      * Busca cargas por nombre con filtro por estado
      */
     public function buscarCargasPorNombre($coordinadorId, $terminoBusqueda, $soloHabilitadas = true) {
-        $sql = "SELECT ce.*,
-                (SELECT COUNT(*) FROM clientes WHERE carga_excel_id = ce.id) AS total_clientes
-                FROM cargas_excel ce
-                WHERE ce.usuario_coordinador_id = ? AND ce.nombre_cargue LIKE ?";
+        $sql = "SELECT
+                    b.id_base AS id,
+                    b.id_base AS id_base,
+                    b.nombre AS nombre_cargue,
+                    b.nombre AS nombre,
+                    b.creado_por AS usuario_coordinador_id,
+                    b.creado_por AS creado_por,
+                    b.fecha_actualizacion AS fecha_cargue,
+                    b.fecha_actualizacion AS fecha_actualizacion,
+                    b.estado AS estado_habilitado,
+                    b.estado AS estado,
+                    (SELECT COUNT(*) FROM clientes c WHERE c.base_id = b.id_base) AS total_clientes,
+                    (SELECT COUNT(*) FROM obligaciones o WHERE o.base_id = b.id_base) AS total_obligaciones
+                FROM base_clientes b
+                WHERE b.creado_por = ?
+                  AND b.nombre LIKE ?";
         $params = [$coordinadorId, '%' . $terminoBusqueda . '%'];
-        
+
         if ($soloHabilitadas) {
-            $sql .= " AND ce.estado_habilitado = 'habilitado'";
+            $sql .= " AND b.estado = 'activo'";
         }
-        
-        $sql .= " ORDER BY ce.fecha_cargue DESC";
-        
+
+        $sql .= " ORDER BY b.fecha_actualizacion DESC";
+
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -900,14 +1018,17 @@ class ClienteModel {
      * @return array Lista de clientes encontrados
      */
     public function buscarPorTelefono($telefono) {
-        $sql = "SELECT id, nombre, telefono, cedula, email, direccion 
-                FROM clientes 
-                WHERE telefono LIKE ? 
-                ORDER BY nombre ASC 
+        // En el esquema actual los teléfonos viven en tel1..tel10.
+        $termLike = '%' . trim((string)$telefono) . '%';
+        $sql = "SELECT " . $this->selectClienteCompatFields() . "
+                FROM clientes c
+                WHERE c.tel1 LIKE ? OR c.tel2 LIKE ? OR c.tel3 LIKE ? OR c.tel4 LIKE ? OR c.tel5 LIKE ?
+                   OR c.tel6 LIKE ? OR c.tel7 LIKE ? OR c.tel8 LIKE ? OR c.tel9 LIKE ? OR c.tel10 LIKE ?
+                ORDER BY c.nombre ASC
                 LIMIT 20";
         
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute(['%' . $telefono . '%']);
+        $stmt->execute([$termLike,$termLike,$termLike,$termLike,$termLike,$termLike,$termLike,$termLike,$termLike,$termLike]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -917,14 +1038,15 @@ class ClienteModel {
      * @return array Lista de clientes encontrados
      */
     public function buscarPorCedula($cedula) {
-        $sql = "SELECT id, nombre, telefono, cedula, email, direccion 
-                FROM clientes 
-                WHERE cedula LIKE ? 
-                ORDER BY nombre ASC 
+        $termLike = '%' . trim((string)$cedula) . '%';
+        $sql = "SELECT " . $this->selectClienteCompatFields() . "
+                FROM clientes c
+                WHERE c.cedula LIKE ?
+                ORDER BY c.nombre ASC
                 LIMIT 20";
         
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute(['%' . $cedula . '%']);
+        $stmt->execute([$termLike]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 

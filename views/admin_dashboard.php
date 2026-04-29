@@ -287,6 +287,7 @@
                         <li>telefono de contacto</li>
                         <li>franja de cliente</li>
                         <li>canal de contacto</li>
+                        <li>tipo de contacto</li>
                         <li>resultado del contacto</li>
                         <li>razón especifica</li>
                         <li>fecha de pago</li>
@@ -321,6 +322,7 @@
                         <input class="form-input" type="file" id="archivo_bash" name="archivo_bash" accept=".csv" required>
                         <div class="help-text">
                             La base destino es la que eliges arriba. Solo se importan filas cuya <strong>cédula</strong> exista en esa base activa; el resto se registrará como error en el resumen.
+                            Si la columna de factura viene vacía o como “ninguna”, se usa la <strong>primera obligación</strong> del cliente en esa base.
                         </div>
                         <div class="help-text" style="margin-top: 12px;">
                             <a href="index.php?action=descargar_plantilla_bash" class="btn btn-primary" style="display: inline-block;">

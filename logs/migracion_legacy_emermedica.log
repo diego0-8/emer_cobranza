@@ -1,0 +1,141 @@
+[2026-04-17 16:54:23] ==== Inicio migración legacy ====
+[2026-04-17 16:54:23] Migrando usuarios...
+[2026-04-17 16:54:23] Migrando bases...
+[2026-04-17 16:54:23] Migrando asignaciones coordinador -> asesor...
+[2026-04-17 16:54:23] Migrando asignaciones base -> asesor...
+[2026-04-17 16:54:23] Migrando clientes...
+[2026-04-17 16:57:35] Migrando obligaciones...
+[2026-04-17 16:58:46] Recalculando totales de base_clientes...
+[2026-04-17 16:58:47] Migrando historial_gestion -> historial_gestiones/acuerdos...
+[2026-04-17 16:59:07] Ejecutando verificación...
+[2026-04-17 16:59:07] source_usuarios=20
+[2026-04-17 16:59:07] source_cargas=11
+[2026-04-17 16:59:07] source_clientes=81126
+[2026-04-17 16:59:07] source_facturas=159528
+[2026-04-17 16:59:07] source_historial=56381
+[2026-04-17 16:59:07] map_usuarios=20
+[2026-04-17 16:59:07] map_bases=11
+[2026-04-17 16:59:08] map_clientes=81126
+[2026-04-17 16:59:08] map_obligaciones=159527
+[2026-04-17 16:59:08] map_historial=56381
+[2026-04-17 16:59:08] target_acuerdos_from_map=2382
+[2026-04-17 16:59:08] historial_fallbacks=54588
+[2026-04-17 16:59:08] acuerdos_huerfanos=0
+[2026-04-17 16:59:08] Resumen de migración:
+[2026-04-17 16:59:08]   - users_inserted: 17
+[2026-04-17 16:59:08]   - users_updated: 3
+[2026-04-17 16:59:08]   - users_skipped_invalid_cedula: 0
+[2026-04-17 16:59:08]   - bases_inserted: 11
+[2026-04-17 16:59:08]   - bases_reused: 0
+[2026-04-17 16:59:08]   - coord_assignments_inserted: 15
+[2026-04-17 16:59:08]   - coord_assignments_updated: 1
+[2026-04-17 16:59:08]   - base_assignments_inserted: 55
+[2026-04-17 16:59:08]   - base_assignments_updated: 0
+[2026-04-17 16:59:08]   - clients_inserted: 81126
+[2026-04-17 16:59:08]   - clients_updated: 0
+[2026-04-17 16:59:08]   - clients_skipped: 0
+[2026-04-17 16:59:08]   - obligations_inserted: 146895
+[2026-04-17 16:59:08]   - obligations_updated: 12632
+[2026-04-17 16:59:08]   - obligations_skipped: 1
+[2026-04-17 16:59:08]   - histories_inserted: 56381
+[2026-04-17 16:59:08]   - histories_skipped: 0
+[2026-04-17 16:59:08]   - histories_fallback_obligation: 54588
+[2026-04-17 16:59:08]   - histories_missing_assignment: 0
+[2026-04-17 16:59:08]   - histories_missing_advisor: 0
+[2026-04-17 16:59:08]   - histories_missing_client: 0
+[2026-04-17 16:59:08]   - histories_missing_obligation: 0
+[2026-04-17 16:59:08]   - agreements_inserted: 2382
+[2026-04-17 17:04:51] ==== Inicio migración legacy ====
+[2026-04-17 17:04:51] Migrando usuarios...
+[2026-04-17 17:04:51] Migrando bases...
+[2026-04-17 17:04:51] Migrando asignaciones coordinador -> asesor...
+[2026-04-17 17:04:51] Migrando asignaciones base -> asesor...
+[2026-04-17 17:04:51] Migrando clientes...
+[2026-04-17 17:08:20] Migrando obligaciones...
+[2026-04-17 17:09:40] Recalculando totales de base_clientes...
+[2026-04-17 17:09:40] Migrando historial_gestion -> historial_gestiones/acuerdos...
+[2026-04-17 17:10:02] Ejecutando verificación...
+[2026-04-17 17:10:02] source_usuarios=20
+[2026-04-17 17:10:02] source_cargas=11
+[2026-04-17 17:10:02] source_clientes=81126
+[2026-04-17 17:10:02] source_facturas=159528
+[2026-04-17 17:10:02] source_historial=56381
+[2026-04-17 17:10:02] map_usuarios=20
+[2026-04-17 17:10:02] map_bases=11
+[2026-04-17 17:10:03] map_clientes=81126
+[2026-04-17 17:10:03] map_obligaciones=159528
+[2026-04-17 17:10:03] map_historial=56381
+[2026-04-17 17:10:03] target_acuerdos_from_map=2382
+[2026-04-17 17:10:03] historial_fallbacks=54588
+[2026-04-17 17:10:03] acuerdos_huerfanos=0
+[2026-04-17 17:10:03] Resumen de migración:
+[2026-04-17 17:10:03]   - users_inserted: 17
+[2026-04-17 17:10:03]   - users_updated: 3
+[2026-04-17 17:10:03]   - users_skipped_invalid_cedula: 0
+[2026-04-17 17:10:03]   - bases_inserted: 11
+[2026-04-17 17:10:03]   - bases_reused: 0
+[2026-04-17 17:10:03]   - coord_assignments_inserted: 15
+[2026-04-17 17:10:03]   - coord_assignments_updated: 1
+[2026-04-17 17:10:03]   - base_assignments_inserted: 55
+[2026-04-17 17:10:03]   - base_assignments_updated: 0
+[2026-04-17 17:10:03]   - clients_inserted: 81126
+[2026-04-17 17:10:03]   - clients_updated: 0
+[2026-04-17 17:10:03]   - clients_skipped: 0
+[2026-04-17 17:10:03]   - obligations_inserted: 146895
+[2026-04-17 17:10:03]   - obligations_updated: 12633
+[2026-04-17 17:10:03]   - obligations_skipped: 0
+[2026-04-17 17:10:03]   - histories_inserted: 56381
+[2026-04-17 17:10:03]   - histories_skipped: 0
+[2026-04-17 17:10:03]   - histories_fallback_obligation: 54588
+[2026-04-17 17:10:03]   - histories_missing_assignment: 0
+[2026-04-17 17:10:03]   - histories_missing_advisor: 0
+[2026-04-17 17:10:03]   - histories_missing_client: 0
+[2026-04-17 17:10:03]   - histories_missing_obligation: 0
+[2026-04-17 17:10:03]   - agreements_inserted: 2382
+[2026-04-21 09:07:05] ==== Inicio migración legacy ====
+[2026-04-21 09:07:06] Migrando usuarios...
+[2026-04-21 09:07:06] Migrando bases...
+[2026-04-21 09:07:06] Migrando asignaciones coordinador -> asesor...
+[2026-04-21 09:07:06] Migrando asignaciones base -> asesor...
+[2026-04-21 09:07:06] Migrando clientes...
+[2026-04-21 09:10:49] Migrando obligaciones...
+[2026-04-21 09:12:00] Recalculando totales de base_clientes...
+[2026-04-21 09:12:01] Migrando historial_gestion -> historial_gestiones/acuerdos...
+[2026-04-21 09:12:28] Ejecutando verificación...
+[2026-04-21 09:12:28] source_usuarios=20
+[2026-04-21 09:12:28] source_cargas=11
+[2026-04-21 09:12:28] source_clientes=81126
+[2026-04-21 09:12:28] source_facturas=159528
+[2026-04-21 09:12:28] source_historial=56381
+[2026-04-21 09:12:28] map_usuarios=20
+[2026-04-21 09:12:28] map_bases=11
+[2026-04-21 09:12:28] map_clientes=81126
+[2026-04-21 09:12:28] map_obligaciones=159528
+[2026-04-21 09:12:28] map_historial=56381
+[2026-04-21 09:12:28] target_acuerdos_from_map=2382
+[2026-04-21 09:12:28] historial_fallbacks=54588
+[2026-04-21 09:12:28] acuerdos_huerfanos=0
+[2026-04-21 09:12:28] Resumen de migración:
+[2026-04-21 09:12:28]   - users_inserted: 17
+[2026-04-21 09:12:28]   - users_updated: 3
+[2026-04-21 09:12:28]   - users_skipped_invalid_cedula: 0
+[2026-04-21 09:12:28]   - bases_inserted: 11
+[2026-04-21 09:12:28]   - bases_reused: 0
+[2026-04-21 09:12:28]   - coord_assignments_inserted: 15
+[2026-04-21 09:12:28]   - coord_assignments_updated: 1
+[2026-04-21 09:12:28]   - base_assignments_inserted: 55
+[2026-04-21 09:12:28]   - base_assignments_updated: 0
+[2026-04-21 09:12:28]   - clients_inserted: 81126
+[2026-04-21 09:12:28]   - clients_updated: 0
+[2026-04-21 09:12:28]   - clients_skipped: 0
+[2026-04-21 09:12:28]   - obligations_inserted: 146895
+[2026-04-21 09:12:28]   - obligations_updated: 12633
+[2026-04-21 09:12:28]   - obligations_skipped: 0
+[2026-04-21 09:12:28]   - histories_inserted: 56381
+[2026-04-21 09:12:28]   - histories_skipped: 0
+[2026-04-21 09:12:28]   - histories_fallback_obligation: 54588
+[2026-04-21 09:12:28]   - histories_missing_assignment: 0
+[2026-04-21 09:12:28]   - histories_missing_advisor: 0
+[2026-04-21 09:12:28]   - histories_missing_client: 0
+[2026-04-21 09:12:28]   - histories_missing_obligation: 0
+[2026-04-21 09:12:28]   - agreements_inserted: 2382

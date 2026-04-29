@@ -25,7 +25,7 @@
     margin-bottom: 25px;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
     border: 1px solid #e2e8f0;
-}
+    }
         
         .cliente-header {
             display: flex;
@@ -2429,6 +2429,34 @@
                         <!-- Primer dropdown: Tipo de contacto -->
                         <div class="form-group">
                             <label for="tipo_contacto" class="form-label">Tipo de Contacto:</label>
+                            <script>
+// #region debug d200d9 tipificaciones bootstrap (pre-onchange)
+(function(){
+  try{
+    // Captura de errores JS que impiden definir funciones más abajo.
+    window.addEventListener('error', function (ev) {
+      fetch('http://127.0.0.1:7559/ingest/0bcc0192-fe61-4fb0-b109-b4792228bcf7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b7eaa7'},body:JSON.stringify({sessionId:'b7eaa7',runId:'pre',hypothesisId:'TIPBOOT1',location:'views/gestionar_cliente.php:pre-onchange:window.error',message:'error',data:{msg:String(ev.message||''),file:String(ev.filename||''),line:Number(ev.lineno||0),col:Number(ev.colno||0)},timestamp:Date.now()})}).catch(()=>{});
+    }, { once: true });
+    window.addEventListener('unhandledrejection', function (ev) {
+      fetch('http://127.0.0.1:7559/ingest/0bcc0192-fe61-4fb0-b109-b4792228bcf7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b7eaa7'},body:JSON.stringify({sessionId:'b7eaa7',runId:'pre',hypothesisId:'TIPBOOT1',location:'views/gestionar_cliente.php:pre-onchange:unhandledrejection',message:'rejection',data:{reason:String((ev&&ev.reason&&ev.reason.message)?ev.reason.message:(ev&&ev.reason)||'')},timestamp:Date.now()})}).catch(()=>{});
+    }, { once: true });
+
+    // Stub global para evitar ReferenceError desde el onchange inline.
+    if (typeof window.mostrarTipificacionesEspecificas !== 'function') {
+      window.mostrarTipificacionesEspecificas = function(tipo){
+        fetch('http://127.0.0.1:7559/ingest/0bcc0192-fe61-4fb0-b109-b4792228bcf7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b7eaa7'},body:JSON.stringify({sessionId:'b7eaa7',runId:'pre',hypothesisId:'TIPBOOT2',location:'views/gestionar_cliente.php:pre-onchange:stub',message:'called',data:{tipo:String(tipo||'')},timestamp:Date.now()})}).catch(()=>{});
+        // Si el script real cargó después, delegar.
+        if (typeof window.__realMostrarTipificacionesEspecificas === 'function') {
+          try { return window.__realMostrarTipificacionesEspecificas(tipo); } catch(e){}
+        }
+      };
+    }
+
+    fetch('http://127.0.0.1:7559/ingest/0bcc0192-fe61-4fb0-b109-b4792228bcf7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b7eaa7'},body:JSON.stringify({sessionId:'b7eaa7',runId:'pre',hypothesisId:'TIPBOOT0',location:'views/gestionar_cliente.php:pre-onchange',message:'boot',data:{hasFn:typeof window.mostrarTipificacionesEspecificas==='function'},timestamp:Date.now()})}).catch(()=>{});
+  }catch(e){}
+})();
+// #endregion
+                            </script>
                             <select name="tipo_contacto" id="tipo_contacto" class="form-select" onchange="mostrarTipificacionesEspecificas(this.value)" required>
                                 <option value="">Selecciona una opción</option>
                                 <option value="contacto_exitoso">CONTACTO EXITOSO</option>
@@ -2830,7 +2858,13 @@
                  <div class="historial-header">
                      <div class="historial-fecha">
                          <i class="fas fa-calendar-alt"></i>
-                         <?php echo date('d/m/Y H:i', strtotime($gestion['fecha_gestion'])); ?>
+                        <?php echo date('d/m/Y H:i', strtotime($gestion['fecha_gestion'])); ?>
+                        <?php if (!empty($gestion['nombre_base'])): ?>
+                            <span style="margin-left: 10px; color: #6b7280;">
+                                <i class="fas fa-database"></i>
+                                <?php echo htmlspecialchars($gestion['nombre_base']); ?>
+                            </span>
+                        <?php endif; ?>
                      </div>
                  </div>
                  
@@ -2881,7 +2915,7 @@
                              </div>
                              <div class="historial-field-value tipificacion">
                                 <?php
-                                $codTipoContacto = $gestion['tipo_contacto_arbol_codigo'] ?? null;
+                                $codTipoContacto = $gestion['tipo_contacto_arbol_codigo'] ?? ($gestion['tipo_contacto'] ?? ($gestion['tipo_gestion'] ?? null));
                                 $tipoContactoMap = [
                                     'contacto_exitoso' => '✅ CONTACTO EXITOSO',
                                     'contacto_tercero' => '👥 CONTACTO CON TERCERO',
@@ -2903,7 +2937,7 @@
                              </div>
                             <div class="historial-field-value tipificacion">
                                 <?php 
-                                $tipificacionGeneral = $gestion['resultado_contacto_codigo'] ?? '';
+                                $tipificacionGeneral = $gestion['resultado_contacto_codigo'] ?? ($gestion['resultado_contacto'] ?? '');
                                 if ($tipificacionGeneral === '' && !empty($gestion['tipo_gestion']) && strpos((string) $gestion['tipo_gestion'], '|') === false) {
                                     $tipificacionGeneral = (string) $gestion['tipo_gestion'];
                                 }
@@ -2960,7 +2994,7 @@
                              </div>
                             <div class="historial-field-value razon-especifica">
                                 <?php 
-                                $razonEspecifica = $gestion['resultado'] ?? '';
+                                $razonEspecifica = $gestion['razon_especifica'] ?? ($gestion['razon_especifica_codigo'] ?? ($gestion['resultado'] ?? ''));
                                 if ($razonEspecifica === '') {
                                     $razonEspecifica = 'No especificada';
                                 }
@@ -3062,18 +3096,6 @@
                                          <span style="color: #6c757d; font-size: 0.9em; font-family: 'Courier New', monospace;">- $<?php echo number_format($gestion['monto_obligacion'], 0, ',', '.'); ?> COP</span>
                                      <?php endif; ?>
                                  <?php endif; ?>
-                             </div>
-                         </div>
-                         <?php endif; ?>
-                         
-                         <!-- Base de Datos -->
-                         <?php if (!empty($gestion['nombre_base'])): ?>
-                         <div class="historial-field">
-                             <div class="historial-field-label">
-                                 <i class="fas fa-database"></i> Base de Datos
-                             </div>
-                             <div class="historial-field-value" style="border-left-color: #9b59b6;">
-                                 <?php echo htmlspecialchars($gestion['nombre_base']); ?>
                              </div>
                          </div>
                          <?php endif; ?>
@@ -3183,6 +3205,38 @@
     <script>
         let tipificacionSeleccionada = null;
         let subTipificacionSeleccionada = null;
+
+        // #region debug d200d9 tipificaciones (vista)
+        function dbglog_tip(location, message, data, hypothesisId, runId) {
+            try {
+                fetch('index.php?action=client_debug_log', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        runId: runId || 'pre-fix',
+                        hypothesisId: hypothesisId || 'TIPV0',
+                        location: location,
+                        message: message,
+                        data: data || {},
+                        timestamp: Date.now()
+                    })
+                }).catch(function(){});
+            } catch (e) {}
+        }
+        window.addEventListener('error', function (ev) {
+            dbglog_tip('views/gestionar_cliente.php:window.error', 'error', {
+                msg: String(ev.message || ''),
+                file: String(ev.filename || ''),
+                line: Number(ev.lineno || 0),
+                col: Number(ev.colno || 0),
+            }, 'TIPV1');
+        });
+        window.addEventListener('unhandledrejection', function (ev) {
+            dbglog_tip('views/gestionar_cliente.php:window.unhandledrejection', 'promise_rejection', {
+                reason: String((ev && ev.reason && ev.reason.message) ? ev.reason.message : (ev && ev.reason) || ''),
+            }, 'TIPV1');
+        });
+        // #endregion
         
         // Mapeo centralizado de canales para evitar duplicación
         const CANALES_MAP = {
@@ -3348,12 +3402,27 @@
             // Resaltar información importante del cliente
             resaltarInformacionCliente();
             
+            dbglog_tip('views/gestionar_cliente.php:DOMContentLoaded', 'boot', {
+                hasTipoContacto: !!document.getElementById('tipo_contacto'),
+                hasOpcionesExitoso: !!document.getElementById('opciones_contacto_exitoso'),
+                hasOpcionesTercero: !!document.getElementById('opciones_contacto_tercero'),
+                hasOpcionesSin: !!document.getElementById('opciones_sin_contacto'),
+                hasTipifHidden: !!document.getElementById('tipificacion_principal'),
+                hasSubHidden: !!document.getElementById('sub_tipificacion_hidden')
+            }, 'TIPV2');
+
             console.log('Sistema de gestión de cliente inicializado correctamente');
          });
 
         // Función para mostrar tipificaciones específicas según el tipo de contacto
         function mostrarTipificacionesEspecificas(tipo) {
             console.log('mostrarTipificacionesEspecificas llamado con:', tipo);
+            dbglog_tip('views/gestionar_cliente.php:mostrarTipificacionesEspecificas', 'enter', {
+                tipo: String(tipo || ''),
+                hasOpcionesExitoso: !!document.getElementById('opciones_contacto_exitoso'),
+                hasOpcionesTercero: !!document.getElementById('opciones_contacto_tercero'),
+                hasOpcionesSin: !!document.getElementById('opciones_sin_contacto'),
+            }, 'TIPV3');
             
             // Ocultar todas las secciones
             const opcionesContactoExitoso = document.getElementById('opciones_contacto_exitoso');
@@ -3404,7 +3473,40 @@
             // Actualizar la tipificación principal
             tipificacionSeleccionada = tipo;
             document.getElementById('tipificacion_principal').value = tipo;
+
+            // Log de estado final de visibilidad
+            const ex = document.getElementById('opciones_contacto_exitoso');
+            const te = document.getElementById('opciones_contacto_tercero');
+            const si = document.getElementById('opciones_sin_contacto');
+            dbglog_tip('views/gestionar_cliente.php:mostrarTipificacionesEspecificas', 'after', {
+                tipo: String(tipo || ''),
+                displayExitoso: ex ? (getComputedStyle(ex).display + '|' + ex.style.display) : null,
+                displayTercero: te ? (getComputedStyle(te).display + '|' + te.style.display) : null,
+                displaySin: si ? (getComputedStyle(si).display + '|' + si.style.display) : null,
+            }, 'TIPV3');
         }
+
+        // Exponer implementación real para que el stub pueda delegar.
+        window.__realMostrarTipificacionesEspecificas = mostrarTipificacionesEspecificas;
+        window.mostrarTipificacionesEspecificas = mostrarTipificacionesEspecificas;
+
+        // Asegurar funciones globales para handlers inline (onchange="...")
+        window.mostrarTipificacionesEspecificas = mostrarTipificacionesEspecificas;
+        window.seleccionarSubOpcion = seleccionarSubOpcion;
+        window.seleccionarOpcionContactoExitoso = seleccionarOpcionContactoExitoso;
+        window.seleccionarOpcionContactoTercero = seleccionarOpcionContactoTercero;
+        window.seleccionarOpcionSinContacto = seleccionarOpcionSinContacto;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const tipoContactoEl = document.getElementById('tipo_contacto');
+            if (tipoContactoEl) {
+                tipoContactoEl.addEventListener('change', function() {
+                    dbglog_tip('views/gestionar_cliente.php:tipo_contacto.change', 'change', {
+                        value: String(tipoContactoEl.value || '')
+                    }, 'TIPV5');
+                });
+            }
+        });
 
         // Función para ir al siguiente cliente
         // Ahora siempre recarga la página
@@ -3713,6 +3815,28 @@
 
         let tieneTareasPendientes = <?php echo json_encode($tieneTareasPendientes ?? false); ?>;
 
+        // #region agent log b7eaa7 gestionar_cliente.js bootstrap
+        try {
+            fetch('http://127.0.0.1:7559/ingest/0bcc0192-fe61-4fb0-b109-b4792228bcf7', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'b7eaa7' },
+                body: JSON.stringify({
+                    sessionId: 'b7eaa7',
+                    runId: 'pre',
+                    hypothesisId: 'NX7',
+                    location: 'views/gestionar_cliente.php:bootstrap',
+                    message: 'page_vars',
+                    data: {
+                        tieneTareasPendientes: !!tieneTareasPendientes,
+                        hasBtnNav: !!document.getElementById('btnNavegacion'),
+                        hasBtnNext: !!document.getElementById('btnSiguienteCliente'),
+                    },
+                    timestamp: Date.now()
+                })
+            }).catch(() => {});
+        } catch (e) {}
+        // #endregion
+
         // Inicializar gestión de facturas
         function inicializarGestionFacturas() {
             // Inicializar array de facturas disponibles (vacío por defecto)
@@ -4016,37 +4140,32 @@
             if (valor === 'acuerdo_pago') {
                 // Obtener la fecha actual para establecer como mínimo
                 const hoy = new Date().toISOString().split('T')[0];
-                
-                camposAdicionales.innerHTML = `
-                    <div class="form-group">
-                        <label for="fecha_acuerdo" class="form-label">Fecha de Pago:</label>
-                        <input type="date" name="fecha_acuerdo" id="fecha_acuerdo" class="form-control" 
-                               min="${hoy}" required>
-                        <small class="form-help">Solo se permiten fechas futuras (hoy o posteriores)</small>
-                    </div>
-                    <div class="form-group">
-                        <label for="monto_acuerdo" class="form-label">Monto del Acuerdo:</label>
-                        <div class="input-group">
-                            <span class="input-prefix" style="background-color: #e9ecef; border: 1px solid #ced4da; padding: 8px 12px; font-weight: bold; color: #495057;">$</span>
-                            <input type="text" name="monto_acuerdo" id="monto_acuerdo" class="form-control" 
-                                   placeholder="Ej: 150.000" required oninput="formatearPesos(this)"
-                                   style="font-family: 'Courier New', monospace; font-weight: bold; text-align: right;">
-                        </div>
-                        <small class="form-help">Ingresa el monto total adeudado o una cuota específica (en pesos colombianos)</small>
-                    </div>
-                `;
+
+                camposAdicionales.innerHTML =
+                    '<div class="form-group">' +
+                        '<label for="fecha_acuerdo" class="form-label">Fecha de Pago:</label>' +
+                        '<input type="date" name="fecha_acuerdo" id="fecha_acuerdo" class="form-control" min="' + hoy + '" required>' +
+                        '<small class="form-help">Solo se permiten fechas futuras (hoy o posteriores)</small>' +
+                    '</div>' +
+                    '<div class="form-group">' +
+                        '<label for="monto_acuerdo" class="form-label">Monto del Acuerdo:</label>' +
+                        '<div class="input-group">' +
+                            '<span class="input-prefix" style="background-color: #e9ecef; border: 1px solid #ced4da; padding: 8px 12px; font-weight: bold; color: #495057;">$</span>' +
+                            '<input type="text" name="monto_acuerdo" id="monto_acuerdo" class="form-control" placeholder="Ej: 150.000" required oninput="formatearPesos(this)" style="font-family: \'Courier New\', monospace; font-weight: bold; text-align: right;">' +
+                        '</div>' +
+                        '<small class="form-help">Ingresa el monto total adeudado o una cuota específica (en pesos colombianos)</small>' +
+                    '</div>';
                 camposAdicionales.style.display = 'block';
             } else if (valor === 'volver_llamar') {
-                camposAdicionales.innerHTML = `
-                    <div class="form-group">
-                        <label for="fecha_nueva_llamada" class="form-label">Fecha para Nueva Llamada:</label>
-                        <input type="date" name="fecha_nueva_llamada" id="fecha_nueva_llamada" class="form-control" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="motivo_nueva_llamada" class="form-label">Motivo:</label>
-                        <input type="text" name="motivo_nueva_llamada" id="motivo_nueva_llamada" class="form-control" required>
-                    </div>
-                `;
+                camposAdicionales.innerHTML =
+                    '<div class="form-group">' +
+                        '<label for="fecha_nueva_llamada" class="form-label">Fecha para Nueva Llamada:</label>' +
+                        '<input type="date" name="fecha_nueva_llamada" id="fecha_nueva_llamada" class="form-control" required>' +
+                    '</div>' +
+                    '<div class="form-group">' +
+                        '<label for="motivo_nueva_llamada" class="form-label">Motivo:</label>' +
+                        '<input type="text" name="motivo_nueva_llamada" id="motivo_nueva_llamada" class="form-control" required>' +
+                    '</div>';
                 camposAdicionales.style.display = 'block';
             }
             
@@ -4134,6 +4253,11 @@
         
         // Función para manejar la selección de sub-opciones (tercer nivel)
         function seleccionarSubOpcion(valor) {
+            dbglog_tip('views/gestionar_cliente.php:seleccionarSubOpcion', 'enter', {
+                valor: String(valor || ''),
+                hasSubHidden: !!document.getElementById('sub_tipificacion_hidden'),
+                opcionContactoExitoso: (document.getElementById('opcion_contacto_exitoso') || {}).value || null
+            }, 'TIPV4');
             // Actualizar la sub-tipificación con el valor específico seleccionado
             document.getElementById('sub_tipificacion_hidden').value = valor;
             

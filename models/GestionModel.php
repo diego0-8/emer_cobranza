@@ -1,2230 +1,1937 @@
-<?php 
+<?php
+/**
+ * Modelo de gestiones adaptado al dump `emermedica_cobranza.sql`.
+ *
+ * Tablas relevantes:
+ * - `historial_gestiones`
+ * - `acuerdos`
+ * - `obligaciones`
+ * - `clientes`
+ * - `base_clientes`
+ * - `usuarios`
+ */
 class GestionModel {
     private $pdo;
+    private ?bool $hasNormCols = null;
 
     public function __construct($pdo) {
         $this->pdo = $pdo;
     }
 
-    /**
-     * Códigos de 2.º nivel (resultado del contacto) cuando el 1.º es CONTACTO EXITOSO.
-     */
-    private function getCodigosResultadoContactoExitoso() {
-        return ['acuerdo_pago', 'ya_pago', 'localizado_sin_acuerdo', 'reclamo', 'volver_llamar', 'recordar_pago', 'venta_novedad'];
+    private function hasNormColumns(): bool {
+        if ($this->hasNormCols !== null) return $this->hasNormCols;
+        try {
+            $stmt = $this->pdo->prepare("
+                SELECT COUNT(*) AS c
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'historial_gestiones'
+                  AND COLUMN_NAME IN ('tipo_contacto_norm','resultado_contacto_norm','forma_contacto_norm','razon_especifica_norm')
+            ");
+            $stmt->execute();
+            $c = (int)($stmt->fetch(PDO::FETCH_ASSOC)['c'] ?? 0);
+            $this->hasNormCols = ($c >= 4);
+        } catch (Throwable $e) {
+            $this->hasNormCols = false;
+        }
+        return $this->hasNormCols;
     }
 
-    /**
-     * Códigos de 2.º nivel cuando el 1.º es CONTACTO CON TERCERO.
-     */
-    private function getCodigosResultadoContactoTercero() {
-        return ['aqui_no_vive', 'mensaje_tercero', 'fallecido_otro'];
+    private function norm(string $v): string {
+        $v = trim($v);
+        if ($v === '') return '';
+        $v = mb_strtolower($v, 'UTF-8');
+        $v = str_replace([' ', '-', '/'], '_', $v);
+        $v = preg_replace('/_+/', '_', $v);
+        return trim($v, '_');
     }
 
-    /**
-     * Códigos de 2.º nivel cuando el 1.º es SIN CONTACTO.
-     */
-    private function getCodigosResultadoSinContacto() {
-        return ['no_contesta', 'buzon_mensajes', 'telefono_danado', 'fallecido_otro', 'localizacion', 'envio_estado_cuenta', 'venta_novedad_analisis'];
+    private function rangoFechasPeriodo($periodo): array {
+        $periodo = strtolower(trim((string)$periodo));
+        $hoy = new DateTime('today');
+
+        if (in_array($periodo, ['dia', 'hoy'], true)) {
+            $inicio = (clone $hoy)->format('Y-m-d 00:00:00');
+            $fin = (clone $hoy)->format('Y-m-d 23:59:59');
+            return [$inicio, $fin];
+        }
+
+        if (in_array($periodo, ['semana', '7dias', '7_dias'], true)) {
+            $inicioDt = (clone $hoy)->modify('-6 days');
+            $inicio = $inicioDt->format('Y-m-d 00:00:00');
+            $fin = (clone $hoy)->format('Y-m-d 23:59:59');
+            return [$inicio, $fin];
+        }
+
+        if (in_array($periodo, ['mes', 'mensual'], true)) {
+            $inicioDt = new DateTime(date('Y-m-01 00:00:00'));
+            $finDt = new DateTime(date('Y-m-t 23:59:59'));
+            return [$inicioDt->format('Y-m-d H:i:s'), $finDt->format('Y-m-d H:i:s')];
+        }
+
+        // Default: día
+        $inicio = (clone $hoy)->format('Y-m-d 00:00:00');
+        $fin = (clone $hoy)->format('Y-m-d 23:59:59');
+        return [$inicio, $fin];
     }
 
-    /**
-     * Descompone tipo_gestion almacenado: "nivel1|nivel2" o solo nivel2 (legacy).
-     *
-     * @return array{nivel1: ?string, nivel2: string}
-     */
-    private function descomponerTipoGestionAlmacenado($raw) {
-        $raw = trim((string) $raw);
-        if ($raw === '') {
-            return ['nivel1' => null, 'nivel2' => ''];
+    private function limpiarObservacionesLegacy($texto) {
+        $texto = (string)$texto;
+        if ($texto === '') return $texto;
+
+        $lineas = preg_split("/\\r\\n|\\r|\\n/", $texto);
+        if (!is_array($lineas)) return $texto;
+
+        $filtradas = [];
+        foreach ($lineas as $linea) {
+            $trim = ltrim((string)$linea);
+            if ($trim === '') {
+                $filtradas[] = $linea;
+                continue;
+            }
+            // Ocultar metadatos del migrador: "legacy_xxx: valor"
+            if (stripos($trim, 'legacy_') === 0) {
+                continue;
+            }
+            $filtradas[] = $linea;
         }
-        if (preg_match('/^(contacto_exitoso|contacto_tercero|sin_contacto)\|(.+)$/u', $raw, $m)) {
-            return ['nivel1' => $m[1], 'nivel2' => $m[2]];
+
+        // Limpiar líneas vacías repetidas al final
+        while (!empty($filtradas) && trim((string)end($filtradas)) === '') {
+            array_pop($filtradas);
         }
-        if (in_array($raw, ['contacto_exitoso', 'contacto_tercero', 'sin_contacto'], true)) {
-            return ['nivel1' => $raw, 'nivel2' => ''];
-        }
-        return ['nivel1' => $this->inferirNivel1DesdeCodigoResultado($raw), 'nivel2' => $raw];
+
+        return implode("\n", $filtradas);
     }
 
-    /**
-     * Infiere el 1.er nivel del árbol a partir del código de 2.º nivel (registros sin prefijo).
-     */
-    private function inferirNivel1DesdeCodigoResultado($codigo) {
-        $c = trim((string) $codigo);
-        if ($c === '') {
-            return null;
+    public function crearGestion($data) {
+        $asesorCedula = (string)($data['asesor_cedula'] ?? ($data['asesor_id'] ?? ''));
+        $clienteId = (int)($data['cliente_id'] ?? 0);
+        $obligacionId = (int)($data['obligacion_id'] ?? 0);
+        $tipoContacto = trim((string)($data['tipo_contacto'] ?? ($data['tipo_contacto_arbol'] ?? '')));
+        $resultadoContacto = trim((string)($data['resultado_contacto'] ?? ($data['resultado'] ?? '')));
+        $razonEspecifica = trim((string)($data['razon_especifica'] ?? ''));
+        $formaContacto = trim((string)($data['forma_contacto'] ?? ''));
+        $telefonoContacto = trim((string)($data['telefono_contacto'] ?? ''));
+        $fechaCreacion = trim((string)($data['fecha_creacion'] ?? ($data['fecha_gestion'] ?? '')));
+
+        // Compatibilidad con payload legacy: `tipo_gestion = nivel1|nivel2`
+        if ($tipoContacto === '' && !empty($data['tipo_gestion'])) {
+            $legacyTipo = (string)$data['tipo_gestion'];
+            if (strpos($legacyTipo, '|') !== false) {
+                [$nivel1, $nivel2] = array_pad(explode('|', $legacyTipo, 2), 2, '');
+                $tipoContacto = trim($nivel1);
+                if ($resultadoContacto === '') $resultadoContacto = trim($nivel2);
+            } else {
+                $tipoContacto = $legacyTipo;
+            }
         }
-        if (in_array($c, $this->getCodigosResultadoContactoExitoso(), true)) {
-            return 'contacto_exitoso';
+
+        if ($clienteId === 0 && !empty($data['cedula_cliente']) && !empty($data['base_id'])) {
+            $stmt = $this->pdo->prepare("SELECT id_cliente FROM clientes WHERE cedula = ? AND base_id = ? LIMIT 1");
+            $stmt->execute([(string)$data['cedula_cliente'], (int)$data['base_id']]);
+            $clienteId = (int)($stmt->fetch(PDO::FETCH_ASSOC)['id_cliente'] ?? 0);
         }
-        if (in_array($c, $this->getCodigosResultadoContactoTercero(), true)) {
-            return 'contacto_tercero';
+
+        if ($obligacionId === 0 && !empty($data['numero_obligacion']) && $clienteId) {
+            $stmt = $this->pdo->prepare("SELECT id_obligacion FROM obligaciones WHERE numero_factura = ? AND cliente_id = ? LIMIT 1");
+            $stmt->execute([(string)$data['numero_obligacion'], $clienteId]);
+            $obligacionId = (int)($stmt->fetch(PDO::FETCH_ASSOC)['id_obligacion'] ?? 0);
         }
-        if (in_array($c, $this->getCodigosResultadoSinContacto(), true)) {
-            return 'sin_contacto';
+
+        if ($asesorCedula === '' || $clienteId <= 0 || $obligacionId <= 0) {
+            throw new Exception('No fue posible crear la gestión: faltan asesor/cliente/obligación.');
         }
-        return null;
+
+        if ($tipoContacto === '' || $resultadoContacto === '') {
+            throw new Exception('No fue posible crear la gestión: faltan tipo_contacto/resultado_contacto.');
+        }
+
+        if ($razonEspecifica === '') {
+            $razonEspecifica = '-';
+        }
+
+        $telefonoContacto = trim($telefonoContacto);
+        if ($telefonoContacto === '') {
+            $telefonoContacto = '0000000000';
+        }
+        if (strlen($telefonoContacto) > 10) {
+            $telefonoContacto = substr($telefonoContacto, -10);
+        }
+
+        $formaContacto = trim($formaContacto);
+        if ($formaContacto === '') {
+            $formaContacto = 'llamada';
+        }
+        if (strlen($formaContacto) > 10) {
+            $formaContacto = substr($formaContacto, 0, 10);
+        }
+
+        $trunc100 = function ($s) {
+            if (function_exists('mb_substr')) {
+                return mb_substr($s, 0, 100, 'UTF-8');
+            }
+            return substr($s, 0, 100);
+        };
+        $tipoContacto = $trunc100($tipoContacto);
+        $resultadoContacto = $trunc100($resultadoContacto);
+        $razonEspecifica = $trunc100($razonEspecifica);
+
+        // Validar/normalizar fecha (si se envía). Si es inválida, dejar que la BD use CURRENT_TIMESTAMP.
+        if ($fechaCreacion !== '') {
+            $ts = strtotime($fechaCreacion);
+            if ($ts === false) {
+                $fechaCreacion = '';
+            } else {
+                $fechaCreacion = date('Y-m-d H:i:s', $ts);
+            }
+        }
+
+        $ownTransaction = !$this->pdo->inTransaction();
+        if ($ownTransaction) {
+            $this->pdo->beginTransaction();
+        }
+        try {
+            if ($fechaCreacion !== '') {
+                if ($this->hasNormColumns()) {
+                    $stmt = $this->pdo->prepare("
+                        INSERT INTO historial_gestiones (
+                            asesor_cedula, cliente_id, obligacion_id,
+                            telefono_contacto, forma_contacto, tipo_contacto,
+                            resultado_contacto, razon_especifica, observaciones,
+                            forma_contacto_norm, tipo_contacto_norm, resultado_contacto_norm, razon_especifica_norm,
+                            llamada_telefonica, email, sms, correo_fisico, whatsap,
+                            fecha_creacion, duracion_segundos
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'no', 'no', 'no', 'no', 'no', ?, ?)
+                    ");
+                } else {
+                    $stmt = $this->pdo->prepare("
+                        INSERT INTO historial_gestiones (
+                            asesor_cedula, cliente_id, obligacion_id,
+                            telefono_contacto, forma_contacto, tipo_contacto,
+                            resultado_contacto, razon_especifica, observaciones,
+                            llamada_telefonica, email, sms, correo_fisico, whatsap,
+                            fecha_creacion, duracion_segundos
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'no', 'no', 'no', 'no', 'no', ?, ?)
+                    ");
+                }
+
+                $params = [
+                    $asesorCedula,
+                    $clienteId,
+                    $obligacionId,
+                    $telefonoContacto,
+                    $formaContacto,
+                    $tipoContacto,
+                    $resultadoContacto,
+                    $razonEspecifica,
+                    (string)($data['comentarios'] ?? ($data['observaciones'] ?? '')),
+                ];
+                if ($this->hasNormColumns()) {
+                    $params[] = $this->norm($formaContacto);
+                    $params[] = $this->norm($tipoContacto);
+                    $params[] = $this->norm($resultadoContacto);
+                    $params[] = $this->norm($razonEspecifica);
+                }
+                $params[] = $fechaCreacion;
+                $params[] = (int)($data['duracion_llamada'] ?? ($data['duracion_segundos'] ?? 0));
+                $stmt->execute($params);
+            } else {
+                if ($this->hasNormColumns()) {
+                    $stmt = $this->pdo->prepare("
+                        INSERT INTO historial_gestiones (
+                            asesor_cedula, cliente_id, obligacion_id,
+                            telefono_contacto, forma_contacto, tipo_contacto,
+                            resultado_contacto, razon_especifica, observaciones,
+                            forma_contacto_norm, tipo_contacto_norm, resultado_contacto_norm, razon_especifica_norm,
+                            llamada_telefonica, email, sms, correo_fisico, whatsap,
+                            duracion_segundos
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'no', 'no', 'no', 'no', 'no', ?)
+                    ");
+                } else {
+                    $stmt = $this->pdo->prepare("
+                        INSERT INTO historial_gestiones (
+                            asesor_cedula, cliente_id, obligacion_id,
+                            telefono_contacto, forma_contacto, tipo_contacto,
+                            resultado_contacto, razon_especifica, observaciones,
+                            llamada_telefonica, email, sms, correo_fisico, whatsap,
+                            duracion_segundos
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'no', 'no', 'no', 'no', 'no', ?)
+                    ");
+                }
+
+                $params = [
+                    $asesorCedula,
+                    $clienteId,
+                    $obligacionId,
+                    $telefonoContacto,
+                    $formaContacto,
+                    $tipoContacto,
+                    $resultadoContacto,
+                    $razonEspecifica,
+                    (string)($data['comentarios'] ?? ($data['observaciones'] ?? '')),
+                ];
+                if ($this->hasNormColumns()) {
+                    $params[] = $this->norm($formaContacto);
+                    $params[] = $this->norm($tipoContacto);
+                    $params[] = $this->norm($resultadoContacto);
+                    $params[] = $this->norm($razonEspecifica);
+                }
+                $params[] = (int)($data['duracion_llamada'] ?? ($data['duracion_segundos'] ?? 0));
+                $stmt->execute($params);
+            }
+
+            $gestionId = (int)$this->pdo->lastInsertId();
+
+            // Marcar cliente como gestionado dentro de cualquier tarea activa del asesor.
+            try {
+                require_once __DIR__ . '/TareaModel.php';
+                (new TareaModel($this->pdo))->marcarClienteGestionadoEnTareas($asesorCedula, $clienteId);
+            } catch (Throwable $e) {}
+
+            if (!empty($data['monto_acuerdo']) || !empty($data['fecha_acuerdo'])) {
+                $stmt = $this->pdo->prepare("
+                    INSERT INTO acuerdos (gestion_id, tipo_acuerdo, valor_acuerdo, fecha_pago)
+                    VALUES (?, ?, ?, ?)
+                ");
+                $stmt->execute([
+                    $gestionId,
+                    'total',
+                    (float)($data['monto_acuerdo'] ?? 0),
+                    $data['fecha_acuerdo'] ? (string)$data['fecha_acuerdo'] : null
+                ]);
+            }
+
+            if ($ownTransaction) {
+                $this->pdo->commit();
+            }
+            return $gestionId;
+        } catch (Throwable $e) {
+            if ($ownTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 
-    /**
-     * Expresión SQL: código de 2.º nivel guardado en tipo_gestion (soporta "n1|n2" y legacy solo n2).
-     */
-    private function sqlTipoGestionNivel2($alias = 'hg.tipo_gestion') {
-        return "SUBSTRING_INDEX($alias, '|', -1)";
+    public function guardarCanalesAutorizados($historialGestionId, $canales) {
+        $flags = [
+            'llamada_telefonica' => 'no',
+            'email' => 'no',
+            'sms' => 'no',
+            'correo_fisico' => 'no',
+            'whatsap' => 'no',
+        ];
+
+        foreach ((array)$canales as $canal) {
+            $c = strtolower(trim((string)$canal));
+            if (in_array($c, ['llamada', 'llamada_telefonica', 'telefono', 'telefonica'], true)) $flags['llamada_telefonica'] = 'si';
+            if (in_array($c, ['correo', 'correo_electronico', 'email'], true)) $flags['email'] = 'si';
+            if ($c === 'sms') $flags['sms'] = 'si';
+            if ($c === 'correo_fisico') $flags['correo_fisico'] = 'si';
+            if (in_array($c, ['whatsapp', 'wa'], true)) $flags['whatsap'] = 'si';
+        }
+
+        $stmt = $this->pdo->prepare("
+            UPDATE historial_gestiones
+            SET llamada_telefonica = ?, email = ?, sms = ?, correo_fisico = ?, whatsap = ?
+            WHERE id_gestion = ?
+        ");
+        return $stmt->execute([
+            $flags['llamada_telefonica'],
+            $flags['email'],
+            $flags['sms'],
+            $flags['correo_fisico'],
+            $flags['whatsap'],
+            (int)$historialGestionId
+        ]);
     }
 
     public function getGestionByAsesorAndCliente($asesorId, $clienteId) {
-        // Primero obtener la cédula del cliente para buscar todas sus gestiones
-        $sqlCedula = "SELECT cedula FROM clientes WHERE id = ?";
-        $stmtCedula = $this->pdo->prepare($sqlCedula);
-        $stmtCedula->execute([$clienteId]);
-        $clienteData = $stmtCedula->fetch(PDO::FETCH_ASSOC);
-        
-        if (!$clienteData || empty($clienteData['cedula'])) {
-            return [];
-        }
-        
-        $cedula = $clienteData['cedula'];
-        
-        // Obtener historial completo del cliente por CÉDULA (todas las bases, activas e inactivas).
-        // Si la cédula está en base inactiva y en base activa, se sigue mostrando todo el historial.
-        $sql = "SELECT DISTINCT hg.id, hg.fecha_gestion, hg.tipo_gestion, hg.resultado, hg.comentarios, 
-                       hg.monto_venta, hg.duracion_llamada, hg.edad, hg.num_personas, 
-                       hg.valor_cotizacion, hg.whatsapp_enviado, hg.proxima_fecha, 
-                       hg.forma_contacto, hg.telefono_contacto, hg.obligacion_id, hg.producto_gestionado, 
-                       hg.monto_obligacion, hg.numero_obligacion, hg.factura_gestionar, hg.estado_obligacion,
-                       hg.fecha_acuerdo, hg.monto_acuerdo,
-                       u.nombre_completo as asesor_nombre, u.id as asesor_id,
-                       c.carga_excel_id, ce.nombre_cargue as nombre_base
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                JOIN clientes c ON ac.cliente_id = c.id
-                LEFT JOIN cargas_excel ce ON c.carga_excel_id = ce.id
-                JOIN usuarios u ON ac.asesor_id = u.id
-                WHERE c.cedula = ? 
-                ORDER BY hg.fecha_gestion DESC, hg.id DESC";
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$cedula]);
-        $gestiones = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        if (empty($gestiones)) {
-            return $gestiones;
-        }
-        
-        // Obtener todos los IDs de gestiones para optimizar consultas
-        $gestionIds = array_column($gestiones, 'id');
-        $placeholders = str_repeat('?,', count($gestionIds) - 1) . '?';
-        
-        // Obtener todos los canales autorizados en una sola consulta
-        $canalesSql = "SELECT historial_gestion_id, canal_autorizado 
-                       FROM canales_autorizados_gestion 
-                       WHERE historial_gestion_id IN ($placeholders)";
-        $canalesStmt = $this->pdo->prepare($canalesSql);
-        $canalesStmt->execute($gestionIds);
-        $canalesData = $canalesStmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        // Agrupar canales por gestión
-        $canalesPorGestion = [];
-        foreach ($canalesData as $canal) {
-            $canalesPorGestion[$canal['historial_gestion_id']][] = $canal['canal_autorizado'];
-        }
-        
-        // Agregar canales autorizados y tipificación completa a cada gestión
-        foreach ($gestiones as &$gestion) {
-            // Obtener canales autorizados del array agrupado
-            $gestion['canales_autorizados'] = $canalesPorGestion[$gestion['id']] ?? [];
+        $stmt = $this->pdo->prepare("
+            SELECT hg.*,
+                   u.nombre as asesor_nombre,
+                   c.base_id as carga_excel_id,
+                   b.nombre as nombre_base,
+                   o.numero_factura as numero_obligacion,
+                   o.saldo as monto_obligacion,
+                   o.numero_contrato as producto_gestionado,
+                   a.tipo_acuerdo,
+                   a.valor_acuerdo as monto_acuerdo,
+                   a.fecha_pago as fecha_acuerdo
+            FROM historial_gestiones hg
+            LEFT JOIN acuerdos a ON a.gestion_id = hg.id_gestion
+            JOIN usuarios u ON hg.asesor_cedula = u.cedula
+            JOIN clientes c ON hg.cliente_id = c.id_cliente
+            JOIN base_clientes b ON c.base_id = b.id_base
+            JOIN obligaciones o ON hg.obligacion_id = o.id_obligacion
+            WHERE hg.cliente_id = ?
+            ORDER BY hg.fecha_creacion DESC, hg.id_gestion DESC
+        ");
+        $stmt->execute([(int)$clienteId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            $des = $this->descomponerTipoGestionAlmacenado($gestion['tipo_gestion'] ?? '');
-            $gestion['tipo_contacto_arbol_codigo'] = $des['nivel1'];
-            $gestion['resultado_contacto_codigo'] = $des['nivel2'];
+        foreach ($rows as &$r) {
+            $r['id'] = $r['id_gestion'];
+            $r['fecha_gestion'] = $r['fecha_creacion'];
+            $r['tipo_gestion'] = $r['tipo_contacto'];
+            $r['resultado'] = $r['resultado_contacto'];
+            $r['observaciones'] = $this->limpiarObservacionesLegacy($r['observaciones'] ?? '');
+            $r['comentarios'] = $r['observaciones'];
+
+            // Campos que la vista usa para el árbol (compatibilidad):
+            $r['tipo_contacto_arbol_codigo'] = $r['tipo_contacto'] ?? null;
+            $r['resultado_contacto_codigo'] = $r['resultado_contacto'] ?? null;
+            $r['razon_especifica_codigo'] = $r['razon_especifica'] ?? null;
+
+            $canales = [];
+            if (($r['llamada_telefonica'] ?? 'no') === 'si') $canales[] = 'llamada';
+            if (($r['email'] ?? 'no') === 'si') $canales[] = 'correo_electronico';
+            if (($r['sms'] ?? 'no') === 'si') $canales[] = 'sms';
+            if (($r['correo_fisico'] ?? 'no') === 'si') $canales[] = 'correo_fisico';
+            if (($r['whatsap'] ?? 'no') === 'si') $canales[] = 'whatsapp';
+            $r['canales_autorizados'] = $canales;
         }
-        
-        return $gestiones;
+
+        return $rows;
     }
-    
+
+    /**
+     * Historial completo por cédula (todas las bases / todos los asesores).
+     * Útil cuando el mismo documento existe en varias bases (clientes.id_cliente distinto por base).
+     */
+    public function getGestionesByCedula($cedula) {
+        $cedula = trim((string)$cedula);
+        if ($cedula === '') return [];
+
+        $stmt = $this->pdo->prepare("
+            SELECT hg.*,
+                   u.nombre as asesor_nombre,
+                   c.base_id as carga_excel_id,
+                   b.nombre as nombre_base,
+                   o.numero_factura as numero_obligacion,
+                   o.saldo as monto_obligacion,
+                   o.numero_contrato as producto_gestionado,
+                   a.tipo_acuerdo,
+                   a.valor_acuerdo as monto_acuerdo,
+                   a.fecha_pago as fecha_acuerdo
+            FROM historial_gestiones hg
+            LEFT JOIN acuerdos a ON a.gestion_id = hg.id_gestion
+            JOIN usuarios u ON hg.asesor_cedula = u.cedula
+            JOIN clientes c ON hg.cliente_id = c.id_cliente
+            JOIN base_clientes b ON c.base_id = b.id_base
+            JOIN obligaciones o ON hg.obligacion_id = o.id_obligacion
+            WHERE c.cedula = ?
+            ORDER BY hg.fecha_creacion DESC, hg.id_gestion DESC
+        ");
+        $stmt->execute([$cedula]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        foreach ($rows as &$r) {
+            $r['id'] = $r['id_gestion'];
+            $r['fecha_gestion'] = $r['fecha_creacion'];
+            $r['tipo_gestion'] = $r['tipo_contacto'];
+            $r['resultado'] = $r['resultado_contacto'];
+            $r['observaciones'] = $this->limpiarObservacionesLegacy($r['observaciones'] ?? '');
+            $r['comentarios'] = $r['observaciones'];
+
+            // Campos que la vista usa para el árbol (compatibilidad):
+            $r['tipo_contacto_arbol_codigo'] = $r['tipo_contacto'] ?? null;
+            $r['resultado_contacto_codigo'] = $r['resultado_contacto'] ?? null;
+            $r['razon_especifica_codigo'] = $r['razon_especifica'] ?? null;
+
+            $canales = [];
+            if (($r['llamada_telefonica'] ?? 'no') === 'si') $canales[] = 'llamada';
+            if (($r['email'] ?? 'no') === 'si') $canales[] = 'correo_electronico';
+            if (($r['sms'] ?? 'no') === 'si') $canales[] = 'sms';
+            if (($r['correo_fisico'] ?? 'no') === 'si') $canales[] = 'correo_fisico';
+            if (($r['whatsap'] ?? 'no') === 'si') $canales[] = 'whatsapp';
+            $r['canales_autorizados'] = $canales;
+        }
+
+        return $rows;
+    }
 
     public function getGestionByAsesor($asesorId) {
-        $sql = "SELECT hg.*, c.nombre as cliente_nombre, c.id as cliente_id FROM historial_gestion hg JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id JOIN clientes c ON ac.cliente_id = c.id WHERE ac.asesor_id = ? ORDER BY hg.fecha_gestion DESC";
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $stmt = $this->pdo->prepare("
+            SELECT hg.*, c.nombre as cliente_nombre, c.id_cliente as cliente_id
+            FROM historial_gestiones hg
+            JOIN clientes c ON hg.cliente_id = c.id_cliente
+            WHERE hg.asesor_cedula = ?
+            ORDER BY hg.fecha_creacion DESC, hg.id_gestion DESC
+        ");
+        $stmt->execute([(string)$asesorId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as &$r) {
+            $r['id'] = $r['id_gestion'];
+            $r['fecha_gestion'] = $r['fecha_creacion'];
+        }
+        return $rows;
     }
 
-    
-    /**
-     * Guarda múltiples canales autorizados para una gestión
-     */
-    public function guardarCanalesAutorizados($historialGestionId, $canales) {
+    public function getGestionesHoy($asesorId) {
+        // #region agent log d54ef5 gestiones hoy
         try {
-            // Eliminar canales existentes para esta gestión
-            $sql = "DELETE FROM canales_autorizados_gestion WHERE historial_gestion_id = ?";
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([$historialGestionId]);
-            
-            // Insertar nuevos canales
-            if (!empty($canales)) {
-                $sql = "INSERT INTO canales_autorizados_gestion (historial_gestion_id, canal_autorizado) VALUES (?, ?)";
-                $stmt = $this->pdo->prepare($sql);
-                
-                foreach ($canales as $canal) {
-                    $stmt->execute([$historialGestionId, $canal]);
-                }
-            }
-            
-            return true;
-        } catch (Exception $e) {
-            error_log("Error guardando canales autorizados: " . $e->getMessage());
-            return false;
-        }
+            @file_put_contents(__DIR__ . '/../debug-d54ef5.log', json_encode([
+                'sessionId' => 'd54ef5',
+                'runId' => 'pre',
+                'hypothesisId' => 'H1',
+                'location' => 'models/GestionModel.php:getGestionesHoy:entry',
+                'message' => 'enter',
+                'data' => [
+                    'asesorIdLen' => strlen((string)$asesorId),
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+        } catch (Throwable $e) {}
+        // #endregion
+
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) as total FROM historial_gestiones WHERE asesor_cedula = ? AND DATE(fecha_creacion) = CURDATE()");
+        $stmt->execute([(string)$asesorId]);
+        $total = (int)($stmt->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
+
+        // #region agent log d54ef5 gestiones hoy diag db time
+        try {
+            $diag = $this->pdo->query("SELECT CURDATE() AS curdate, NOW() AS now_dt, @@session.time_zone AS tz")->fetch(PDO::FETCH_ASSOC) ?: [];
+            @file_put_contents(__DIR__ . '/../debug-d54ef5.log', json_encode([
+                'sessionId' => 'd54ef5',
+                'runId' => 'pre',
+                'hypothesisId' => 'H1',
+                'location' => 'models/GestionModel.php:getGestionesHoy:result',
+                'message' => 'count',
+                'data' => [
+                    'total' => $total,
+                    'dbCurdate' => (string)($diag['curdate'] ?? ''),
+                    'dbNow' => (string)($diag['now_dt'] ?? ''),
+                    'dbTz' => (string)($diag['tz'] ?? ''),
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+        } catch (Throwable $e) {}
+        // #endregion
+
+        return $total;
     }
-    
+
     /**
-     * Obtiene los canales autorizados para una gestión
+     * Cantidad de gestiones del asesor en el mes calendario actual (historial_gestiones.fecha_creacion).
      */
-    public function getCanalesAutorizados($historialGestionId) {
+    public function getGestionesMesActual($asesorId) {
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*) AS total
+            FROM historial_gestiones
+            WHERE asesor_cedula = ?
+              AND YEAR(fecha_creacion) = YEAR(CURDATE())
+              AND MONTH(fecha_creacion) = MONTH(CURDATE())
+        ");
+        $stmt->execute([(string)$asesorId]);
+        return (int)($stmt->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
+    }
+
+    public function getContactosEfectivosHoy($asesorId) {
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) as total FROM historial_gestiones WHERE asesor_cedula = ? AND DATE(fecha_creacion) = CURDATE() AND resultado_contacto <> ''");
+        $stmt->execute([(string)$asesorId]);
+        return (int)($stmt->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
+    }
+
+    public function getAcuerdosHoy($asesorId) {
+        // #region agent log d54ef5 acuerdos hoy
         try {
-            $sql = "SELECT canal_autorizado FROM canales_autorizados_gestion WHERE historial_gestion_id = ? ORDER BY canal_autorizado";
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([$historialGestionId]);
-            return $stmt->fetchAll(PDO::FETCH_COLUMN);
-        } catch (Exception $e) {
-            error_log("Error obteniendo canales autorizados: " . $e->getMessage());
+            @file_put_contents(__DIR__ . '/../debug-d54ef5.log', json_encode([
+                'sessionId' => 'd54ef5',
+                'runId' => 'pre',
+                'hypothesisId' => 'H1',
+                'location' => 'models/GestionModel.php:getAcuerdosHoy:entry',
+                'message' => 'enter',
+                'data' => [
+                    'asesorIdLen' => strlen((string)$asesorId),
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+        } catch (Throwable $e) {}
+        // #endregion
+
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*) as total
+            FROM acuerdos a
+            JOIN historial_gestiones hg ON a.gestion_id = hg.id_gestion
+            WHERE hg.asesor_cedula = ? AND DATE(hg.fecha_creacion) = CURDATE()
+        ");
+        $stmt->execute([(string)$asesorId]);
+        $total = (int)($stmt->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
+
+        // #region agent log d54ef5 acuerdos hoy result
+        try {
+            @file_put_contents(__DIR__ . '/../debug-d54ef5.log', json_encode([
+                'sessionId' => 'd54ef5',
+                'runId' => 'pre',
+                'hypothesisId' => 'H1',
+                'location' => 'models/GestionModel.php:getAcuerdosHoy:result',
+                'message' => 'count',
+                'data' => [
+                    'total' => $total,
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+        } catch (Throwable $e) {}
+        // #endregion
+
+        return $total;
+    }
+
+    /**
+     * Suma valor_acuerdo de los acuerdos del asesor creados hoy.
+     *
+     * Nota: en esta app "Acuerdos hoy" se calcula por DATE(hg.fecha_creacion)=CURDATE().
+     * Para mantener consistencia del dashboard, "Recaudo hoy" usa el mismo criterio.
+     */
+    public function getSumaValorAcuerdosAsesorDia($asesorCedula): float {
+        // #region agent log b7eaa7 getSumaValorAcuerdosAsesorDia entry
+        try { @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode(['sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'H0','location'=>'models/GestionModel.php:getSumaValorAcuerdosAsesorDia:entry','message'=>'enter','data'=>['asesorCedulaLen'=>strlen((string)$asesorCedula),'phpDate'=>date('Y-m-d'),'phpNow'=>date('Y-m-d H:i:s'),'phpTz'=>date_default_timezone_get() ?: ''],'timestamp'=>(int) round(microtime(true)*1000)], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
+        // #endregion
+
+        // #region agent log b7eaa7 mysql clock + tz
+        try {
+            $stmtClock = $this->pdo->query("SELECT CURDATE() AS curdate, NOW() AS now_ts, @@session.time_zone AS session_tz, @@global.time_zone AS global_tz");
+            $clk = $stmtClock ? ($stmtClock->fetch(PDO::FETCH_ASSOC) ?: []) : [];
+            @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode(['sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'H2','location'=>'models/GestionModel.php:getSumaValorAcuerdosAsesorDia:clock','message'=>'mysql_clock','data'=>['curdate'=>(string)($clk['curdate']??''),'now_ts'=>(string)($clk['now_ts']??''),'session_tz'=>(string)($clk['session_tz']??''),'global_tz'=>(string)($clk['global_tz']??'')],'timestamp'=>(int) round(microtime(true)*1000)], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND);
+        } catch (Throwable $e) {}
+        // #endregion
+
+        // #region agent log b7eaa7 compare fecha_pago vs fecha_creacion
+        try {
+            $stmtCmp = $this->pdo->prepare("
+                SELECT
+                    SUM(CASE WHEN a.fecha_pago = CURDATE() THEN 1 ELSE 0 END) AS cnt_pago_hoy,
+                    COALESCE(SUM(CASE WHEN a.fecha_pago = CURDATE() THEN a.valor_acuerdo ELSE 0 END), 0) AS sum_pago_hoy,
+                    SUM(CASE WHEN DATE(hg.fecha_creacion) = CURDATE() THEN 1 ELSE 0 END) AS cnt_creacion_hoy,
+                    COALESCE(SUM(CASE WHEN DATE(hg.fecha_creacion) = CURDATE() THEN a.valor_acuerdo ELSE 0 END), 0) AS sum_creacion_hoy,
+                    SUM(CASE WHEN a.fecha_pago IS NULL THEN 1 ELSE 0 END) AS cnt_pago_null
+                FROM acuerdos a
+                INNER JOIN historial_gestiones hg ON a.gestion_id = hg.id_gestion
+                WHERE hg.asesor_cedula = ?
+            ");
+            $stmtCmp->execute([(string)$asesorCedula]);
+            $cmp = $stmtCmp->fetch(PDO::FETCH_ASSOC) ?: [];
+            @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode(['sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'H1','location'=>'models/GestionModel.php:getSumaValorAcuerdosAsesorDia:compare','message'=>'counts_sums','data'=>['cnt_pago_hoy'=>(int)($cmp['cnt_pago_hoy']??0),'sum_pago_hoy'=>(float)($cmp['sum_pago_hoy']??0),'cnt_creacion_hoy'=>(int)($cmp['cnt_creacion_hoy']??0),'sum_creacion_hoy'=>(float)($cmp['sum_creacion_hoy']??0),'cnt_pago_null'=>(int)($cmp['cnt_pago_null']??0)],'timestamp'=>(int) round(microtime(true)*1000)], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND);
+        } catch (Throwable $e) {}
+        // #endregion
+
+        $sql = "
+            SELECT COALESCE(SUM(a.valor_acuerdo), 0) AS total
+            FROM acuerdos a
+            INNER JOIN historial_gestiones hg ON a.gestion_id = hg.id_gestion
+            WHERE hg.asesor_cedula = ?
+              AND DATE(hg.fecha_creacion) = CURDATE()
+        ";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([(string)$asesorCedula]);
+        $total = (float)($stmt->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
+
+        // #region agent log b7eaa7 getSumaValorAcuerdosAsesorDia result
+        try { @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode(['sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'H1','location'=>'models/GestionModel.php:getSumaValorAcuerdosAsesorDia:result','message'=>'total','data'=>['total'=>$total],'timestamp'=>(int) round(microtime(true)*1000)], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
+        // #endregion
+
+        return $total;
+    }
+
+    /**
+     * Suma valor_acuerdo de los acuerdos del asesor en el mes calendario actual (por fecha_pago).
+     */
+    public function getSumaValorAcuerdosAsesorMes($asesorCedula): float {
+        $sql = "
+            SELECT COALESCE(SUM(a.valor_acuerdo), 0) AS total
+            FROM acuerdos a
+            INNER JOIN historial_gestiones hg ON a.gestion_id = hg.id_gestion
+            WHERE hg.asesor_cedula = ?
+              AND a.fecha_pago IS NOT NULL
+              AND YEAR(a.fecha_pago) = YEAR(CURDATE())
+              AND MONTH(a.fecha_pago) = MONTH(CURDATE())
+        ";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([(string)$asesorCedula]);
+        return (float)($stmt->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
+    }
+
+    /**
+     * Completa campos que espera CoordinadorController::formatearFilaGestionCSV().
+     */
+    private function aplicarCompatExportacionGestion(array $row): array {
+        $labels = [];
+        if (($row['llamada_telefonica'] ?? 'no') === 'si') {
+            $labels[] = 'LLAMADA TELEFONICA';
+        }
+        if (($row['email'] ?? 'no') === 'si') {
+            $labels[] = 'CORREO ELECTRONICO';
+        }
+        if (($row['sms'] ?? 'no') === 'si') {
+            $labels[] = 'SMS';
+        }
+        if (($row['correo_fisico'] ?? 'no') === 'si') {
+            $labels[] = 'CORREO FISICO';
+        }
+        if (($row['whatsap'] ?? 'no') === 'si') {
+            $labels[] = 'WHATSAPP';
+        }
+        $row['canales_autorizados_texto'] = implode(', ', $labels);
+        return $row;
+    }
+
+    /**
+     * Historial para CSV (coordinador): une historial_gestiones, clientes, obligaciones, base, acuerdo más reciente.
+     *
+     * @param string|null $asesorId Cédula del asesor (mismo criterio que usuarios.cedula).
+     */
+    public function getHistorialCompletoParaExportacion($asesorId = null, $inicio = null, $fin = null, $filtros = []) {
+        if ($asesorId === null || $asesorId === '' || $inicio === null || $inicio === '' || $fin === null || $fin === '') {
             return [];
         }
-    }
-    
-    /**
-     * Convierte códigos de tipificación a texto completo
-     */
-    
-    /**
-     * Obtiene una gestión por su ID
-     */
-    public function getGestionById($gestionId) {
-        try {
-            $sql = "SELECT * FROM historial_gestion WHERE id = ?";
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([$gestionId]);
-            return $stmt->fetch(PDO::FETCH_ASSOC);
-        } catch (Exception $e) {
-            error_log("Error obteniendo gestión por ID: " . $e->getMessage());
-            return false;
+
+        $sql = "
+            SELECT
+                hg.id_gestion,
+                hg.fecha_creacion AS fecha_gestion,
+                u.nombre AS asesor_nombre,
+                c.cedula AS cedula,
+                c.nombre AS cliente_nombre,
+                b.nombre AS base_datos_nombre,
+                hg.telefono_contacto,
+                o.numero_factura AS obligacion_texto,
+                o.franja AS franja_cliente,
+                hg.forma_contacto,
+                hg.tipo_contacto AS tipo_gestion,
+                hg.resultado_contacto AS resultado,
+                hg.resultado_contacto AS tipificacion_2_nivel,
+                hg.razon_especifica AS tipificacion_3_nivel,
+                hg.observaciones AS comentarios,
+                (SELECT a2.fecha_pago FROM acuerdos a2 WHERE a2.gestion_id = hg.id_gestion ORDER BY a2.id_acuerdos DESC LIMIT 1) AS fecha_acuerdo,
+                (SELECT a2.valor_acuerdo FROM acuerdos a2 WHERE a2.gestion_id = hg.id_gestion ORDER BY a2.id_acuerdos DESC LIMIT 1) AS monto_acuerdo,
+                c.tel1 AS telefono,
+                c.tel2 AS celular2,
+                c.tel3 AS cel3,
+                c.tel4 AS cel4,
+                c.tel5 AS cel5,
+                c.tel6 AS cel6,
+                c.tel7 AS cel7,
+                c.tel8 AS cel8,
+                c.tel9 AS cel9,
+                c.tel10 AS cel10,
+                hg.llamada_telefonica,
+                hg.email,
+                hg.sms,
+                hg.correo_fisico,
+                hg.whatsap
+            FROM historial_gestiones hg
+            INNER JOIN usuarios u ON hg.asesor_cedula = u.cedula
+            INNER JOIN clientes c ON hg.cliente_id = c.id_cliente
+            INNER JOIN base_clientes b ON c.base_id = b.id_base
+            INNER JOIN obligaciones o ON hg.obligacion_id = o.id_obligacion
+            WHERE hg.asesor_cedula = ?
+              AND DATE(hg.fecha_creacion) BETWEEN ? AND ?
+            ORDER BY hg.fecha_creacion DESC, hg.id_gestion DESC
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([(string)$asesorId, (string)$inicio, (string)$fin]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        foreach ($rows as &$r) {
+            $r = $this->aplicarCompatExportacionGestion($r);
         }
+        unset($r);
+
+        return $rows;
     }
 
-    public function updateAsignacionStatus($asignacionId, $estado) {
-        $sql = "UPDATE asignaciones_clientes SET estado = ? WHERE id = ?";
+    /**
+     * Asesores con al menos una gestión en el rango (opcionalmente limitados al equipo de un coordinador).
+     *
+     * @return array<int, array{id: string, cedula: string, nombre_completo: string}>
+     */
+    public function getAsesoresConGestionesEnPeriodo($inicio, $fin, $coordinadorCedula = null) {
+        $sql = "
+            SELECT DISTINCT u.cedula AS id, u.cedula, u.nombre AS nombre_completo
+            FROM historial_gestiones hg
+            INNER JOIN usuarios u ON u.cedula = hg.asesor_cedula
+            WHERE DATE(hg.fecha_creacion) BETWEEN ? AND ?
+        ";
+        $params = [(string)$inicio, (string)$fin];
+
+        if ($coordinadorCedula !== null && $coordinadorCedula !== '') {
+            $sql .= "
+              AND EXISTS (
+                SELECT 1 FROM asignaciones_cordinador ac
+                WHERE ac.asesor_cedula = hg.asesor_cedula
+                  AND ac.cordinador_cedula = ?
+                  AND ac.estado = 'activo'
+              )
+            ";
+            $params[] = (string)$coordinadorCedula;
+        }
+
+        $sql .= " ORDER BY u.nombre ASC";
+
         $stmt = $this->pdo->prepare($sql);
-        return $stmt->execute([$estado, $asignacionId]);
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
-    // MÉTODOS COMPLETOS PARA EL DASHBOARD DEL ASESOR
-    
     /**
-     * Obtiene el número de gestiones realizadas hoy por un asesor
+     * Gestiones del equipo de un coordinador en un rango de fechas, con filtros opcionales.
+     *
+     * @param string|null $asesorId Cédula del asesor o null.
      */
-    public function getGestionesHoy($asesorId) {
-        $sql = "SELECT COUNT(*) as total
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                WHERE ac.asesor_id = ? 
-                AND DATE(hg.fecha_gestion) = CURDATE()";
-        
+    public function getGestionFiltrada($coordinadorCedula, $fechaInicio, $fechaFin, $asesorId = null, $resultado = null, $tipoGestion = null) {
+        if ($coordinadorCedula === null || $coordinadorCedula === '' || $fechaInicio === '' || $fechaFin === '') {
+            return [];
+        }
+
+        $sql = "
+            SELECT
+                hg.id_gestion,
+                hg.fecha_creacion AS fecha_gestion,
+                u.nombre AS asesor_nombre,
+                c.cedula AS cedula,
+                c.nombre AS cliente_nombre,
+                b.nombre AS base_datos_nombre,
+                hg.telefono_contacto,
+                o.numero_factura AS obligacion_texto,
+                o.franja AS franja_cliente,
+                hg.forma_contacto,
+                hg.tipo_contacto AS tipo_gestion,
+                hg.resultado_contacto AS resultado,
+                hg.resultado_contacto AS tipificacion_2_nivel,
+                hg.razon_especifica AS tipificacion_3_nivel,
+                hg.observaciones AS comentarios,
+                (SELECT a2.fecha_pago FROM acuerdos a2 WHERE a2.gestion_id = hg.id_gestion ORDER BY a2.id_acuerdos DESC LIMIT 1) AS fecha_acuerdo,
+                (SELECT a2.valor_acuerdo FROM acuerdos a2 WHERE a2.gestion_id = hg.id_gestion ORDER BY a2.id_acuerdos DESC LIMIT 1) AS monto_acuerdo,
+                c.tel1 AS telefono,
+                c.tel2 AS celular2,
+                c.tel3 AS cel3,
+                c.tel4 AS cel4,
+                c.tel5 AS cel5,
+                c.tel6 AS cel6,
+                c.tel7 AS cel7,
+                c.tel8 AS cel8,
+                c.tel9 AS cel9,
+                c.tel10 AS cel10,
+                hg.llamada_telefonica,
+                hg.email,
+                hg.sms,
+                hg.correo_fisico,
+                hg.whatsap
+            FROM historial_gestiones hg
+            INNER JOIN usuarios u ON hg.asesor_cedula = u.cedula
+            INNER JOIN clientes c ON hg.cliente_id = c.id_cliente
+            INNER JOIN base_clientes b ON c.base_id = b.id_base
+            INNER JOIN obligaciones o ON hg.obligacion_id = o.id_obligacion
+            WHERE EXISTS (
+                SELECT 1 FROM asignaciones_cordinador ac
+                WHERE ac.asesor_cedula = hg.asesor_cedula
+                  AND ac.cordinador_cedula = ?
+                  AND ac.estado = 'activo'
+            )
+            AND DATE(hg.fecha_creacion) BETWEEN ? AND ?
+        ";
+
+        $params = [(string)$coordinadorCedula, (string)$fechaInicio, (string)$fechaFin];
+
+        if ($asesorId !== null && $asesorId !== '') {
+            $sql .= " AND hg.asesor_cedula = ?";
+            $params[] = (string)$asesorId;
+        }
+        if ($resultado !== null && $resultado !== '') {
+            $sql .= " AND hg.resultado_contacto LIKE ?";
+            $params[] = '%' . $resultado . '%';
+        }
+        if ($tipoGestion !== null && $tipoGestion !== '') {
+            $sql .= " AND hg.tipo_contacto LIKE ?";
+            $params[] = '%' . $tipoGestion . '%';
+        }
+
+        $sql .= " ORDER BY hg.fecha_creacion DESC, hg.id_gestion DESC";
+
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId]);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        return $result['total'] ?? 0;
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        foreach ($rows as &$r) {
+            $r = $this->aplicarCompatExportacionGestion($r);
+        }
+        unset($r);
+
+        return $rows;
     }
-    
-    /**
-     * Obtiene el número de contactos efectivos hoy por un asesor
-     */
-    public function getContactosEfectivosHoy($asesorId) {
-        $sql = "SELECT COUNT(*) as total
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                WHERE ac.asesor_id = ? 
-                AND DATE(hg.fecha_gestion) = CURDATE()
-                AND {$this->sqlTipoGestionNivel2()} IN ('acuerdo_pago', 'ya_pago', 'localizado_sin_acuerdo', 'reclamo', 'volver_llamar', 'recordar_pago', 'venta_novedad')
-                AND hg.resultado IS NOT NULL 
-                AND hg.resultado != ''";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId]);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        return $result['total'] ?? 0;
-    }
-    
-    /**
-     * Obtiene el número de acuerdos de pago realizados hoy por un asesor
-     */
-    public function getAcuerdosHoy($asesorId) {
-        $sql = "SELECT COUNT(*) as total
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                WHERE ac.asesor_id = ? 
-                AND DATE(hg.fecha_gestion) = CURDATE()
-                AND ({$this->sqlTipoGestionNivel2()} = 'acuerdo_pago' 
-                     OR hg.resultado = 'acuerdo_pago'
-                     OR (hg.monto_acuerdo > 0 AND hg.fecha_acuerdo IS NOT NULL))";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId]);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        return $result['total'] ?? 0;
-    }
-    
-    /**
-     * Obtiene métricas de la semana para un asesor
-     */
-    public function getMetricasSemana($asesorId) {
-        $sql = "SELECT 
-                    COUNT(*) as gestiones_semana,
-                    COUNT(CASE WHEN {$this->sqlTipoGestionNivel2()} IN ('acuerdo_pago', 'ya_pago', 'localizado_sin_acuerdo', 'reclamo', 'volver_llamar', 'recordar_pago', 'venta_novedad') OR hg.tipo_gestion = 'contacto_exitoso' THEN 1 END) as contactos_efectivos_semana,
-                    COUNT(CASE WHEN {$this->sqlTipoGestionNivel2()} = 'acuerdo_pago' OR hg.resultado = 'acuerdo_pago' OR hg.monto_acuerdo > 0 THEN 1 END) as acuerdos_semana
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                WHERE ac.asesor_id = ? 
-                AND hg.fecha_gestion >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId]);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        return $result;
-    }
-    
-    /**
-     * Obtiene métricas del mes para un asesor
-     */
-    public function getMetricasMes($asesorId) {
-        $sql = "SELECT 
-                    COUNT(*) as gestiones_mes,
-                    COUNT(CASE WHEN {$this->sqlTipoGestionNivel2()} IN ('acuerdo_pago', 'ya_pago', 'localizado_sin_acuerdo', 'reclamo', 'volver_llamar', 'recordar_pago', 'venta_novedad') OR hg.tipo_gestion = 'contacto_exitoso' THEN 1 END) as contactos_efectivos_mes,
-                    COUNT(CASE WHEN {$this->sqlTipoGestionNivel2()} = 'acuerdo_pago' OR hg.resultado = 'acuerdo_pago' OR hg.monto_acuerdo > 0 THEN 1 END) as acuerdos_mes
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                WHERE ac.asesor_id = ? 
-                AND hg.fecha_gestion >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId]);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        return $result;
-    }
-    
+
+    // Métodos usados por controladores/reportes (dashboard asesor).
     public function getMetricasDashboard($asesorId, $periodo = 'dia') {
-        $fechaInicio = $this->getFechaInicio($periodo);
-        
-        $sql = "SELECT 
-                    COUNT(*) as total_llamadas,
-                    COUNT(CASE WHEN hg.resultado IS NOT NULL THEN 1 END) as contactos_efectivos,
-                    COUNT(CASE WHEN hg.resultado IN ('Venta Exitosa', 'VENTA INGRESADA', 'Agendado', 'Interesado') THEN 1 END) as ventas_exitosas,
-                    COUNT(CASE WHEN hg.resultado IN ('Rechazo por Precio', 'Rechazo por Competencia', 'No Interesado', 'No Califica', 'Necesita Pensarlo') THEN 1 END) as ventas_fallidas,
-                    COUNT(CASE WHEN hg.resultado IN ('No Contesta', 'Número Equivocado', 'Buzón de Voz', 'Número Fuera de Servicio', 'Cliente Ocupado') THEN 1 END) as contactos_no_efectivos,
-                    COUNT(CASE WHEN hg.resultado = 'Agenda Llamada de Seguimiento' THEN 1 END) as seguimientos_agendados,
-                    COUNT(CASE WHEN hg.resultado IN ('Problema Técnico', 'Error en la Base de Datos', 'Cliente Molesto/Insultos') THEN 1 END) as errores_gestion,
-                    AVG(hg.duracion_llamada) as tiempo_promedio_conversacion,
-                    SUM(hg.monto_venta) as total_ventas_monto,
-                    AVG(CASE WHEN hg.monto_venta > 0 THEN hg.monto_venta END) as promedio_venta,
-                    COUNT(CASE WHEN hg.duracion_llamada > 0 THEN 1 END) as llamadas_con_duracion
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                WHERE ac.asesor_id = ? AND hg.fecha_gestion >= ?";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId, $fechaInicio]);
-        $resultado = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        // Calcular métricas adicionales
-        $resultado['tasa_conversion'] = $resultado['total_llamadas'] > 0 ? 
-            round(($resultado['ventas_exitosas'] / $resultado['total_llamadas']) * 100, 2) : 0;
-        
-        $resultado['tasa_contacto_efectivo'] = $resultado['total_llamadas'] > 0 ? 
-            round(($resultado['contactos_efectivos'] / $resultado['total_llamadas']) * 100, 2) : 0;
-        
-        $resultado['tiempo_promedio_conversacion'] = $resultado['tiempo_promedio_conversacion'] !== null ? 
-            round($resultado['tiempo_promedio_conversacion'], 2) : 0;
-        $resultado['promedio_venta'] = $resultado['promedio_venta'] !== null ? 
-            round($resultado['promedio_venta'], 2) : 0;
-        
-        return $resultado;
+        [$inicio, $fin] = $this->rangoFechasPeriodo($periodo);
+
+        $stmt = $this->pdo->prepare("
+            SELECT
+                COUNT(*) AS gestiones,
+                SUM(CASE WHEN COALESCE(hg.resultado_contacto,'') <> '' THEN 1 ELSE 0 END) AS contactos_efectivos
+            FROM historial_gestiones hg
+            WHERE hg.asesor_cedula = ?
+              AND hg.fecha_creacion BETWEEN ? AND ?
+        ");
+        $stmt->execute([(string)$asesorId, (string)$inicio, (string)$fin]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        $stmt2 = $this->pdo->prepare("
+            SELECT
+                COUNT(*) AS acuerdos,
+                COALESCE(SUM(a.valor_acuerdo), 0) AS recaudo
+            FROM acuerdos a
+            JOIN historial_gestiones hg ON a.gestion_id = hg.id_gestion
+            WHERE hg.asesor_cedula = ?
+              AND hg.fecha_creacion BETWEEN ? AND ?
+        ");
+        $stmt2->execute([(string)$asesorId, (string)$inicio, (string)$fin]);
+        $row2 = $stmt2->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        return [
+            'periodo' => (string)$periodo,
+            'inicio' => (string)$inicio,
+            'fin' => (string)$fin,
+            'gestiones' => (int)($row['gestiones'] ?? 0),
+            'contactos_efectivos' => (int)($row['contactos_efectivos'] ?? 0),
+            'acuerdos' => (int)($row2['acuerdos'] ?? 0),
+            'recaudo' => (float)($row2['recaudo'] ?? 0),
+        ];
     }
 
     public function getTipificacionesPorResultado($asesorId, $periodo = 'dia') {
-        $fechaInicio = $this->getFechaInicio($periodo);
-        
-        $sql = "SELECT 
-                    COALESCE(hg.tipo_gestion, hg.resultado) as resultado,
-                    COUNT(*) as cantidad,
-                    AVG(hg.duracion_llamada) as tiempo_promedio,
-                    SUM(hg.monto_venta) as total_monto
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                WHERE ac.asesor_id = ? AND hg.fecha_gestion >= ? 
-                AND (hg.tipo_gestion IS NOT NULL OR hg.resultado IS NOT NULL)
-                GROUP BY COALESCE(hg.tipo_gestion, hg.resultado)
-                ORDER BY cantidad DESC";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId, $fechaInicio]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        [$inicio, $fin] = $this->rangoFechasPeriodo($periodo);
+        $stmt = $this->pdo->prepare("
+            SELECT
+                COALESCE(NULLIF(TRIM(hg.resultado_contacto), ''), 'No especificado') AS resultado,
+                COUNT(*) AS cantidad
+            FROM historial_gestiones hg
+            WHERE hg.asesor_cedula = ?
+              AND hg.fecha_creacion BETWEEN ? AND ?
+            GROUP BY resultado
+            ORDER BY cantidad DESC
+            LIMIT 20
+        ");
+        $stmt->execute([(string)$asesorId, (string)$inicio, (string)$fin]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
-    public function getLlamadasPorDia($asesorId, $periodo = 'semana') {
-        $fechaInicio = $this->getFechaInicio($periodo);
-        
-        $sql = "SELECT 
-                    DATE(hg.fecha_gestion) as fecha,
-                    COUNT(*) as total_llamadas,
-                    COUNT(CASE WHEN hg.resultado IS NOT NULL THEN 1 END) as contactos_efectivos,
-                    COUNT(CASE WHEN hg.resultado IN ('Venta Exitosa', 'VENTA INGRESADA', 'Agendado', 'Interesado') THEN 1 END) as ventas_exitosas,
-                    AVG(hg.duracion_llamada) as tiempo_promedio
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                WHERE ac.asesor_id = ? AND hg.fecha_gestion >= ?
-                GROUP BY DATE(hg.fecha_gestion)
-                ORDER BY fecha DESC";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId, $fechaInicio]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    public function getClientesConSeguimiento($asesorId) {
-        $sql = "SELECT 
-                    c.id, c.nombre, c.cedula, c.telefono, c.celular2,
-                    hg.proxima_fecha, hg.resultado, hg.fecha_gestion, hg.comentarios,
-                    ac.id as asignacion_id
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                JOIN clientes c ON ac.cliente_id = c.id 
-                WHERE ac.asesor_id = ? AND hg.proxima_fecha IS NOT NULL 
-                AND hg.proxima_fecha > NOW()
-                ORDER BY hg.proxima_fecha ASC";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-    
-    /**
-     * Obtiene clientes con tipificación "volver a llamar" en su ÚLTIMA gestión
-     * Solo incluye clientes que actualmente tienen esta tipificación
-     */
-    public function getClientesVolverALlamar($asesorId) {
-        $sql = "SELECT 
-                    c.id as cliente_id, 
-                    c.nombre as cliente_nombre, 
-                    c.cedula, 
-                    c.telefono, 
-                    c.celular2,
-                    hg.proxima_fecha, 
-                    hg.resultado, 
-                    hg.fecha_gestion, 
-                    hg.comentarios,
-                    ac.id as asignacion_id
-                FROM clientes c
-                JOIN asignaciones_clientes ac ON c.id = ac.cliente_id
-                JOIN (
-                    SELECT 
-                        ac2.cliente_id,
-                        MAX(hg2.fecha_gestion) as ultima_fecha
-                    FROM historial_gestion hg2
-                    JOIN asignaciones_clientes ac2 ON hg2.asignacion_id = ac2.id
-                    WHERE ac2.asesor_id = ?
-                    GROUP BY ac2.cliente_id
-                ) ultima ON c.id = ultima.cliente_id
-                JOIN historial_gestion hg ON hg.asignacion_id = ac.id 
-                    AND hg.fecha_gestion = ultima.ultima_fecha
-                WHERE ac.asesor_id = ? 
-                    AND (hg.resultado LIKE '%volver a llamar%' OR hg.resultado LIKE '%volver_llamar%')
-                    AND hg.proxima_fecha IS NOT NULL
-                    AND DATE(hg.proxima_fecha) = CURDATE()
-                ORDER BY hg.proxima_fecha ASC";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId, $asesorId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-    
-        /**
-     * Obtiene el total de clientes con tipificación "volver a llamar"
-     */
-    public function getTotalClientesVolverALlamar($asesorId) {
-        $sql = "SELECT COUNT(DISTINCT c.id) as total
-                FROM clientes c
-                JOIN asignaciones_clientes ac ON c.id = ac.cliente_id
-                JOIN (
-                    SELECT 
-                        ac2.cliente_id,
-                        MAX(hg2.fecha_gestion) as ultima_fecha
-                    FROM historial_gestion hg2
-                    JOIN asignaciones_clientes ac2 ON hg2.asignacion_id = ac2.id
-                    WHERE ac2.asesor_id = ?
-                    GROUP BY ac2.cliente_id
-                    ) ultima ON c.id = ultima.cliente_id
-                JOIN historial_gestion hg ON hg.asignacion_id = ac.id 
-                    AND hg.fecha_gestion = ultima.ultima_fecha
-                WHERE ac.asesor_id = ? 
-                    AND (hg.resultado LIKE '%volver a llamar%' OR hg.resultado LIKE '%volver_llamar%')
-                    AND hg.proxima_fecha IS NOT NULL
-                    AND DATE(hg.proxima_fecha) = CURDATE()";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId, $asesorId]);
-        $resultado = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $resultado['total'] ?? 0;
-    }
-    
-    /**
-     * Obtiene llamadas pendientes para el día actual (método alternativo más preciso)
-     */
-    public function getLlamadasPendientesHoy($asesorId) {
-        $sql = "SELECT 
-                    c.id as cliente_id, 
-                    c.nombre as cliente_nombre, 
-                    c.cedula, 
-                    c.telefono, 
-                    c.celular2,
-                    hg.proxima_fecha, 
-                    hg.resultado, 
-                    hg.fecha_gestion, 
-                    hg.comentarios,
-                    ac.id as asignacion_id
-                FROM clientes c
-                JOIN asignaciones_clientes ac ON c.id = ac.cliente_id
-                JOIN historial_gestion hg ON hg.asignacion_id = ac.id
-                WHERE ac.asesor_id = ? 
-                    AND hg.resultado = 'VOLVER A LLAMAR'
-                    AND hg.fecha_gestion = (
-                        SELECT MAX(hg2.fecha_gestion)
-                        FROM historial_gestion hg2
-                        JOIN asignaciones_clientes ac2 ON hg2.asignacion_id = ac2.id
-                        WHERE ac2.cliente_id = c.id AND ac2.asesor_id = ?
-                    )
-                    AND (
-                        (hg.proxima_fecha IS NOT NULL AND DATE(hg.proxima_fecha) = CURDATE())
-                        OR
-                        (hg.proxima_fecha IS NULL AND DATE(hg.fecha_gestion) = CURDATE())
-                    )
-                ORDER BY hg.fecha_gestion DESC";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId, $asesorId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-    
-    /**
-     * Obtiene el total de llamadas pendientes para el día actual
-     */
-    public function getTotalLlamadasPendientesHoy($asesorId) {
-        $sql = "SELECT COUNT(DISTINCT c.id) as total
-                FROM clientes c
-                JOIN asignaciones_clientes ac ON c.id = ac.cliente_id
-                JOIN historial_gestion hg ON hg.asignacion_id = ac.id
-                WHERE ac.asesor_id = ? 
-                    AND hg.resultado = 'VOLVER A LLAMAR'
-                    AND hg.fecha_gestion = (
-                        SELECT MAX(hg2.fecha_gestion)
-                        FROM historial_gestion hg2
-                        JOIN asignaciones_clientes ac2 ON hg2.asignacion_id = ac2.id
-                        WHERE ac2.cliente_id = c.id AND ac2.asesor_id = ?
-                    )
-                    AND (
-                        (hg.proxima_fecha IS NOT NULL AND DATE(hg.proxima_fecha) = CURDATE())
-                        OR
-                        (hg.proxima_fecha IS NULL AND DATE(hg.fecha_gestion) = CURDATE())
-                    )";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId, $asesorId]);
-        $resultado = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $resultado['total'] ?? 0;
-    }
-
-    public function getUltimasGestiones($asesorId, $limite = 5) {
-        $sql = "SELECT 
-                    hg.id, hg.tipo_gestion, hg.resultado, hg.fecha_gestion, hg.duracion_llamada,
-                    c.nombre as cliente_nombre, c.cedula, c.telefono, c.celular2
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                JOIN clientes c ON ac.cliente_id = c.id 
-                WHERE ac.asesor_id = ? 
-                ORDER BY hg.fecha_gestion DESC
-                LIMIT " . $limite;
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    /**
-     * Obtiene el número real de clientes gestionados por un asesor
-     * (clientes que han sido contactados al menos una vez)
-     */
-    public function getClientesGestionados($asesorId) {
-        $sql = "SELECT 
-                    COUNT(DISTINCT ac.cliente_id) as total_clientes_gestionados
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                WHERE ac.asesor_id = ? AND hg.fecha_gestion IS NOT NULL";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId]);
-        $resultado = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        return $resultado['total_clientes_gestionados'] ?? 0;
-    }
-
-    /**
-     * Obtiene el total recaudado real por un asesor
-     * (suma de todas las ventas exitosas)
-     */
-    public function getTotalRecaudado($asesorId) {
-        $sql = "SELECT 
-                    COALESCE(SUM(hg.monto_venta), 0) as total_recaudado
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                WHERE ac.asesor_id = ? AND hg.monto_venta > 0";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId]);
-        $resultado = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        return $resultado['total_recaudado'] ?? 0;
-    }
-
-    public function getEstadisticasPorTipoVenta($asesorId, $periodo = 'dia') {
-        $fechaInicio = $this->getFechaInicio($periodo);
-        
-        $sql = "SELECT 
-                    hg.resultado,
-                    COUNT(*) as cantidad,
-                    AVG(hg.monto_venta) as monto_promedio,
-                    SUM(hg.monto_venta) as monto_total,
-                    AVG(hg.duracion_llamada) as tiempo_promedio
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                WHERE ac.asesor_id = ? AND hg.fecha_gestion >= ? 
-                AND hg.resultado IN ('Venta Exitosa', 'VENTA INGRESADA', 'Agendado', 'Interesado')
-                GROUP BY hg.resultado
-                ORDER BY cantidad DESC";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId, $fechaInicio]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    public function getEstadisticasPorRechazo($asesorId, $periodo = 'dia') {
-        $fechaInicio = $this->getFechaInicio($periodo);
-        
-        $sql = "SELECT 
-                    hg.resultado,
-                    COUNT(*) as cantidad,
-                    AVG(hg.duracion_llamada) as tiempo_promedio
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                WHERE ac.asesor_id = ? AND hg.fecha_gestion >= ? 
-                AND hg.resultado IN ('Rechazo por Precio', 'Rechazo por Competencia', 'No Interesado', 'No Califica', 'Necesita Pensarlo')
-                GROUP BY hg.resultado
-                ORDER BY cantidad DESC";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId, $fechaInicio]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    public function getEstadisticasContactosNoEfectivos($asesorId, $periodo = 'dia') {
-        $fechaInicio = $this->getFechaInicio($periodo);
-        
-        $sql = "SELECT 
-                    hg.resultado,
-                    COUNT(*) as cantidad,
-                    AVG(hg.duracion_llamada) as tiempo_promedio
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                WHERE ac.asesor_id = ? AND hg.fecha_gestion >= ? 
-                AND hg.resultado IN ('No Contesta', 'Número Equivocado', 'Buzón de Voz', 'Número Fuera de Servicio', 'Cliente Ocupado')
-                GROUP BY hg.resultado
-                ORDER BY cantidad DESC";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId, $fechaInicio]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    public function getProductividadPorHora($asesorId, $periodo = 'dia') {
-        $fechaInicio = $this->getFechaInicio($periodo);
-        
-        $sql = "SELECT 
-                    HOUR(hg.fecha_gestion) as hora,
-                    COUNT(*) as total_llamadas,
-                    COUNT(CASE WHEN hg.resultado IS NOT NULL THEN 1 END) as contactos_efectivos,
-                    AVG(hg.duracion_llamada) as tiempo_promedio
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                WHERE ac.asesor_id = ? AND hg.fecha_gestion >= ?
-                GROUP BY HOUR(hg.fecha_gestion)
-                ORDER BY hora ASC";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId, $fechaInicio]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-
-    /**
-     * Obtiene gestiones de un asesor en un rango de fechas específico
-     * CORREGIDO para usar la estructura real de la tabla historial_gestion
-     */
-    public function getGestionByAsesorAndFechas($asesorId, $fechaInicio, $fechaFin) {
-        try {
-            // Usar la estructura correcta con asignaciones_clientes
-            $sql = "SELECT hg.*, c.nombre as cliente_nombre, c.cedula, c.telefono, c.celular2,
-                           ac.asesor_id, ac.estado as estado_asignacion
-                    FROM historial_gestion hg
-                    JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id
-                    JOIN clientes c ON ac.cliente_id = c.id
-                    WHERE ac.asesor_id = ? 
-                    AND DATE(hg.fecha_gestion) BETWEEN ? AND ?
-                    ORDER BY hg.fecha_gestion DESC";
-            
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([$asesorId, $fechaInicio, $fechaFin]);
-            return $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-        } catch (Exception $e) {
-            error_log("Error en getGestionByAsesorAndFechas: " . $e->getMessage());
-            return [];
-        }
-    }
-
-    /**
-     * Obtiene gestiones de un asesor en un rango de fechas específico con información de base de datos
-     */
-    public function getGestionByAsesorAndFechasConBaseDatos($asesorId, $fechaInicio, $fechaFin) {
-        try {
-            // Usar la estructura correcta con asignaciones_clientes e incluir información de base de datos
-            $sql = "SELECT hg.*, c.nombre as cliente_nombre, c.cedula, c.telefono, c.celular2,
-                           ac.asesor_id, ac.estado as estado_asignacion,
-                           ce.nombre_cargue as base_datos_nombre, ce.fecha_cargue as base_datos_fecha
-                    FROM historial_gestion hg
-                    JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id
-                    JOIN clientes c ON ac.cliente_id = c.id
-                    LEFT JOIN cargas_excel ce ON c.carga_excel_id = ce.id
-                    WHERE ac.asesor_id = ? 
-                    AND DATE(hg.fecha_gestion) BETWEEN ? AND ?
-                    ORDER BY hg.fecha_gestion DESC";
-            
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([$asesorId, $fechaInicio, $fechaFin]);
-            return $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-        } catch (Exception $e) {
-            error_log("Error en getGestionByAsesorAndFechasConBaseDatos: " . $e->getMessage());
-            return [];
-        }
-    }
-
-    /**
-     * Obtiene gestiones de un asesor con filtros avanzados del modal
-     * CORREGIDO para usar la estructura real de la tabla historial_gestion
-     */
-    public function getGestionByAsesorAndFechasConFiltros($asesorId, $fechaInicio, $fechaFin, $filtros = []) {
-        try {
-            // Si el filtro es "gestionado", solo mostrar clientes con gestiones reales
-            if (!empty($filtros['gestion']) && $filtros['gestion'] === 'gestionado') {
-                $sql = "SELECT hg.*, c.nombre as cliente_nombre, c.cedula, c.telefono, c.celular2,
-                               c.fecha_creacion, ac.estado as estado_asignacion
-                        FROM historial_gestion hg
-                        JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id
-                        JOIN clientes c ON ac.cliente_id = c.id
-                        WHERE ac.asesor_id = ?";
-                $params = [$asesorId];
-                
-                // Filtro de fechas de gestión
-                if ($fechaInicio && $fechaFin) {
-                    $sql .= " AND DATE(hg.fecha_gestion) BETWEEN ? AND ?";
-                    $params[] = $fechaInicio;
-                    $params[] = $fechaFin;
-                }
-            } 
-            // Si el filtro es "no_gestionado", mostrar clientes asignados sin gestiones
-            elseif (!empty($filtros['gestion']) && $filtros['gestion'] === 'no_gestionado') {
-                $sql = "SELECT NULL as id, c.nombre as cliente_nombre, c.cedula, c.telefono, c.celular2,
-                               c.fecha_creacion, ac.estado as estado_asignacion,
-                               NULL as fecha_gestion, NULL as tipo_gestion, NULL as resultado, 
-                               NULL as comentarios, NULL as monto_venta, NULL as duracion_llamada
-                        FROM asignaciones_clientes ac
-                        JOIN clientes c ON ac.cliente_id = c.id
-                        WHERE ac.asesor_id = ? AND ac.estado = 'asignado'
-                        AND NOT EXISTS (
-                            SELECT 1 FROM historial_gestion hg2 
-                            WHERE hg2.asignacion_id = ac.id
-                        )";
-                $params = [$asesorId];
-            }
-            // Si no hay filtro de gestión, mostrar todos los clientes asignados
-            else {
-                $sql = "SELECT hg.*, c.nombre as cliente_nombre, c.cedula, c.telefono, c.celular2,
-                               c.fecha_creacion, ac.estado as estado_asignacion
-                        FROM asignaciones_clientes ac
-                        JOIN clientes c ON ac.cliente_id = c.id
-                        LEFT JOIN historial_gestion hg ON hg.asignacion_id = ac.id
-                        WHERE ac.asesor_id = ? AND ac.estado = 'asignado'";
-                $params = [$asesorId];
-                
-                // Filtro de fechas de gestión
-                if ($fechaInicio && $fechaFin) {
-                    $sql .= " AND (hg.fecha_gestion IS NULL OR DATE(hg.fecha_gestion) BETWEEN ? AND ?)";
-                    $params[] = $fechaInicio;
-                    $params[] = $fechaFin;
-                }
-            }
-            
-            // Aplicar filtros adicionales solo si no es "no_gestionado"
-            if (empty($filtros['gestion']) || $filtros['gestion'] !== 'no_gestionado') {
-                // Filtro de contacto (contactado, no contactado)
-                if (!empty($filtros['contacto'])) {
-                    if ($filtros['contacto'] === 'contactado') {
-                        $sql .= " AND hg.resultado IS NOT NULL AND hg.resultado != ''";
-                    } elseif ($filtros['contacto'] === 'no_contactado') {
-                        $sql .= " AND (hg.resultado IS NULL OR hg.resultado = '')";
-                    }
-                }
-                
-                // Filtro de tipificación específica
-                if (!empty($filtros['tipificacion']) && $filtros['tipificacion'] !== 'todos') {
-                    $sql .= " AND hg.resultado = ?";
-                    $params[] = $filtros['tipificacion'];
-                }
-                
-                // Filtro de tipificación específica (usando valores exactos de la base de datos)
-                if (!empty($filtros['tipificacion_especifica']) && $filtros['tipificacion_especifica'] !== 'todos') {
-                    if ($filtros['tipificacion_especifica'] === 'sin_gestion') {
-                        $sql .= " AND (hg.resultado IS NULL OR hg.resultado = '' OR hg.resultado = 'Sin gestión')";
-                    } else {
-                        // Usar el valor exacto de la base de datos
-                        $sql .= " AND hg.resultado = ?";
-                        $params[] = $filtros['tipificacion_especifica'];
-                    }
-                }
-            }
-            
-            // Filtro de fechas de creación del cliente (aplicable a todos los casos)
-            if (!empty($filtros['fecha_creacion_inicio'])) {
-                $sql .= " AND DATE(c.fecha_creacion) >= ?";
-                $params[] = $filtros['fecha_creacion_inicio'];
-            }
-            
-            if (!empty($filtros['fecha_creacion_fin'])) {
-                $sql .= " AND DATE(c.fecha_creacion) <= ?";
-                $params[] = $filtros['fecha_creacion_fin'];
-            }
-            
-            // Ordenar según el tipo de consulta
-            if (!empty($filtros['gestion']) && $filtros['gestion'] === 'no_gestionado') {
-                $sql .= " ORDER BY c.fecha_creacion DESC";
-            } else {
-                $sql .= " ORDER BY hg.fecha_gestion DESC";
-            }
-            
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute($params);
-            return $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-        } catch (Exception $e) {
-            error_log("Error en getGestionByAsesorAndFechasConFiltros: " . $e->getMessage());
-            return [];
-        }
-    }
-
-    /**
-     * Obtiene gestiones filtradas para el coordinador con múltiples criterios
-     * CORREGIDO para usar la estructura real de la tabla historial_gestion
-     */
-    public function getGestionFiltrada($coordinadorId, $fechaInicio, $fechaFin, $asesorId = null, $resultado = null, $tipoGestion = null) {
-        $sql = "SELECT 
-                       hg.*,
-                       c.nombre as cliente_nombre,
-                       c.cedula,
-                       c.telefono,
-                       c.celular2,
-                       c.cel3,
-                       c.cel4,
-                       c.cel5,
-                       c.cel6,
-                       c.cel7,
-                       c.cel8,
-                       c.cel9,
-                       c.cel10,
-                       hg.telefono_contacto,
-                       u.nombre_completo as asesor_nombre,
-                       ac.estado as estado_asignacion
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id
-                JOIN clientes c ON ac.cliente_id = c.id 
-                JOIN usuarios u ON ac.asesor_id = u.id 
-                JOIN asignaciones_asesor_coordinador aac ON ac.asesor_id = aac.asesor_id
-                WHERE aac.coordinador_id = ? 
-                AND DATE(hg.fecha_gestion) BETWEEN ? AND ?";
-        
-        $params = [$coordinadorId, $fechaInicio, $fechaFin];
-        
-        if ($asesorId) {
-            $sql .= " AND ac.asesor_id = ?";
-            $params[] = $asesorId;
-        }
-        
-        if ($resultado) {
-            $sql .= " AND hg.resultado = ?";
-            $params[] = $resultado;
-        }
-        
-        if ($tipoGestion) {
-            $sql .= " AND hg.tipo_gestion = ?";
-            $params[] = $tipoGestion;
-        }
-        
-        $sql .= " ORDER BY hg.fecha_gestion DESC";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-    
-    /**
-     * Crea una nueva gestión en la tabla historial_gestion
-     * CORREGIDO para usar solo los campos que realmente existen en la tabla
-     */
-    public function crearGestion($gestionData) {
-        $inicioTransaccion = false;
-        try {
-            // Validar que los campos obligatorios estén presentes
-            if (empty($gestionData['asignacion_id']) || empty($gestionData['tipo_gestion']) || empty($gestionData['comentarios'])) {
-                throw new Exception("Campos obligatorios faltantes para crear la gestión");
-            }
-            
-            // Iniciar transacción solo si no existe una activa.
-            if (!$this->pdo->inTransaction()) {
-                $this->pdo->beginTransaction();
-                $inicioTransaccion = true;
-            }
-            
-            // Usar solo los campos que realmente existen en la tabla historial_gestion
-            $sql = "INSERT INTO historial_gestion (
-                        asignacion_id, fecha_gestion, tipo_gestion, comentarios, resultado,
-                        monto_venta, duracion_llamada, edad, num_personas, 
-                        valor_cotizacion, whatsapp_enviado, proxima_fecha, forma_contacto,
-                        factura_gestionar, obligacion_id, producto_gestionado, monto_obligacion, numero_obligacion, estado_obligacion,
-                        fecha_acuerdo, monto_acuerdo, fecha_nueva_llamada, motivo_nueva_llamada, nuevo_telefono, observaciones_tercero,
-                        mensaje_tercero, nombre_tercero, nueva_direccion, email_envio, observaciones_envio, tipo_novedad, descripcion_novedad, motivo_fallecido, observaciones_fallecido,
-                        telefono_contacto
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-            
-            $stmt = $this->pdo->prepare($sql);
-            
-            // Preparar los parámetros en el orden correcto según la estructura real de la tabla
-            $params = [
-                $gestionData['asignacion_id'],
-                $gestionData['fecha_gestion'] ?? date('Y-m-d H:i:s'),
-                $gestionData['tipo_gestion'],
-                $gestionData['comentarios'],
-                $gestionData['resultado'] ?? null,
-                $gestionData['monto_venta'] ?? null,
-                $gestionData['duracion_llamada'] ?? null,
-                $gestionData['edad'] ?? $gestionData['edad_cliente'] ?? null,
-                $gestionData['num_personas'] ?? null,
-                $gestionData['valor_cotizacion'] ?? null,
-                $gestionData['whatsapp_enviado'] ?? null,
-                $gestionData['proxima_fecha'] ?? null,
-                $gestionData['forma_contacto'] ?? 'llamada',
-                $gestionData['factura_gestionar'] ?? null,
-                $gestionData['obligacion_id'] ?? null,
-                $gestionData['producto_gestionado'] ?? null,
-                $gestionData['monto_obligacion'] ?? null,
-                $gestionData['numero_obligacion'] ?? null,
-                $gestionData['estado_obligacion'] ?? null,
-                $gestionData['fecha_acuerdo'] ?? null,
-                $gestionData['monto_acuerdo'] ?? null,
-                $gestionData['fecha_nueva_llamada'] ?? null,
-                $gestionData['motivo_nueva_llamada'] ?? null,
-                $gestionData['nuevo_telefono'] ?? null,
-                $gestionData['observaciones_tercero'] ?? null,
-                $gestionData['mensaje_tercero'] ?? null,
-                $gestionData['nombre_tercero'] ?? null,
-                $gestionData['nueva_direccion'] ?? null,
-                $gestionData['email_envio'] ?? null,
-                $gestionData['observaciones_envio'] ?? null,
-                $gestionData['tipo_novedad'] ?? null,
-                $gestionData['descripcion_novedad'] ?? null,
-                $gestionData['motivo_fallecido'] ?? null,
-                $gestionData['observaciones_fallecido'] ?? null,
-                $gestionData['telefono_contacto'] ?? null
-            ];
-            
-            // Ejecutar la consulta
-            $success = $stmt->execute($params);
-            
-            if (!$success) {
-                if ($inicioTransaccion && $this->pdo->inTransaction()) {
-                    $this->pdo->rollBack();
-                }
-                throw new Exception("Error al ejecutar la consulta SQL");
-            }
-            
-            $historialGestionId = $this->pdo->lastInsertId();
-            
-            // Registrar actividad automáticamente
-            $this->registrarActividadAutomatica($historialGestionId, $gestionData);
-            
-            // Confirmar transacción
-            if ($inicioTransaccion && $this->pdo->inTransaction()) {
-                $this->pdo->commit();
-            }
-            
-            return $historialGestionId;
-            
-        } catch (Exception $e) {
-            if ($inicioTransaccion && $this->pdo->inTransaction()) {
-                $this->pdo->rollBack();
-            }
-            error_log("Error en crearGestion: " . $e->getMessage());
-            error_log("Datos recibidos: " . json_encode($gestionData));
-            throw $e;
-        }
-    }
-
-    /**
-     * Método de prueba simplificado para crear gestiones
-     * Usa solo las columnas que realmente existen en la tabla
-     */
-    public function crearGestionSimple($asignacionId, $tipoGestion, $comentarios, $resultado = null) {
-        try {
-            $sql = "INSERT INTO historial_gestion (asignacion_id, fecha_gestion, tipo_gestion, comentarios, resultado) VALUES (?, NOW(), ?, ?, ?)";
-            $stmt = $this->pdo->prepare($sql);
-            
-            $success = $stmt->execute([$asignacionId, $tipoGestion, $comentarios, $resultado]);
-            
-            if (!$success) {
-                throw new Exception("Error al ejecutar la consulta SQL");
-            }
-            
-            return $this->pdo->lastInsertId();
-            
-        } catch (Exception $e) {
-            error_log("Error en crearGestionSimple: " . $e->getMessage());
-            throw $e;
-        }
-    }
-
-    /**
-     * Obtiene el total de llamadas realizadas por un asesor
-     */
-    public function getTotalLlamadasByAsesor($asesorId) {
-        $stmt = $this->pdo->prepare("SELECT COUNT(*) as total FROM historial_gestion hg
-                                    JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id
-                                    WHERE ac.asesor_id = ?");
-        $stmt->execute([$asesorId]);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $result['total'];
-    }
-
-    /**
-     * Obtiene el total de ventas realizadas por un asesor
-     */
-    public function getTotalVentasByAsesor($asesorId) {
-        $stmt = $this->pdo->prepare("SELECT COUNT(*) as total FROM historial_gestion hg
-                                    JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id
-                                    WHERE ac.asesor_id = ? AND hg.resultado IN ('Venta Exitosa', 'VENTA INGRESADA', 'Agendado', 'Interesado')");
-        $stmt->execute([$asesorId]);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $result['total'];
-    }
-
-    /**
-     * Obtiene el total de gestiones por resultado específico
-     */
-    public function getTotalGestionesByResultado($asesorId, $resultado) {
-        $stmt = $this->pdo->prepare("SELECT COUNT(*) as total FROM historial_gestion hg
-                                    JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id
-                                    WHERE ac.asesor_id = ? AND hg.resultado = ?");
-        $stmt->execute([$asesorId, $resultado]);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $result['total'];
-    }
-
-    /**
-     * Obtiene la fecha de inicio según el período seleccionado
-     */
-    private function getFechaInicio($periodo) {
-        switch ($periodo) {
-            case 'total':
-                // Para mostrar todas las gestiones históricas, retornar una fecha muy antigua
-                return '1900-01-01 00:00:00';
-            case 'dia':
-                return date('Y-m-d 00:00:00');
-            case 'semana':
-                return date('Y-m-d 00:00:00', strtotime('-7 days'));
-            case 'mes':
-                return date('Y-m-d 00:00:00', strtotime('-30 days'));
-            default:
-                return date('Y-m-d 00:00:00');
-        }
-    }
-    
-    /**
-     * Obtiene la fecha de inicio basada en fechas específicas
-     */
-    private function getFechaInicioFromFechas($fechaInicio, $fechaFin) {
-        if ($fechaInicio && $fechaFin) {
-            return $fechaInicio . ' 00:00:00';
-        }
-        return date('Y-m-d 00:00:00');
-    }
-    
-    /**
-     * Obtiene la fecha de fin basada en fechas específicas
-     */
-    private function getFechaFinFromFechas($fechaInicio, $fechaFin) {
-        if ($fechaInicio && $fechaFin) {
-            return $fechaFin . ' 23:59:59';
-        }
-        return date('Y-m-d 23:59:59');
-    }
-
-    /**
-     * Obtiene métricas del equipo para el coordinador
-     */
-    public function getMetricasEquipo($coordinadorId, $periodo = 'dia') {
-        $fechaInicio = $this->getFechaInicio($periodo);
-        
-        // Primero obtener el total de asesores asignados al coordinador
-        $sqlAsesores = "SELECT COUNT(DISTINCT aac.asesor_id) as total_asesores
-                        FROM asignaciones_asesor_coordinador aac 
-                        WHERE aac.coordinador_id = ? AND aac.estado = 'Activa'";
-        $stmtAsesores = $this->pdo->prepare($sqlAsesores);
-        $stmtAsesores->execute([$coordinadorId]);
-        $totalAsesores = $stmtAsesores->fetch(PDO::FETCH_ASSOC)['total_asesores'];
-        
-        // Obtener el total de clientes de TODAS las cargas del coordinador
-        $sqlTotalClientes = "SELECT COUNT(*) as total_clientes
-                            FROM clientes c
-                            JOIN cargas_excel ce ON c.carga_excel_id = ce.id
-                            WHERE ce.usuario_coordinador_id = ?";
-        $stmtTotalClientes = $this->pdo->prepare($sqlTotalClientes);
-        $stmtTotalClientes->execute([$coordinadorId]);
-        $totalClientes = $stmtTotalClientes->fetch(PDO::FETCH_ASSOC)['total_clientes'];
-        
-        // Luego obtener las métricas del equipo (solo gestiones)
-        $sql = "SELECT 
-                    COUNT(hg.id) as total_gestiones,
-                    COUNT(CASE WHEN hg.resultado IS NOT NULL THEN 1 END) as contactos_efectivos,
-                    COUNT(CASE WHEN hg.resultado IN ('Venta Exitosa', 'VENTA INGRESADA', 'Agendado', 'Interesado') THEN 1 END) as ventas_exitosas,
-                    COUNT(CASE WHEN hg.resultado IN ('Rechazo por Precio', 'Rechazo por Competencia', 'No Interesado', 'No Califica', 'Necesita Pensarlo') THEN 1 END) as ventas_fallidas,
-                    COUNT(CASE WHEN hg.resultado IN ('No Contesta', 'Número Equivocado', 'Buzón de Voz', 'Número Fuera de Servicio', 'Cliente Ocupado') THEN 1 END) as contactos_no_efectivos,
-                    AVG(hg.duracion_llamada) as tiempo_promedio_conversacion,
-                    SUM(hg.monto_venta) as total_ventas_monto,
-                    AVG(CASE WHEN hg.monto_venta > 0 THEN hg.monto_venta END) as promedio_venta
-                FROM asignaciones_clientes ac
-                JOIN asignaciones_asesor_coordinador aac ON ac.asesor_id = aac.asesor_id
-                LEFT JOIN historial_gestion hg ON ac.id = hg.asignacion_id AND hg.fecha_gestion >= ?
-                WHERE aac.coordinador_id = ? AND aac.estado = 'Activa'";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$fechaInicio, $coordinadorId]);
-        $resultado = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        // Agregar el total de asesores y clientes calculados por separado
-        $resultado['total_asesores'] = $totalAsesores;
-        $resultado['total_clientes'] = $totalClientes;
-        
-        // Calcular métricas adicionales
-        $resultado['tasa_conversion'] = $resultado['total_gestiones'] > 0 ? 
-            round(($resultado['ventas_exitosas'] / $resultado['total_gestiones']) * 100, 2) : 0;
-        
-        $resultado['tasa_contacto_efectivo'] = $resultado['total_gestiones'] > 0 ? 
-            round(($resultado['contactos_efectivos'] / $resultado['total_gestiones']) * 100, 2) : 0;
-        
-        $resultado['tiempo_promedio_conversacion'] = $resultado['tiempo_promedio_conversacion'] !== null ? 
-            round($resultado['tiempo_promedio_conversacion'], 2) : 0;
-        $resultado['promedio_venta'] = $resultado['promedio_venta'] !== null ? 
-            round($resultado['promedio_venta'], 2) : 0;
-        
-        return $resultado;
-    }
-    
-    /**
-     * Obtiene métricas del equipo para el coordinador con fechas específicas
-     */
-    public function getMetricasEquipoConFechas($coordinadorId, $fechaInicio, $fechaFin) {
-        $fechaInicioFormateada = $this->getFechaInicioFromFechas($fechaInicio, $fechaFin);
-        $fechaFinFormateada = $this->getFechaFinFromFechas($fechaInicio, $fechaFin);
-        
-        // Primero obtener el total de asesores asignados al coordinador
-        $sqlAsesores = "SELECT COUNT(DISTINCT aac.asesor_id) as total_asesores
-                        FROM asignaciones_asesor_coordinador aac 
-                        WHERE aac.coordinador_id = ? AND aac.estado = 'Activa'";
-        $stmtAsesores = $this->pdo->prepare($sqlAsesores);
-        $stmtAsesores->execute([$coordinadorId]);
-        $totalAsesores = $stmtAsesores->fetch(PDO::FETCH_ASSOC)['total_asesores'];
-        
-        // Obtener el total de clientes de TODAS las cargas del coordinador
-        $sqlTotalClientes = "SELECT COUNT(*) as total_clientes
-                            FROM clientes c
-                            JOIN cargas_excel ce ON c.carga_excel_id = ce.id
-                            WHERE ce.usuario_coordinador_id = ?";
-        $stmtTotalClientes = $this->pdo->prepare($sqlTotalClientes);
-        $stmtTotalClientes->execute([$coordinadorId]);
-        $totalClientes = $stmtTotalClientes->fetch(PDO::FETCH_ASSOC)['total_clientes'];
-        
-        // Luego obtener las métricas del equipo con fechas específicas (solo gestiones)
-        $sql = "SELECT 
-                    COUNT(hg.id) as total_gestiones,
-                    COUNT(CASE WHEN hg.resultado IS NOT NULL THEN 1 END) as contactos_efectivos,
-                    COUNT(CASE WHEN hg.resultado IN ('Venta Exitosa', 'VENTA INGRESADA', 'Agendado', 'Interesado') THEN 1 END) as ventas_exitosas,
-                    COUNT(CASE WHEN hg.resultado IN ('Rechazo por Precio', 'Rechazo por Competencia', 'No Interesado', 'No Califica', 'Necesita Pensarlo') THEN 1 END) as ventas_fallidas,
-                    COUNT(CASE WHEN hg.resultado IN ('No Contesta', 'Número Equivocado', 'Buzón de Voz', 'Número Fuera de Servicio', 'Cliente Ocupado') THEN 1 END) as contactos_no_efectivos,
-                    AVG(hg.duracion_llamada) as tiempo_promedio_conversacion,
-                    SUM(hg.monto_venta) as total_ventas_monto,
-                    AVG(CASE WHEN hg.monto_venta > 0 THEN hg.monto_venta END) as promedio_venta
-                FROM asignaciones_clientes ac
-                JOIN asignaciones_asesor_coordinador aac ON ac.asesor_id = aac.asesor_id
-                LEFT JOIN historial_gestion hg ON ac.id = hg.asignacion_id 
-                    AND hg.fecha_gestion >= ? AND hg.fecha_gestion <= ?
-                WHERE aac.coordinador_id = ? AND aac.estado = 'Activa'";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$fechaInicioFormateada, $fechaFinFormateada, $coordinadorId]);
-        $resultado = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        // Agregar el total de asesores y clientes calculados por separado
-        $resultado['total_asesores'] = $totalAsesores;
-        $resultado['total_clientes'] = $totalClientes;
-        
-        // Calcular métricas adicionales
-        $resultado['tasa_conversion'] = $resultado['total_gestiones'] > 0 ? 
-            round(($resultado['ventas_exitosas'] / $resultado['total_gestiones']) * 100, 2) : 0;
-        
-        $resultado['tasa_contacto_efectivo'] = $resultado['total_gestiones'] > 0 ? 
-            round(($resultado['contactos_efectivos'] / $resultado['total_gestiones']) * 100, 2) : 0;
-        
-        $resultado['tiempo_promedio_conversacion'] = $resultado['tiempo_promedio_conversacion'] !== null ? 
-            round($resultado['tiempo_promedio_conversacion'], 2) : 0;
-        $resultado['promedio_venta'] = $resultado['promedio_venta'] !== null ? 
-            round($resultado['promedio_venta'], 2) : 0;
-        
-        return $resultado;
-    }
-
-    /**
-     * Obtiene métricas de un asesor específico para el coordinador
-     * MEJORADO para manejar casos donde no hay gestiones y fechas específicas
-     */
-    public function getMetricasAsesor($asesorId, $periodo = 'dia', $fechaInicio = null, $fechaFin = null) {
-        try {
-            // Determinar fechas según parámetros
-            if ($fechaInicio && $fechaFin) {
-                $fechaInicioFormateada = $this->getFechaInicioFromFechas($fechaInicio, $fechaFin);
-                $fechaFinFormateada = $this->getFechaFinFromFechas($fechaInicio, $fechaFin);
-            } else {
-                $fechaInicioFormateada = $this->getFechaInicio($periodo);
-                $fechaFinFormateada = date('Y-m-d 23:59:59');
-            }
-            
-            // CONSULTA CORREGIDA: Contar clientes asignados en asignaciones_clientes
-            $sql = "SELECT 
-                        (
-                            -- Contar clientes asignados en asignaciones_clientes
-                            SELECT COUNT(DISTINCT ac.cliente_id) 
-                            FROM asignaciones_clientes ac 
-                            WHERE ac.asesor_id = ? AND ac.estado = 'asignado'
-                        ) as total_clientes,
-                        (
-                            -- Gestiones por asignacion_id únicamente
-                            SELECT COUNT(hg1.id) 
-                            FROM historial_gestion hg1 
-                            JOIN asignaciones_clientes ac1 ON hg1.asignacion_id = ac1.id 
-                            WHERE ac1.asesor_id = ? AND hg1.fecha_gestion >= ? AND hg1.fecha_gestion <= ?
-                        ) as total_gestiones,
-                        (
-                            -- Contactos efectivos por asignacion_id únicamente
-                            SELECT COUNT(hg1.id) 
-                            FROM historial_gestion hg1 
-                            JOIN asignaciones_clientes ac1 ON hg1.asignacion_id = ac1.id 
-                            WHERE ac1.asesor_id = ? AND hg1.fecha_gestion >= ? AND hg1.fecha_gestion <= ? AND hg1.resultado IS NOT NULL
-                        ) as contactos_efectivos,
-                        (
-                            -- Ventas exitosas por asignacion_id únicamente
-                            SELECT COUNT(hg1.id) 
-                            FROM historial_gestion hg1 
-                            JOIN asignaciones_clientes ac1 ON hg1.asignacion_id = ac1.id 
-                            WHERE ac1.asesor_id = ? AND hg1.fecha_gestion >= ? AND hg1.fecha_gestion <= ? AND hg1.resultado IN ('Venta Exitosa', 'VENTA INGRESADA', 'Agendado', 'Interesado')
-                        ) as ventas_exitosas,
-                        (
-                            -- Ventas fallidas por asignacion_id únicamente
-                            SELECT COUNT(hg1.id) 
-                            FROM historial_gestion hg1 
-                            JOIN asignaciones_clientes ac1 ON hg1.asignacion_id = ac1.id 
-                            WHERE ac1.asesor_id = ? AND hg1.fecha_gestion >= ? AND hg1.fecha_gestion <= ? AND hg1.resultado IN ('Rechazo por Precio', 'Rechazo por Competencia', 'No Interesado', 'No Califica', 'Necesita Pensarlo')
-                        ) as ventas_fallidas,
-                        (
-                            -- Tiempo promedio por asignacion_id únicamente
-                            SELECT AVG(hg1.duracion_llamada) 
-                            FROM historial_gestion hg1 
-                            JOIN asignaciones_clientes ac1 ON hg1.asignacion_id = ac1.id 
-                            WHERE ac1.asesor_id = ? AND hg1.fecha_gestion >= ? AND hg1.fecha_gestion <= ? AND hg1.duracion_llamada > 0
-                        ) as tiempo_promedio_conversacion,
-                        (
-                            -- Total ventas por asignacion_id únicamente
-                            SELECT COALESCE(SUM(hg1.monto_venta), 0) 
-                            FROM historial_gestion hg1 
-                            JOIN asignaciones_clientes ac1 ON hg1.asignacion_id = ac1.id 
-                            WHERE ac1.asesor_id = ? AND hg1.fecha_gestion >= ? AND hg1.fecha_gestion <= ? AND hg1.monto_venta > 0
-                        ) as total_ventas_monto
-                    FROM asignaciones_clientes ac
-                    WHERE ac.asesor_id = ? AND ac.estado = 'asignado'";
-            
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([
-                $asesorId,  // total_clientes
-                $asesorId, $fechaInicioFormateada, $fechaFinFormateada,  // total_gestiones
-                $asesorId, $fechaInicioFormateada, $fechaFinFormateada,  // contactos_efectivos
-                $asesorId, $fechaInicioFormateada, $fechaFinFormateada,  // ventas_exitosas
-                $asesorId, $fechaInicioFormateada, $fechaFinFormateada,  // ventas_fallidas
-                $asesorId, $fechaInicioFormateada, $fechaFinFormateada,  // tiempo_promedio_conversacion
-                $asesorId, $fechaInicioFormateada, $fechaFinFormateada,  // total_ventas_monto
-                $asesorId  // WHERE final
-            ]);
-            $resultado = $stmt->fetch(PDO::FETCH_ASSOC);
-            
-            // Verificar si la consulta devolvió resultados
-            if ($resultado === false) {
-                $resultado = [
-                    'total_clientes' => 0,
-                    'total_gestiones' => 0,
-                    'contactos_efectivos' => 0,
-                    'ventas_exitosas' => 0,
-                    'ventas_fallidas' => 0,
-                    'tiempo_promedio_conversacion' => 0,
-                    'total_ventas_monto' => 0
-                ];
-            } else {
-                // Asegurar que todos los campos tengan valores por defecto si son null
-                $resultado = array_map(function($value) {
-                    return $value !== null ? $value : 0;
-                }, $resultado);
-            }
-            
-            // Calcular métricas adicionales con manejo seguro de división por cero
-            $resultado['tasa_conversion'] = $resultado['total_gestiones'] > 0 ? 
-                round(($resultado['ventas_exitosas'] / $resultado['total_gestiones']) * 100, 2) : 0;
-            
-            $resultado['tasa_contacto_efectivo'] = $resultado['total_gestiones'] > 0 ? 
-                round(($resultado['contactos_efectivos'] / $resultado['total_gestiones']) * 100, 2) : 0;
-            
-            $resultado['tiempo_promedio_conversacion'] = $resultado['tiempo_promedio_conversacion'] !== null ? 
-                round($resultado['tiempo_promedio_conversacion'], 2) : 0;
-            
-            // Calcular promedio de venta correctamente
-            $total_ventas_count = $resultado['ventas_exitosas'] ?? 0;
-            if ($total_ventas_count > 0 && $resultado['total_ventas_monto'] > 0) {
-                $resultado['promedio_venta'] = round($resultado['total_ventas_monto'] / $total_ventas_count, 2);
-            } else {
-                $resultado['promedio_venta'] = 0;
-            }
-            
-            // Log para debugging
-            error_log("Métricas obtenidas para asesor ID: " . $asesorId . " - Clientes: " . $resultado['total_clientes'] . ", Gestiones: " . $resultado['total_gestiones']);
-            
-            return $resultado;
-            
-        } catch (Exception $e) {
-            error_log("Error en getMetricasAsesor para asesor ID: " . $asesorId . " - Error: " . $e->getMessage());
-            
-            // Retornar métricas por defecto en caso de error
-            return [
-                'total_clientes' => 0,
-                'total_gestiones' => 0,
-                'contactos_efectivos' => 0,
-                'ventas_exitosas' => 0,
-                'ventas_fallidas' => 0,
-                'tiempo_promedio_conversacion' => 0,
-                'total_ventas_monto' => 0,
-                'promedio_venta' => 0,
-                'tasa_conversion' => 0,
-                'tasa_contacto_efectivo' => 0
-            ];
-        }
-    }
-
-    /**
-     * Obtiene las llamadas pendientes de un asesor (clientes que debe volver a llamar)
-     * SOLUCIÓN HÍBRIDA: Busca tanto en proxima_fecha como en gestiones existentes
-     */
-    public function getLlamadasPendientes($asesorId) {
-        // CONSULTA HÍBRIDA: Combinar gestiones nuevas (con proxima_fecha) y existentes (con resultado VOLVER A LLAMAR)
-        $sql = "SELECT
-                    hg.*,
-                    c.nombre as cliente_nombre,
-                    c.telefono,
-                    c.celular2,
-                    ac.cliente_id,
-                    CASE
-                        WHEN hg.proxima_fecha IS NOT NULL THEN hg.proxima_fecha
-                        WHEN hg.resultado = 'VOLVER A LLAMAR' THEN DATE_ADD(hg.fecha_gestion, INTERVAL 1 DAY)
-                        ELSE NULL
-                    END as fecha_llamada_pendiente
-                FROM historial_gestion hg
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id
-                JOIN clientes c ON ac.cliente_id = c.id
-                WHERE ac.asesor_id = ?
-                AND (
-                    -- Gestiones nuevas con proxima_fecha
-                    (hg.proxima_fecha IS NOT NULL
-                     AND hg.proxima_fecha >= CURDATE()
-                     AND hg.proxima_fecha <= DATE_ADD(CURDATE(), INTERVAL 7 DAY))
-                    OR
-                    -- Gestiones existentes de VOLVER A LLAMAR (sin proxima_fecha)
-                    (hg.resultado = 'VOLVER A LLAMAR'
-                     AND hg.proxima_fecha IS NULL
-                     AND hg.fecha_gestion >= DATE_SUB(CURDATE(), INTERVAL 30 DAY))
-                )
-                ORDER BY fecha_llamada_pendiente ASC, hg.fecha_gestion DESC";
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    
-
-    
-    /**
-     * Obtiene todas las gestiones de seguimiento de un asesor (nuevas y existentes)
-     * SOLUCIÓN HÍBRIDA para compatibilidad con gestiones existentes
-     */
-    public function getGestionesSeguimiento($asesorId) {
-        $sql = "SELECT 
-                    hg.*, 
-                    c.nombre as cliente_nombre, 
-                    c.telefono, 
-                    c.celular2, 
-                    ac.cliente_id,
-                    CASE 
-                        WHEN hg.proxima_fecha IS NOT NULL THEN hg.proxima_fecha
-                        WHEN hg.resultado = 'VOLVER A LLAMAR' THEN DATE_ADD(hg.fecha_gestion, INTERVAL 1 DAY)
-                        ELSE NULL
-                    END as fecha_seguimiento,
-                    CASE 
-                        WHEN hg.proxima_fecha IS NOT NULL THEN 'Nueva Gestión'
-                        WHEN hg.resultado = 'VOLVER A LLAMAR' THEN 'Gestión Existente'
-                        ELSE 'Sin Seguimiento'
-                    END as tipo_seguimiento
-                FROM historial_gestion hg
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id
-                JOIN clientes c ON ac.cliente_id = c.id
-                WHERE ac.asesor_id = ? 
-                AND (
-                    -- Gestiones nuevas con proxima_fecha
-                    hg.proxima_fecha IS NOT NULL 
-                    OR
-                    -- Gestiones existentes de VOLVER A LLAMAR
-                    hg.resultado = 'VOLVER A LLAMAR'
-                )
-                ORDER BY fecha_seguimiento ASC, hg.fecha_gestion DESC";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    /**
-     * Obtiene el historial COMPLETO de gestiones de un asesor
-     * INCLUYE múltiples gestiones por cliente para el CSV
-     */
-    public function getHistorialCompletoAsesor($asesorId, $fechaInicio = null, $fechaFin = null) {
-        try {
-            $sql = "SELECT 
-                        hg.id,
-                        hg.fecha_gestion,
-                        hg.tipo_gestion,
-                        hg.resultado,
-                        hg.comentarios,
-                        hg.monto_venta,
-                        hg.duracion_llamada,
-                        hg.edad,
-                        hg.num_personas,
-                        hg.valor_cotizacion,
-                        hg.whatsapp_enviado,
-                        c.nombre as cliente_nombre,
-                        c.cedula,
-                        c.telefono,
-                        c.celular2,
-                        c.fecha_creacion,
-                        ac.estado as estado_asignacion,
-                        ac.cliente_id
-                    FROM historial_gestion hg
-                    LEFT JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id
-                    LEFT JOIN clientes c ON ac.cliente_id = c.id
-                    WHERE (ac.asesor_id = ? OR hg.asesor_id = ?)";
-            
-            $params = [$asesorId, $asesorId];
-            
-            // Filtro de fechas si se especifican
-            if ($fechaInicio && $fechaFin) {
-                $sql .= " AND DATE(hg.fecha_gestion) BETWEEN ? AND ?";
-                $params[] = $fechaInicio;
-                $params[] = $fechaFin;
-            }
-            
-            // Ordenar por cliente y luego por fecha de gestión
-            $sql .= " ORDER BY c.nombre ASC, hg.fecha_gestion DESC";
-            
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute($params);
-            return $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-        } catch (Exception $e) {
-            error_log("Error en getHistorialCompletoAsesor: " . $e->getMessage());
-            return [];
-        }
-    }
-    
-    /**
-     * Obtiene gestiones de un cliente específico en tareas
-     */
-    public function getGestionesClienteEnTarea($clienteId, $asesorId, $fechaInicio = null, $fechaFin = null) {
-        try {
-            $sql = "SELECT hg.* 
-                    FROM historial_gestion hg
-                    JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id
-                    WHERE ac.cliente_id = ? AND ac.asesor_id = ?";
-            
-            $params = [$clienteId, $asesorId];
-            
-            if ($fechaInicio && $fechaFin) {
-                $sql .= " AND hg.fecha_gestion >= ? AND hg.fecha_gestion <= ?";
-                $params[] = $fechaInicio;
-                $params[] = $fechaFin;
-            }
-            
-            $sql .= " ORDER BY hg.fecha_gestion DESC";
-            
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute($params);
-            return $stmt->fetchAll(PDO::FETCH_ASSOC);
-        } catch (Exception $e) {
-            error_log("Error en getGestionesClienteEnTarea: " . $e->getMessage());
-            return [];
-        }
-    }
-    
-    /**
-     * Obtiene historial completo para exportación con todos los campos requeridos.
-     * Incluye tipificaciones de 2 y 3 nivel, canales autorizados y nombre de base de datos.
-     * Incluye gestiones de todas las bases (activas e inactivas) para el CSV del coordinador.
-     */
-    public function getHistorialCompletoParaExportacion($asesorId, $fechaInicio = null, $fechaFin = null) {
-        try {
-            $sql = "SELECT
-                        hg.id,
-                        hg.fecha_gestion,
-                        hg.tipo_gestion,
-                        hg.resultado,
-                        hg.comentarios,
-                        hg.forma_contacto,
-                        hg.proxima_fecha,
-                        hg.numero_obligacion as factura_gestionada,
-                        hg.monto_obligacion,
-                        hg.fecha_acuerdo,
-                        hg.monto_acuerdo,
-                        hg.telefono_contacto,
-                        c.nombre as cliente_nombre,
-                        c.cedula,
-                        c.telefono,
-                        c.celular2,
-                        c.cel3,
-                        c.cel4,
-                        c.cel5,
-                        c.cel6,
-                        c.cel7,
-                        c.cel8,
-                        c.cel9,
-                        c.cel10,
-                        u.nombre_completo as asesor_nombre,
-                        ce.nombre_cargue as base_datos_nombre,
-                        ac.estado as estado_asignacion,
-                        GROUP_CONCAT(DISTINCT f.telefono2 ORDER BY f.id SEPARATOR ', ') as telefonos_adicionales_2,
-                        GROUP_CONCAT(DISTINCT f.telefono3 ORDER BY f.id SEPARATOR ', ') as telefonos_adicionales_3,
-                        GROUP_CONCAT(DISTINCT f.franja ORDER BY f.id SEPARATOR ', ') as franja_cliente
-                    FROM historial_gestion hg
-                    INNER JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id
-                    INNER JOIN clientes c ON ac.cliente_id = c.id
-                    INNER JOIN usuarios u ON ac.asesor_id = u.id
-                    LEFT JOIN cargas_excel ce ON c.carga_excel_id = ce.id
-                    LEFT JOIN facturas f ON c.id = f.cliente_id
-                    WHERE ac.asesor_id = ?";
-
-            $params = [$asesorId];
-
-            // Filtro de fechas DENTRO del WHERE (antes del GROUP BY) para que el período se aplique correctamente
-            if ($fechaInicio && $fechaFin) {
-                $sql .= " AND DATE(hg.fecha_gestion) BETWEEN ? AND ?";
-                $params[] = $fechaInicio;
-                $params[] = $fechaFin;
-            } else {
-                $sql .= " AND DATE(hg.fecha_gestion) >= '2020-01-01'";
-            }
-
-            $sql .= " GROUP BY hg.id, c.id ORDER BY hg.fecha_gestion DESC";
-
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute($params);
-            $gestiones = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-            // Agregar información adicional a cada gestión
-            foreach ($gestiones as &$gestion) {
-                // Obtener canales autorizados
-                try {
-                    $gestion['canales_autorizados'] = $this->getCanalesAutorizados($gestion['id']);
-                } catch (Exception $e) {
-                    $gestion['canales_autorizados'] = [];
-                }
-                
-                // Obtener tipificaciones de 2 y 3 nivel
-                try {
-                    $gestion['tipificacion_2_nivel'] = $this->getTipificacion2Nivel($gestion['tipo_gestion']);
-                } catch (Exception $e) {
-                    $gestion['tipificacion_2_nivel'] = $gestion['tipo_gestion'];
-                }
-                
-                try {
-                    $gestion['tipificacion_3_nivel'] = $this->getTipificacion3Nivel($gestion['resultado']);
-                } catch (Exception $e) {
-                    $gestion['tipificacion_3_nivel'] = $gestion['resultado'];
-                }
-                
-                // Formatear obligación para CSV
-                try {
-                    $gestion['obligacion_texto'] = $this->formatearObligacionParaExportacion($gestion);
-                } catch (Exception $e) {
-                    $gestion['obligacion_texto'] = 'Ninguna';
-                }
-                
-                // Formatear canales autorizados para CSV
-                try {
-                    $gestion['canales_autorizados_texto'] = $this->formatearCanalesAutorizados($gestion['canales_autorizados']);
-                } catch (Exception $e) {
-                    $gestion['canales_autorizados_texto'] = '';
-                }
-            }
-            
-            return $gestiones;
-            
-        } catch (Exception $e) {
-            error_log("Error en getHistorialCompletoParaExportacion: " . $e->getMessage());
-            return [];
-        }
-    }
-    
-    /**
-     * Formatea la factura para mostrar en CSV
-     * Usa el número de obligación del historial_gestion
-     */
-    private function formatearObligacionParaExportacion($gestion) {
-        // Usar el número de obligación del historial_gestion
-        if (!empty($gestion['factura_gestionada'])) {
-            return $gestion['factura_gestionada'];
-        }
-        
-        // Si no hay factura, mostrar "Ninguna"
-        return 'Ninguna';
-    }
-    
-    /**
-     * Obtiene tipificación de 2 nivel basada en el tipo de gestión
-     */
-    private function getTipificacion2Nivel($tipoGestion) {
-        $partes = $this->descomponerTipoGestionAlmacenado($tipoGestion);
-        $clave = $partes['nivel2'] !== '' ? $partes['nivel2'] : $tipoGestion;
-
-        $tipificaciones2Nivel = [
-            // Valores del sistema de tipificación de 3 niveles
-            'acuerdo_pago' => 'ACUERDO DE PAGO',
-            'ya_pago' => 'YA PAGO',
-            'localizado_sin_acuerdo' => 'LOCALIZADO SIN ACUERDO',
-            'reclamo' => 'RECLAMO',
-            'volver_llamar' => 'VOLVER A LLAMAR',
-            'recordar_pago' => 'RECORDAR PAGO',
-            'venta_novedad' => 'VENTA CON NOVEDAD',
-            // Valores legacy del sistema anterior
-            'contacto_exitoso' => 'CONTACTO EXITOSO',
-            'contacto_tercero' => 'CONTACTO CON TERCERO',
-            'sin_contacto' => 'SIN CONTACTO',
-            'Llamada de Venta' => 'LLAMADA DE VENTA',
-            'Llamada de Gestión' => 'LLAMADA DE GESTIÓN',
-            'Cliente Interesado' => 'CLIENTE INTERESADO',
-            'Venta Ingresada' => 'VENTA INGRESADA',
-            'hacer_llamada' => 'HACER LLAMADA',
-            'recibir_llamada' => 'RECIBIR LLAMADA'
-        ];
-        
-        return $tipificaciones2Nivel[$clave] ?? $clave;
-    }
-    
-    /**
-     * Obtiene tipificación de 3 nivel basada en el resultado
-     */
-    private function getTipificacion3Nivel($resultado) {
-        $tipificaciones3Nivel = [
-            // Opciones de ACUERDO DE PAGO
-            'acuerdo_pago' => 'ACUERDO DE PAGO',
-            'ya_pago' => 'YA PAGO',
-            'localizado_sin_acuerdo' => 'LOCALIZADO SIN ACUERDO',
-            'reclamo' => 'RECLAMO',
-            'volver_llamar' => 'VOLVER A LLAMAR',
-            'recordar_pago' => 'RECORDAR PAGO',
-            'venta_novedad' => 'VENTA CON NOVEDAD',
-            
-            // Opciones de RECLAMO (razones específicas)
-            'desempleo' => 'DESEMPLEO',
-            'incremento_tarifa' => 'INCREMENTO DE TARIFA',
-            'otras_prioridades_economicas' => 'TIENE OTRAS PRIORIDADES ECONOMICAS',
-            'disminucion_ingresos' => 'DISMINUCION DE INGRESOS',
-            'adquirio_otro_servicio_salud' => 'ADQUIRIO OTRO SERVICIO DE SALUD',
-            'no_utiliza_beneficios' => 'NO UTILIZA/NO BENEFICIOS DEL SERVICIO',
-            'sale_del_pais' => 'SALE DEL PAIS',
-            'fallecido' => 'FALLECIDO',
-            'humanizacion_servicio' => 'HUMANIZACION DEL SERVICIO GENERAL',
-            'oportunidad_nunca_llegaron' => 'OPORTUNIDAD/NUNCA LLEGARON',
-            'metodo_pago_errado' => 'METODO DE PAGO ERRADO/DEBITO AUTOMATICO',
-            'no_realizan_debito_automatico' => 'NO REALIZAN DEBITO AUTOMATICO',
-            'falsa_promesa_comercial' => 'FALSA PROMESA COMERCIAL',
-            'fraude' => 'FRAUDE',
-            'factura_no_corresponde' => 'FACTURA NO CORRESPONDE',
-            'no_entrega_aviso_pago' => 'NO ENTREGA DE AVISO DE PAGO/FACTURA',
-            'facturacion_errada' => 'FACTURACION ERRADA',
-            'cambio_traslado_sin_cobertura' => 'CAMBIO/TRASLADO SIN COBERTURA',
-            'cancelacion_no_aplicada' => 'CANCELACION NO APLICADA',
-            
-            // Otras opciones del sistema
-            'incumplimiento_ofercimientos' => 'INCUMPLIMIENTO OFRECIMIENTOS REALIZADOS (LEALTAD)',
-            'inconformidad_pqr' => 'INCONFORMIDAD PQR',
-            'informacion_errada' => 'INFORMACION ERRADA',
-            'no_contestaron_sac' => 'NO CONTESTARON EN LA LINEA DE SAC',
-            'reclamo_pendiente_respuesta' => 'RECLAMO PENDIENTE DE RESPUESTA',
-            'pago_afiliacion_no_aplicado' => 'PAGO DE AFILIACION NO APLICADO',
-            'pago_sin_aplicar' => 'PAGO SIN APLICAR',
-            'no_contesta' => 'NO CONTESTA',
-            'mensaje_tercero' => 'MENSAJE CON TERCERO',
-            'no_informa' => 'NO INFORMA',
-            'contesta_cuelga' => 'CONTESTA-CUELGA',
-            'aqui_no_vive' => 'AQUÍ NO VIVE',
-            'fallecido_otro' => 'FALLECIDO/OTRO',
-            'localizacion' => 'LOCALIZACIÓN',
-            'envio_estado_cuenta' => 'ENVÍO DE ESTADO DE CUENTA',
-            'venta_novedad_analisis' => 'VENTA CON NOVEDAD ANÁLISIS DATA',
-            'informacion_adicional' => 'INFORMACIÓN ADICIONAL',
-            
-            // Valores legacy del sistema anterior
-            'INTERESADO' => 'INTERESADO',
-            'VENTA INGRESADA' => 'VENTA INGRESADA',
-            'VOLVER A LLAMAR' => 'VOLVER A LLAMAR',
-            'Número Equivocado' => 'NÚMERO EQUIVOCADO',
-            'Venta Exitosa' => 'VENTA EXITOSA',
-            'BUZÓN DE VOZ' => 'BUZÓN DE VOZ',
-            'FALLECIDO' => 'FALLECIDO',
-            
-            // Valores del sistema anterior (con códigos numéricos)
-            '01' => '01. CANCELADA',
-            '02' => '02. MEMORANDO CNC',
-            '03' => '03. ACUERDO DE PAGO',
-            '04' => '04. PAGO TOTAL',
-            '05' => '05. YA PAGO',
-            '06' => '06. PROMESA',
-            '06.1' => '06.1 BANNER',
-            '06.2' => '06.2 REFINANCIACION',
-            '06.3' => '06.3 UNIFICACION',
-            '06.4' => '06.4 NIVELACION O NORMALIZACION',
-            '07' => '07. REPORTE DE PAGO',
-            '08' => '08. ABONOS',
-            '09' => '09. NEGOCIACION EN TRAMITE',
-            '10' => '10. SEGUIM GESTION',
-            '11' => '11. SEGUIMIENTO',
-            '12' => '12. RENUENTE',
-            '13' => '13. VOLUNTAD DE PAGO',
-            '14' => '14. VOLVER A LLAMAR',
-            '14.1' => '14.1 VOLVER A LLAMAR HOY',
-            '15' => '15. LOCALIZADO',
-            '16' => '16. CONTACTO CON TERCERO',
-            '17' => '17. FALLECIDO',
-            '18' => '18. QUEJA / RECLAMO',
-            '19' => '19. NO CONTESTAN',
-            '20' => '20. ACTUALIZACION DATOS',
-            '21' => '21. MENSAJE',
-            '22' => '22. CORREO-E',
-            '23' => '23. LEY DE INSOLVENCIA',
-            '24' => '24. NO LOCALIZADO',
-            '25' => '25. NUMERO EQUIVOCADO',
-            '26' => '26. WHATSAPP',
-            '27' => '27. ABANDONO CHAT'
-        ];
-        
-        return $tipificaciones3Nivel[$resultado] ?? $resultado;
-    }
-    
-    /**
-     * Formatea los canales autorizados para mostrar en CSV
-     */
-    private function formatearCanalesAutorizados($canales) {
-        if (empty($canales)) {
-            return 'No especificados';
-        }
-        
-        $canalesMap = [
-            'llamada' => 'Llamada',
-            'correo_electronico' => 'Correo Electrónico',
-            'sms' => 'SMS',
-            'correo_fisico' => 'Correo Físico',
-            'mensajeria_aplicaciones' => 'Mensajería por Aplicaciones'
-        ];
-        
-        $canalesFormateados = [];
-        foreach ($canales as $canal) {
-            $canalesFormateados[] = $canalesMap[$canal] ?? $canal;
-        }
-        
-        return implode(', ', $canalesFormateados);
-    }
-    
-
-    /**
-     * Obtiene llamadas pendientes consolidadas de todos los asesores de un coordinador
-     */
-    public function getLlamadasPendientesCoordinador($coordinadorId) {
-        $sql = "SELECT
-                    c.id as cliente_id,
-                    c.nombre as cliente_nombre,
-                    c.cedula,
-                    c.telefono,
-                    c.celular2,
-                    hg.proxima_fecha,
-                    hg.resultado,
-                    hg.fecha_gestion,
-                    hg.comentarios,
-                    ac.id as asignacion_id,
-                    u.nombre_completo as asesor_nombre,
-                    u.id as asesor_id
-                FROM clientes c
-                JOIN asignaciones_clientes ac ON c.id = ac.cliente_id
-                JOIN historial_gestion hg ON hg.asignacion_id = ac.id
-                JOIN usuarios u ON ac.asesor_id = u.id
-                JOIN asignaciones_asesor_coordinador aac ON ac.asesor_id = aac.asesor_id
-                WHERE aac.coordinador_id = ?
-                    AND aac.estado = 'Activa'
-                    AND hg.resultado = 'VOLVER A LLAMAR'
-                    AND hg.fecha_gestion = (
-                        SELECT MAX(hg2.fecha_gestion)
-                        FROM historial_gestion hg2
-                        JOIN asignaciones_clientes ac2 ON hg2.asignacion_id = ac2.id
-                        WHERE ac2.cliente_id = c.id AND ac2.asesor_id = ac.asesor_id
-                    )
-                    AND (
-                        (hg.proxima_fecha IS NOT NULL AND DATE(hg.proxima_fecha) = CURDATE())
-                        OR
-                        (hg.proxima_fecha IS NULL AND DATE(hg.fecha_gestion) = CURDATE())
-                    )
-                ORDER BY hg.fecha_gestion DESC";
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$coordinadorId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    /**
-     * Obtiene el total de llamadas pendientes consolidadas de todos los asesores de un coordinador
-     */
-    public function getTotalLlamadasPendientesCoordinador($coordinadorId) {
-        $sql = "SELECT COUNT(DISTINCT c.id) as total
-                FROM clientes c
-                JOIN asignaciones_clientes ac ON c.id = ac.cliente_id
-                JOIN historial_gestion hg ON hg.asignacion_id = ac.id
-                JOIN asignaciones_asesor_coordinador aac ON ac.asesor_id = aac.asesor_id
-                WHERE aac.coordinador_id = ?
-                    AND aac.estado = 'Activa'
-                    AND hg.resultado = 'VOLVER A LLAMAR'
-                    AND hg.fecha_gestion = (
-                        SELECT MAX(hg2.fecha_gestion)
-                        FROM historial_gestion hg2
-                        JOIN asignaciones_clientes ac2 ON hg2.asignacion_id = ac2.id
-                        WHERE ac2.cliente_id = c.id AND ac2.asesor_id = ac.asesor_id
-                    )
-                    AND (
-                        (hg.proxima_fecha IS NOT NULL AND DATE(hg.proxima_fecha) = CURDATE())
-                        OR
-                        (hg.proxima_fecha IS NULL AND DATE(hg.fecha_gestion) = CURDATE())
-                    )";
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$coordinadorId]);
-        $resultado = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $resultado['total'] ?? 0;
-    }
-
-    /**
-     * Transfiere un recordatorio de un asesor a otro
-     */
-    public function transferirRecordatorio($clienteId, $asesorOrigenId, $asesorDestinoId, $coordinadorId) {
-        try {
-            // Verificar que ambos asesores estén asignados al coordinador
-            $sqlVerificar = "SELECT COUNT(*) as total FROM asignaciones_asesor_coordinador
-                            WHERE coordinador_id = ? AND asesor_id IN (?, ?) AND estado = 'Activa'";
-            $stmtVerificar = $this->pdo->prepare($sqlVerificar);
-            $stmtVerificar->execute([$coordinadorId, $asesorOrigenId, $asesorDestinoId]);
-            $verificacion = $stmtVerificar->fetch(PDO::FETCH_ASSOC);
-
-            if ($verificacion['total'] != 2) {
-                throw new Exception("Uno o ambos asesores no están asignados a este coordinador");
-            }
-
-            // Obtener la asignación actual del cliente
-            $sqlAsignacion = "SELECT ac.id as asignacion_id, ac.asesor_id
-                            FROM asignaciones_clientes ac
-                            WHERE ac.cliente_id = ? AND ac.asesor_id = ?";
-            $stmtAsignacion = $this->pdo->prepare($sqlAsignacion);
-            $stmtAsignacion->execute([$clienteId, $asesorOrigenId]);
-            $asignacion = $stmtAsignacion->fetch(PDO::FETCH_ASSOC);
-
-            if (!$asignacion) {
-                throw new Exception("No se encontró la asignación del cliente al asesor origen");
-            }
-
-            // Transferir la asignación al nuevo asesor
-            $sqlTransferir = "UPDATE asignaciones_clientes SET asesor_id = ? WHERE id = ?";
-            $stmtTransferir = $this->pdo->prepare($sqlTransferir);
-            $resultado = $stmtTransferir->execute([$asesorDestinoId, $asignacion['asignacion_id']]);
-
-            if ($resultado) {
-                // Log de la transferencia
-                error_log("Recordatorio transferido - Cliente ID: {$clienteId}, De asesor ID: {$asesorOrigenId} a asesor ID: {$asesorDestinoId}, Coordinador ID: {$coordinadorId}");
-                return true;
-            } else {
-                throw new Exception("Error al transferir la asignación");
-            }
-
-        } catch (Exception $e) {
-            error_log("Error en transferirRecordatorio: " . $e->getMessage());
-            throw $e;
-        }
-    }
-
-    /**
-     * Obtiene la lista de asesores disponibles para transferir recordatorios (excluyendo el asesor actual)
-     */
-    public function getAsesoresParaTransferencia($coordinadorId, $asesorActualId = null) {
-        $sql = "SELECT u.id, u.nombre_completo
-                FROM usuarios u
-                JOIN asignaciones_asesor_coordinador aac ON u.id = aac.asesor_id
-                WHERE aac.coordinador_id = ? AND aac.estado = 'Activa' AND u.estado = 'Activo'";
-
-        $params = [$coordinadorId];
-
-        if ($asesorActualId) {
-            $sql .= " AND u.id != ?";
-            $params[] = $asesorActualId;
-        }
-
-        $sql .= " ORDER BY u.nombre_completo";
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-
-    /**
-     * Obtener total de gestiones por asesor y cliente
-     */
-    public function getTotalGestionesByAsesorAndCliente($asesorId, $clienteId) {
-        $sql = "SELECT COUNT(*) as total
-                FROM historial_gestion hg
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id
-                WHERE ac.asesor_id = ? AND ac.cliente_id = ?";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId, $clienteId]);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        return $result['total'] ?? 0;
-    }
-    
-    /**
-     * Registra automáticamente una actividad cuando se crea una gestión
-     */
-    private function registrarActividadAutomatica($historialGestionId, $gestionData) {
-        try {
-            error_log("Iniciando registrarActividadAutomatica para gestión ID: $historialGestionId");
-            
-            // Obtener información del cliente y asesor
-            $sql = "SELECT ac.cliente_id, ac.asesor_id 
-                    FROM asignaciones_clientes ac 
-                    WHERE ac.id = ?";
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([$gestionData['asignacion_id']]);
-            $asignacion = $stmt->fetch(PDO::FETCH_ASSOC);
-            
-            if (!$asignacion) {
-                error_log("No se encontró asignación para ID: " . $gestionData['asignacion_id']);
-                return false;
-            }
-            
-            error_log("Asignación encontrada - Cliente: {$asignacion['cliente_id']}, Asesor: {$asignacion['asesor_id']}");
-            
-            // Crear instancia del modelo de actividades
-            require_once __DIR__ . '/ActividadProductoModel.php';
-            $actividadModel = new ActividadProductoModel($this->pdo);
-            
-            error_log("Modelo de actividades creado");
-            
-            // Registrar la gestión del producto
-            $actividadId = $actividadModel->registrarGestionProducto(
-                $historialGestionId,
-                $asignacion['cliente_id'],
-                $asignacion['asesor_id'],
-                $gestionData
-            );
-            
-            if ($actividadId) {
-                error_log("Actividad registrada con ID: $actividadId");
-            } else {
-                error_log("Error al registrar actividad");
-            }
-            
-            // Registrar log del sistema
-            $logResult = $actividadModel->registrarLogSistema([
-                'tipo_evento' => 'gestion_producto',
-                'entidad_afectada' => 'historial_gestion',
-                'entidad_id' => $historialGestionId,
-                'usuario_id' => $asignacion['asesor_id'],
-                'accion' => 'crear_gestion',
-                'descripcion' => 'Nueva gestión de producto creada',
-                'datos_nuevos' => $gestionData
-            ]);
-            
-            error_log("Log del sistema registrado: " . ($logResult ? 'true' : 'false'));
-            
-            return true;
-            
-        } catch (Exception $e) {
-            error_log("Error en registrarActividadAutomatica: " . $e->getMessage());
-            error_log("Stack trace: " . $e->getTraceAsString());
-            return false;
-        }
-    }
-
-    /**
-     * Obtiene gestiones por día para el dashboard del asesor
-     */
-    public function getGestionesPorDia($asesorId, $periodo = 'dia') {
-        $fechaInicio = $this->getFechaInicio($periodo);
-        
-        $sql = "SELECT 
-                    DATE(hg.fecha_gestion) as fecha,
-                    COUNT(*) as cantidad,
-                    COUNT(CASE WHEN {$this->sqlTipoGestionNivel2()} IN ('acuerdo_pago', 'ya_pago', 'localizado_sin_acuerdo', 'reclamo', 'volver_llamar', 'recordar_pago', 'venta_novedad') OR hg.tipo_gestion = 'contacto_exitoso' THEN 1 END) as contactos_efectivos,
-                    COUNT(CASE WHEN {$this->sqlTipoGestionNivel2()} = 'acuerdo_pago' OR hg.resultado = 'acuerdo_pago' OR hg.monto_acuerdo > 0 THEN 1 END) as acuerdos,
-                    COUNT(CASE WHEN {$this->sqlTipoGestionNivel2()} IN ('aqui_no_vive', 'mensaje_tercero', 'fallecido_otro', 'no_contesta', 'buzon_mensajes', 'telefono_danado', 'localizacion', 'envio_estado_cuenta', 'venta_novedad_analisis') OR hg.tipo_gestion IN ('contacto_tercero', 'sin_contacto') THEN 1 END) as contactos_no_efectivos
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                WHERE ac.asesor_id = ? AND hg.fecha_gestion >= ?
-                GROUP BY DATE(hg.fecha_gestion)
-                ORDER BY fecha ASC";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId, $fechaInicio]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-    
-    /**
-     * Obtiene gestiones de los últimos 7 días para el gráfico
-     */
     public function getGestionesUltimosDias($asesorId, $dias = 7) {
-        $sql = "SELECT 
-                    DATE(hg.fecha_gestion) as fecha,
-                    COUNT(*) as cantidad
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                WHERE ac.asesor_id = ? 
-                AND hg.fecha_gestion >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
-                GROUP BY DATE(hg.fecha_gestion)
-                ORDER BY fecha ASC";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId, $dias]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
-    
-    /**
-     * Obtiene los últimos clientes gestionados que estén en las tareas asignadas
-     */
-    public function getUltimosClientesGestionadosTareas($asesorId, $clienteIdsTareas, $limite = 5) {
-        if (empty($clienteIdsTareas)) {
-            return [];
+        $dias = max(1, min(60, (int)$dias));
+        $inicioDt = new DateTime('today');
+        $inicioDt->modify('-' . ($dias - 1) . ' days');
+        $inicio = $inicioDt->format('Y-m-d 00:00:00');
+        $fin = (new DateTime('today'))->format('Y-m-d 23:59:59');
+
+        $stmt = $this->pdo->prepare("
+            SELECT DATE(hg.fecha_creacion) AS fecha, COUNT(*) AS cantidad
+            FROM historial_gestiones hg
+            WHERE hg.asesor_cedula = ?
+              AND hg.fecha_creacion BETWEEN ? AND ?
+            GROUP BY DATE(hg.fecha_creacion)
+            ORDER BY DATE(hg.fecha_creacion) ASC
+        ");
+        $stmt->execute([(string)$asesorId, (string)$inicio, (string)$fin]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        $map = [];
+        foreach ($rows as $r) {
+            $map[(string)($r['fecha'] ?? '')] = (int)($r['cantidad'] ?? 0);
         }
-        
-        $placeholders = str_repeat('?,', count($clienteIdsTareas) - 1) . '?';
-        
-        $sql = "SELECT DISTINCT
-                    c.id as cliente_id,
-                    c.nombre as cliente_nombre,
-                    c.cedula as cliente_cedula,
-                    c.telefono as cliente_telefono,
-                    hg.fecha_gestion,
-                    hg.tipo_gestion,
-                    hg.resultado,
-                    hg.comentarios,
-                    hg.monto_venta,
-                    hg.duracion_llamada
-                FROM historial_gestion hg 
-                JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id 
-                JOIN clientes c ON ac.cliente_id = c.id
-                WHERE ac.asesor_id = ? 
-                AND c.id IN ($placeholders)
-                AND hg.fecha_gestion IS NOT NULL
-                ORDER BY hg.fecha_gestion DESC
-                LIMIT " . intval($limite);
-        
-        $params = array_merge([$asesorId], $clienteIdsTareas);
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-        
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $out = [];
+        $cursor = clone $inicioDt;
+        for ($i = 0; $i < $dias; $i++) {
+            $key = $cursor->format('Y-m-d');
+            $out[] = ['fecha' => $key, 'cantidad' => (int)($map[$key] ?? 0)];
+            $cursor->modify('+1 day');
+        }
+        return $out;
     }
-    
-    /**
-     * Obtiene las observaciones y fecha de próxima llamada de una gestión
-     */
-    public function getObservacionesGestion($gestionId) {
-        $sql = "SELECT comentarios, proxima_fecha 
-                FROM historial_gestion 
-                WHERE id = ?";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$gestionId]);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
-        
-        // Extraer hora de proxima_fecha si existe
-        if (isset($result['proxima_fecha']) && $result['proxima_fecha']) {
-            try {
-                $fecha = new DateTime($result['proxima_fecha']);
-                $result['proxima_hora'] = $fecha->format('H:i:s');
-            } catch (Exception $e) {
-                $result['proxima_hora'] = '';
+
+    public function getClientesConSeguimiento($asesorId) { return []; }
+
+    public function getUltimasGestiones($asesorId, $limit = 5) {
+        $limit = max(1, min(50, (int)$limit));
+        $stmt = $this->pdo->prepare("
+            SELECT
+                hg.*,
+                c.nombre AS cliente_nombre,
+                c.cedula AS cliente_cedula,
+                b.nombre AS nombre_base
+            FROM historial_gestiones hg
+            JOIN clientes c ON hg.cliente_id = c.id_cliente
+            JOIN base_clientes b ON c.base_id = b.id_base
+            WHERE hg.asesor_cedula = ?
+            ORDER BY hg.fecha_creacion DESC, hg.id_gestion DESC
+            LIMIT {$limit}
+        ");
+        $stmt->execute([(string)$asesorId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public function getLlamadasPendientesHoy($asesorId) {
+        $stmt = $this->pdo->prepare("
+            SELECT
+                c.id_cliente,
+                c.nombre AS cliente_nombre,
+                c.cedula AS cliente_cedula,
+                c.tel1 AS telefono,
+                b.nombre AS nombre_base,
+                hg.fecha_creacion AS fecha_gestion,
+                hg.resultado_contacto,
+                hg.razon_especifica
+            FROM historial_gestiones hg
+            JOIN clientes c ON hg.cliente_id = c.id_cliente
+            JOIN base_clientes b ON c.base_id = b.id_base
+            WHERE hg.asesor_cedula = ?
+              AND DATE(hg.fecha_creacion) = CURDATE()
+              AND (hg.resultado_contacto = 'volver_llamar' OR hg.resultado_contacto LIKE '%VOLVER A LLAMAR%')
+            ORDER BY hg.fecha_creacion DESC
+            LIMIT 50
+        ");
+        $stmt->execute([(string)$asesorId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public function getTotalLlamadasPendientesHoy($asesorId) {
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*) AS total
+            FROM historial_gestiones
+            WHERE asesor_cedula = ?
+              AND DATE(fecha_creacion) = CURDATE()
+              AND (resultado_contacto = 'volver_llamar' OR resultado_contacto LIKE '%VOLVER A LLAMAR%')
+        ");
+        $stmt->execute([(string)$asesorId]);
+        return (int)($stmt->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
+    }
+
+    public function getClientesGestionados($asesorId) {
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(DISTINCT cliente_id) AS total
+            FROM historial_gestiones
+            WHERE asesor_cedula = ?
+        ");
+        $stmt->execute([(string)$asesorId]);
+        return (int)($stmt->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
+    }
+
+    public function getTotalRecaudado($asesorId) {
+        $stmt = $this->pdo->prepare("
+            SELECT COALESCE(SUM(a.valor_acuerdo), 0) AS total
+            FROM acuerdos a
+            JOIN historial_gestiones hg ON a.gestion_id = hg.id_gestion
+            WHERE hg.asesor_cedula = ?
+        ");
+        $stmt->execute([(string)$asesorId]);
+        return (float)($stmt->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
+    }
+
+    public function getMetricasSemana($asesorId) {
+        [$inicio, $fin] = $this->rangoFechasPeriodo('semana');
+        $stmt = $this->pdo->prepare("
+            SELECT
+                COUNT(*) AS gestiones_semana,
+                SUM(CASE WHEN COALESCE(resultado_contacto,'') <> '' THEN 1 ELSE 0 END) AS contactos_efectivos_semana
+            FROM historial_gestiones
+            WHERE asesor_cedula = ?
+              AND fecha_creacion BETWEEN ? AND ?
+        ");
+        $stmt->execute([(string)$asesorId, (string)$inicio, (string)$fin]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        $stmt2 = $this->pdo->prepare("
+            SELECT COUNT(*) AS acuerdos_semana
+            FROM acuerdos a
+            JOIN historial_gestiones hg ON a.gestion_id = hg.id_gestion
+            WHERE hg.asesor_cedula = ?
+              AND hg.fecha_creacion BETWEEN ? AND ?
+        ");
+        $stmt2->execute([(string)$asesorId, (string)$inicio, (string)$fin]);
+        $row2 = $stmt2->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        return [
+            'gestiones_semana' => (int)($row['gestiones_semana'] ?? 0),
+            'contactos_efectivos_semana' => (int)($row['contactos_efectivos_semana'] ?? 0),
+            'acuerdos_semana' => (int)($row2['acuerdos_semana'] ?? 0),
+        ];
+    }
+
+    public function getMetricasMes($asesorId) {
+        [$inicio, $fin] = $this->rangoFechasPeriodo('mes');
+        $stmt = $this->pdo->prepare("
+            SELECT
+                SUM(CASE WHEN COALESCE(resultado_contacto,'') <> '' THEN 1 ELSE 0 END) AS contactos_efectivos_mes
+            FROM historial_gestiones
+            WHERE asesor_cedula = ?
+              AND fecha_creacion BETWEEN ? AND ?
+        ");
+        $stmt->execute([(string)$asesorId, (string)$inicio, (string)$fin]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        $stmt2 = $this->pdo->prepare("
+            SELECT COUNT(*) AS acuerdos_mes
+            FROM acuerdos a
+            JOIN historial_gestiones hg ON a.gestion_id = hg.id_gestion
+            WHERE hg.asesor_cedula = ?
+              AND hg.fecha_creacion BETWEEN ? AND ?
+        ");
+        $stmt2->execute([(string)$asesorId, (string)$inicio, (string)$fin]);
+        $row2 = $stmt2->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        return [
+            'contactos_efectivos_mes' => (int)($row['contactos_efectivos_mes'] ?? 0),
+            'acuerdos_mes' => (int)($row2['acuerdos_mes'] ?? 0),
+        ];
+    }
+    public function getMetricasEquipoConFechas($coordinadorId, $inicio, $fin) {
+        $inicio = (string)$inicio;
+        $fin = (string)$fin;
+        // Normalizar a rangos completos (incluye horas si no vienen).
+        if (strlen($inicio) <= 10) $inicio .= ' 00:00:00';
+        if (strlen($fin) <= 10) $fin .= ' 23:59:59';
+        $tsI = strtotime($inicio);
+        $tsF = strtotime($fin);
+        if ($tsI === false || $tsF === false) {
+            [$inicio, $fin] = $this->rangoFechasPeriodo('mes');
+        } else {
+            $inicio = date('Y-m-d H:i:s', $tsI);
+            $fin = date('Y-m-d H:i:s', $tsF);
+        }
+
+        return $this->calcularMetricasEquipoRango((string)$coordinadorId, $inicio, $fin);
+    }
+
+    public function getMetricasEquipo($coordinadorId, $periodo = 'total') {
+        $periodo = strtolower(trim((string)$periodo));
+        if ($periodo === 'total') {
+            $inicio = '1970-01-01 00:00:00';
+            $fin = '2099-12-31 23:59:59';
+        } else {
+            [$inicio, $fin] = $this->rangoFechasPeriodo($periodo);
+        }
+        return $this->calcularMetricasEquipoRango((string)$coordinadorId, (string)$inicio, (string)$fin);
+    }
+
+    private function calcularMetricasEquipoRango(string $coordinadorCedula, string $inicio, string $fin): array {
+        // Total asesores activos del equipo
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(DISTINCT ac.asesor_cedula) AS total
+            FROM asignaciones_cordinador ac
+            WHERE ac.cordinador_cedula = ?
+              AND ac.estado = 'activo'
+        ");
+        $stmt->execute([$coordinadorCedula]);
+        $totalAsesores = (int)($stmt->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
+
+        // Total clientes en bases del coordinador (se apoya en base_clientes.total_clientes)
+        $stmt = $this->pdo->prepare("
+            SELECT COALESCE(SUM(b.total_clientes), 0) AS total
+            FROM base_clientes b
+            WHERE b.creado_por = ?
+        ");
+        $stmt->execute([$coordinadorCedula]);
+        $totalClientes = (int)($stmt->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
+
+        // Gestiones / contactos efectivos / duracion promedio (en rango) para asesores del equipo
+        $stmt = $this->pdo->prepare($this->hasNormColumns() ? "
+            SELECT
+                COUNT(*) AS total_gestiones,
+                SUM(CASE WHEN hg.tipo_contacto_norm IN ('contacto_exitoso','contacto_tercero') THEN 1 ELSE 0 END) AS contactos_efectivos,
+                COALESCE(AVG(NULLIF(hg.duracion_segundos, 0)), 0) AS tmo
+            FROM historial_gestiones hg
+            WHERE hg.fecha_creacion BETWEEN ? AND ?
+              AND EXISTS (
+                SELECT 1
+                FROM asignaciones_cordinador ac
+                WHERE ac.asesor_cedula = hg.asesor_cedula
+                  AND ac.cordinador_cedula = ?
+                  AND ac.estado = 'activo'
+              )
+        " : "
+            SELECT
+                COUNT(*) AS total_gestiones,
+                SUM(CASE
+                    WHEN LOWER(REPLACE(TRIM(hg.tipo_contacto), ' ', '_')) IN ('contacto_exitoso','contacto_tercero')
+                      OR UPPER(TRIM(hg.tipo_contacto)) IN ('CONTACTO EXITOSO','CONTACTO CON TERCERO')
+                    THEN 1 ELSE 0 END) AS contactos_efectivos,
+                COALESCE(AVG(NULLIF(hg.duracion_segundos, 0)), 0) AS tmo
+            FROM historial_gestiones hg
+            WHERE hg.fecha_creacion BETWEEN ? AND ?
+              AND EXISTS (
+                SELECT 1
+                FROM asignaciones_cordinador ac
+                WHERE ac.asesor_cedula = hg.asesor_cedula
+                  AND ac.cordinador_cedula = ?
+                  AND ac.estado = 'activo'
+              )
+        ");
+        $stmt->execute([(string)$inicio, (string)$fin, $coordinadorCedula]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $totalGestiones = (int)($row['total_gestiones'] ?? 0);
+        $contactosEfectivos = (int)($row['contactos_efectivos'] ?? 0);
+        $tmo = (float)($row['tmo'] ?? 0);
+
+        // Acuerdos y monto en rango (por fecha_creacion de la gestión)
+        $stmt = $this->pdo->prepare("
+            SELECT
+                COUNT(*) AS acuerdos,
+                COALESCE(SUM(a.valor_acuerdo), 0) AS total_ventas_monto
+            FROM acuerdos a
+            JOIN historial_gestiones hg ON a.gestion_id = hg.id_gestion
+            WHERE hg.fecha_creacion BETWEEN ? AND ?
+              AND EXISTS (
+                SELECT 1
+                FROM asignaciones_cordinador ac
+                WHERE ac.asesor_cedula = hg.asesor_cedula
+                  AND ac.cordinador_cedula = ?
+                  AND ac.estado = 'activo'
+              )
+        ");
+        $stmt->execute([(string)$inicio, (string)$fin, $coordinadorCedula]);
+        $row2 = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $acuerdos = (int)($row2['acuerdos'] ?? 0);
+        $totalVentasMonto = (float)($row2['total_ventas_monto'] ?? 0);
+
+        $tasaConversion = $totalGestiones > 0 ? round(($acuerdos / $totalGestiones) * 100, 1) : 0.0;
+        $tasaContactoEfectivo = $totalGestiones > 0 ? round(($contactosEfectivos / $totalGestiones) * 100, 1) : 0.0;
+        $promedioVenta = $acuerdos > 0 ? round($totalVentasMonto / $acuerdos, 2) : 0.0;
+
+        return [
+            'total_asesores' => $totalAsesores,
+            'total_clientes' => $totalClientes,
+            'total_gestiones' => $totalGestiones,
+            'ventas_exitosas' => $acuerdos,
+            'tasa_conversion' => $tasaConversion,
+            'tasa_contacto_efectivo' => $tasaContactoEfectivo,
+            'tiempo_promedio_conversacion' => (int) round($tmo),
+            'total_ventas_monto' => $totalVentasMonto,
+            'promedio_venta' => $promedioVenta,
+            'inicio' => $inicio,
+            'fin' => $fin,
+        ];
+    }
+
+    public function getMetricasAsesor($asesorId, $periodo = 'total', $inicio = null, $fin = null) {
+        if ($inicio !== null && $fin !== null && (string)$inicio !== '' && (string)$fin !== '') {
+            $i = (string)$inicio;
+            $f = (string)$fin;
+            if (strlen($i) <= 10) $i .= ' 00:00:00';
+            if (strlen($f) <= 10) $f .= ' 23:59:59';
+            $tsI = strtotime($i);
+            $tsF = strtotime($f);
+            if ($tsI !== false && $tsF !== false) {
+                $inicioR = date('Y-m-d H:i:s', $tsI);
+                $finR = date('Y-m-d H:i:s', $tsF);
+            } else {
+                [$inicioR, $finR] = $this->rangoFechasPeriodo($periodo);
             }
         } else {
-            $result['proxima_hora'] = '';
+            $periodo = strtolower(trim((string)$periodo));
+            if ($periodo === 'total') {
+                $inicioR = '1970-01-01 00:00:00';
+                $finR = '2099-12-31 23:59:59';
+            } else {
+                [$inicioR, $finR] = $this->rangoFechasPeriodo($periodo);
+            }
         }
-        
-        return $result;
+
+        $stmt = $this->pdo->prepare($this->hasNormColumns() ? "
+            SELECT
+                COUNT(*) AS total_gestiones,
+                SUM(CASE
+                    WHEN tipo_contacto_norm IN ('contacto_exitoso','contacto_tercero')
+                    THEN 1 ELSE 0 END) AS contactos_efectivos,
+                COUNT(DISTINCT cliente_id) AS total_clientes,
+                COALESCE(AVG(NULLIF(duracion_segundos, 0)), 0) AS tmo
+            FROM historial_gestiones
+            WHERE asesor_cedula = ?
+              AND fecha_creacion BETWEEN ? AND ?
+        " : "
+            SELECT
+                COUNT(*) AS total_gestiones,
+                SUM(CASE
+                    WHEN LOWER(REPLACE(TRIM(tipo_contacto), ' ', '_')) IN ('contacto_exitoso','contacto_tercero')
+                      OR UPPER(TRIM(tipo_contacto)) IN ('CONTACTO EXITOSO','CONTACTO CON TERCERO')
+                    THEN 1 ELSE 0 END) AS contactos_efectivos,
+                COUNT(DISTINCT cliente_id) AS total_clientes,
+                COALESCE(AVG(NULLIF(duracion_segundos, 0)), 0) AS tmo
+            FROM historial_gestiones
+            WHERE asesor_cedula = ?
+              AND fecha_creacion BETWEEN ? AND ?
+        ");
+        $stmt->execute([(string)$asesorId, (string)$inicioR, (string)$finR]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        $stmt2 = $this->pdo->prepare("
+            SELECT
+                COUNT(*) AS ventas_exitosas,
+                COALESCE(SUM(a.valor_acuerdo), 0) AS total_ventas_monto
+            FROM acuerdos a
+            JOIN historial_gestiones hg ON a.gestion_id = hg.id_gestion
+            WHERE hg.asesor_cedula = ?
+              AND hg.fecha_creacion BETWEEN ? AND ?
+        ");
+        $stmt2->execute([(string)$asesorId, (string)$inicioR, (string)$finR]);
+        $row2 = $stmt2->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        $totalGestiones = (int)($row['total_gestiones'] ?? 0);
+        $ventas = (int)($row2['ventas_exitosas'] ?? 0);
+        $monto = (float)($row2['total_ventas_monto'] ?? 0);
+
+        $tasaConversion = $totalGestiones > 0 ? round(($ventas / $totalGestiones) * 100, 1) : 0.0;
+        $tasaContactoEfectivo = $totalGestiones > 0 ? round((((int)($row['contactos_efectivos'] ?? 0)) / $totalGestiones) * 100, 1) : 0.0;
+        $promedioVenta = $ventas > 0 ? round($monto / $ventas, 2) : 0.0;
+
+        return [
+            'total_gestiones' => $totalGestiones,
+            'contactos_efectivos' => (int)($row['contactos_efectivos'] ?? 0),
+            'total_clientes' => (int)($row['total_clientes'] ?? 0),
+            'ventas_exitosas' => $ventas,
+            'tasa_conversion' => $tasaConversion,
+            'tasa_contacto_efectivo' => $tasaContactoEfectivo,
+            'tiempo_promedio_conversacion' => (int) round((float)($row['tmo'] ?? 0)),
+            'total_ventas_monto' => $monto,
+            'promedio_venta' => $promedioVenta,
+            'inicio' => $inicioR,
+            'fin' => $finR,
+        ];
+    }
+
+    public function getGestionesPorDia($asesorId, $periodo = 'dia') {
+        // Para CoordinadorController solo se usa 'dia'. Devolvemos una fila con totales.
+        [$inicio, $fin] = $this->rangoFechasPeriodo($periodo);
+        $stmt = $this->pdo->prepare($this->hasNormColumns() ? "
+            SELECT
+                COUNT(*) AS total_gestiones,
+                SUM(CASE
+                    WHEN tipo_contacto_norm IN ('contacto_exitoso','contacto_tercero')
+                    THEN 1 ELSE 0 END) AS contactos_efectivos,
+                SUM(CASE
+                    WHEN resultado_contacto_norm IN ('acuerdo_pago','acuerdo_de_pago')
+                    THEN 1 ELSE 0 END) AS acuerdos_hoy
+            FROM historial_gestiones
+            WHERE asesor_cedula = ?
+              AND fecha_creacion BETWEEN ? AND ?
+        " : "
+            SELECT
+                COUNT(*) AS total_gestiones,
+                SUM(CASE
+                    WHEN LOWER(REPLACE(TRIM(tipo_contacto), ' ', '_')) IN ('contacto_exitoso','contacto_tercero')
+                      OR UPPER(TRIM(tipo_contacto)) IN ('CONTACTO EXITOSO','CONTACTO CON TERCERO')
+                    THEN 1 ELSE 0 END) AS contactos_efectivos,
+                SUM(CASE
+                    WHEN LOWER(REPLACE(TRIM(resultado_contacto), ' ', '_')) IN ('acuerdo_pago','acuerdo_de_pago')
+                      OR UPPER(TRIM(resultado_contacto)) = 'ACUERDO DE PAGO'
+                    THEN 1 ELSE 0 END) AS acuerdos_hoy
+            FROM historial_gestiones
+            WHERE asesor_cedula = ?
+              AND fecha_creacion BETWEEN ? AND ?
+        ");
+        $stmt->execute([(string)$asesorId, (string)$inicio, (string)$fin]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        return [[
+            'fecha' => date('Y-m-d'),
+            'total_gestiones' => (int)($row['total_gestiones'] ?? 0),
+            'contactos_efectivos' => (int)($row['contactos_efectivos'] ?? 0),
+            // Compat: antes se llamaba 'ventas' y se contaba desde acuerdos. Ahora representa acuerdos en historial.
+            'ventas' => (int)($row['acuerdos_hoy'] ?? 0),
+        ]];
     }
 
     /**
-     * Obtiene actividades recientes del sistema
+     * Resumen del día (hoy) para la tabla "Gestión de Asesores" (coordinador).
+     *
+     * Reglas (según requerimiento):
+     * - gestiones_hoy: todas las gestiones con DATE(fecha_creacion)=hoy
+     * - contactos_efectivos_hoy: gestiones de hoy con tipo_contacto in (contacto_exitoso, contacto_tercero)
+     * - acuerdos_hoy: gestiones de hoy con resultado_contacto = acuerdo_pago
      */
-    public function getActividadesRecientes($limit = 50) {
+    public function getResumenActividadHoyAsesor($asesorId): array {
+        $stmt = $this->pdo->prepare($this->hasNormColumns() ? "
+            SELECT
+                COUNT(*) AS gestiones_hoy,
+                SUM(CASE
+                    WHEN tipo_contacto_norm IN ('contacto_exitoso','contacto_tercero')
+                    THEN 1 ELSE 0 END) AS contactos_efectivos_hoy,
+                SUM(CASE
+                    WHEN resultado_contacto_norm IN ('acuerdo_pago','acuerdo_de_pago')
+                    THEN 1 ELSE 0 END) AS acuerdos_hoy
+            FROM historial_gestiones
+            WHERE asesor_cedula = ?
+              AND DATE(fecha_creacion) = CURDATE()
+        " : "
+            SELECT
+                COUNT(*) AS gestiones_hoy,
+                SUM(CASE
+                    WHEN LOWER(REPLACE(TRIM(tipo_contacto), ' ', '_')) IN ('contacto_exitoso','contacto_tercero')
+                      OR UPPER(TRIM(tipo_contacto)) IN ('CONTACTO EXITOSO','CONTACTO CON TERCERO')
+                    THEN 1 ELSE 0 END) AS contactos_efectivos_hoy,
+                SUM(CASE
+                    WHEN LOWER(REPLACE(TRIM(resultado_contacto), ' ', '_')) IN ('acuerdo_pago','acuerdo_de_pago')
+                      OR UPPER(TRIM(resultado_contacto)) = 'ACUERDO DE PAGO'
+                    THEN 1 ELSE 0 END) AS acuerdos_hoy
+            FROM historial_gestiones
+            WHERE asesor_cedula = ?
+              AND DATE(fecha_creacion) = CURDATE()
+        ");
+        $stmt->execute([(string)$asesorId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $out = [
+            'gestiones_hoy' => (int)($row['gestiones_hoy'] ?? 0),
+            'contactos_efectivos_hoy' => (int)($row['contactos_efectivos_hoy'] ?? 0),
+            'acuerdos_hoy' => (int)($row['acuerdos_hoy'] ?? 0),
+        ];
+
+        // #region agent log b7eaa7 actividad hoy breakdown when mismatch
+        // Si hay gestiones hoy pero los contadores salen 0, registrar valores reales guardados en BD.
         try {
-            $sql = "
-                SELECT 
-                    hg.id,
-                    hg.fecha_gestion,
-                    hg.tipo_gestion,
-                    hg.comentarios,
-                    c.nombre as cliente_nombre,
-                    u.nombre_completo as asesor_nombre,
-                    u.rol as asesor_rol
-                FROM historial_gestion hg
-                INNER JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id
-                INNER JOIN clientes c ON ac.cliente_id = c.id
-                INNER JOIN usuarios u ON ac.asesor_id = u.id
-                ORDER BY hg.fecha_gestion DESC
-                LIMIT ?
-            ";
-            
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([$limit]);
-            return $stmt->fetchAll(PDO::FETCH_ASSOC);
-            
-        } catch (Exception $e) {
-            error_log("Error en getActividadesRecientes: " . $e->getMessage());
+            if ($out['gestiones_hoy'] > 0 && ($out['contactos_efectivos_hoy'] === 0 || $out['acuerdos_hoy'] === 0)) {
+                $tcStmt = $this->pdo->prepare("
+                    SELECT COALESCE(NULLIF(TRIM(tipo_contacto), ''), '(vacio)') AS k, COUNT(*) AS c
+                    FROM historial_gestiones
+                    WHERE asesor_cedula = ?
+                      AND DATE(fecha_creacion) = CURDATE()
+                    GROUP BY COALESCE(NULLIF(TRIM(tipo_contacto), ''), '(vacio)')
+                    ORDER BY c DESC
+                    LIMIT 10
+                ");
+                $tcStmt->execute([(string)$asesorId]);
+                $tc = $tcStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+                $rcStmt = $this->pdo->prepare("
+                    SELECT COALESCE(NULLIF(TRIM(resultado_contacto), ''), '(vacio)') AS k, COUNT(*) AS c
+                    FROM historial_gestiones
+                    WHERE asesor_cedula = ?
+                      AND DATE(fecha_creacion) = CURDATE()
+                    GROUP BY COALESCE(NULLIF(TRIM(resultado_contacto), ''), '(vacio)')
+                    ORDER BY c DESC
+                    LIMIT 10
+                ");
+                $rcStmt->execute([(string)$asesorId]);
+                $rc = $rcStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+                @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode([
+                    'sessionId' => 'b7eaa7',
+                    'runId' => 'pre',
+                    'hypothesisId' => 'H7',
+                    'location' => 'models/GestionModel.php:getResumenActividadHoyAsesor:breakdown',
+                    'message' => 'today_value_breakdown',
+                    'data' => [
+                        'asesorIdLen' => strlen((string)$asesorId),
+                        'gestiones_hoy' => $out['gestiones_hoy'],
+                        'contactos_efectivos_hoy' => $out['contactos_efectivos_hoy'],
+                        'acuerdos_hoy' => $out['acuerdos_hoy'],
+                        'tipo_contacto_top' => $tc,
+                        'resultado_contacto_top' => $rc,
+                    ],
+                    'timestamp' => (int) round(microtime(true) * 1000),
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+            }
+        } catch (Throwable $e) {}
+        // #endregion
+
+        return $out;
+    }
+
+    public function getGestionesClienteEnTarea($clienteId, $asesorId, $inicio = null, $fin = null) {
+        $params = [(int)$clienteId, (string)$asesorId];
+        $sql = "
+            SELECT hg.*
+            FROM historial_gestiones hg
+            WHERE hg.cliente_id = ?
+              AND hg.asesor_cedula = ?
+        ";
+        if ($inicio !== null && $fin !== null && (string)$inicio !== '' && (string)$fin !== '') {
+            $i = (string)$inicio;
+            $f = (string)$fin;
+            if (strlen($i) <= 10) $i .= ' 00:00:00';
+            if (strlen($f) <= 10) $f .= ' 23:59:59';
+            $tsI = strtotime($i);
+            $tsF = strtotime($f);
+            if ($tsI !== false && $tsF !== false) {
+                $sql .= " AND hg.fecha_creacion BETWEEN ? AND ? ";
+                $params[] = date('Y-m-d H:i:s', $tsI);
+                $params[] = date('Y-m-d H:i:s', $tsF);
+            }
+        }
+        $sql .= " ORDER BY hg.fecha_creacion DESC, hg.id_gestion DESC";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public function getLlamadasPendientesCoordinador($coordinadorId) {
+        $stmt = $this->pdo->prepare($this->hasNormColumns() ? "
+            SELECT
+                hg.id_gestion,
+                hg.fecha_creacion AS fecha_gestion,
+                hg.asesor_cedula,
+                u.nombre AS asesor_nombre,
+                c.id_cliente,
+                c.nombre AS cliente_nombre,
+                c.cedula AS cliente_cedula,
+                c.tel1 AS telefono,
+                b.nombre AS nombre_base,
+                hg.resultado_contacto,
+                hg.razon_especifica
+            FROM historial_gestiones hg
+            JOIN usuarios u ON hg.asesor_cedula = u.cedula
+            JOIN clientes c ON hg.cliente_id = c.id_cliente
+            JOIN base_clientes b ON c.base_id = b.id_base
+            WHERE DATE(hg.fecha_creacion) = CURDATE()
+              AND hg.resultado_contacto_norm IN ('volver_a_llamar','volver_llamar','agenda_llamada_de_seguimiento')
+              AND EXISTS (
+                SELECT 1
+                FROM asignaciones_cordinador ac
+                WHERE ac.asesor_cedula = hg.asesor_cedula
+                  AND ac.cordinador_cedula = ?
+                  AND ac.estado = 'activo'
+              )
+            ORDER BY hg.fecha_creacion DESC
+            LIMIT 200
+        " : "
+            SELECT
+                hg.id_gestion,
+                hg.fecha_creacion AS fecha_gestion,
+                hg.asesor_cedula,
+                u.nombre AS asesor_nombre,
+                c.id_cliente,
+                c.nombre AS cliente_nombre,
+                c.cedula AS cliente_cedula,
+                c.tel1 AS telefono,
+                b.nombre AS nombre_base,
+                hg.resultado_contacto,
+                hg.razon_especifica
+            FROM historial_gestiones hg
+            JOIN usuarios u ON hg.asesor_cedula = u.cedula
+            JOIN clientes c ON hg.cliente_id = c.id_cliente
+            JOIN base_clientes b ON c.base_id = b.id_base
+            WHERE DATE(hg.fecha_creacion) = CURDATE()
+              AND (hg.resultado_contacto = 'volver_llamar' OR hg.resultado_contacto LIKE '%VOLVER A LLAMAR%')
+              AND EXISTS (
+                SELECT 1
+                FROM asignaciones_cordinador ac
+                WHERE ac.asesor_cedula = hg.asesor_cedula
+                  AND ac.cordinador_cedula = ?
+                  AND ac.estado = 'activo'
+              )
+            ORDER BY hg.fecha_creacion DESC
+            LIMIT 200
+        ");
+        $stmt->execute([(string)$coordinadorId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    /**
+     * Total de gestiones del asesor en el periodo (por defecto mes calendario), alineado con getTipificacionesPorResultado.
+     *
+     * @param string $asesorId Cédula del asesor
+     */
+    public function getTotalLlamadasByAsesor($asesorId, $periodo = 'mes') {
+        $periodo = strtolower(trim((string)$periodo));
+        if ($periodo === 'total' || $periodo === 'all') {
+            $inicio = '1970-01-01 00:00:00';
+            $fin = '2099-12-31 23:59:59';
+        } else {
+            [$inicio, $fin] = $this->rangoFechasPeriodo($periodo);
+        }
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*) AS n
+            FROM historial_gestiones
+            WHERE asesor_cedula = ?
+              AND fecha_creacion BETWEEN ? AND ?
+        ");
+        $stmt->execute([(string)$asesorId, (string)$inicio, (string)$fin]);
+        return (int)($stmt->fetch(PDO::FETCH_ASSOC)['n'] ?? 0);
+    }
+
+    /**
+     * Acuerdos de pago: gestiones en `historial_gestiones` con resultado_contacto = acuerdo_pago
+     * y fecha_creacion dentro del periodo (para "mes", solo dentro del mes calendario, sin rebasar).
+     *
+     * @param string $asesorId Cédula del asesor
+     */
+    public function getTotalAcuerdosByAsesor($asesorId, $periodo = 'mes') {
+        $periodo = strtolower(trim((string)$periodo));
+        if ($periodo === 'total' || $periodo === 'all') {
+            $inicio = '1970-01-01 00:00:00';
+            $fin = '2099-12-31 23:59:59';
+        } else {
+            [$inicio, $fin] = $this->rangoFechasPeriodo($periodo);
+        }
+        // Normalizar y contar SOLO 'acuerdo_pago' (equivalente a 'acuerdo pago' al reemplazar '_' por espacio).
+        // Nota: en BD también existe 'ACUERDO DE PAGO', pero el criterio solicitado es estrictamente acuerdo_pago.
+        $stmt = $this->pdo->prepare($this->hasNormColumns() ? "
+            SELECT COUNT(*) AS n
+            FROM historial_gestiones hg
+            WHERE hg.asesor_cedula = ?
+              AND hg.resultado_contacto_norm IN ('acuerdo_pago','acuerdo_de_pago')
+              AND hg.fecha_creacion >= ?
+              AND hg.fecha_creacion <= ?
+        " : "
+            SELECT COUNT(*) AS n
+            FROM historial_gestiones hg
+            WHERE hg.asesor_cedula = ?
+              AND LOWER(REPLACE(TRIM(hg.resultado_contacto), '_', ' ')) = 'acuerdo pago'
+              AND hg.fecha_creacion >= ?
+              AND hg.fecha_creacion <= ?
+        ");
+        $stmt->execute([(string)$asesorId, (string)$inicio, (string)$fin]);
+        return (int)($stmt->fetch(PDO::FETCH_ASSOC)['n'] ?? 0);
+    }
+
+    /** @deprecated Usar getTotalAcuerdosByAsesor; se mantiene por compatibilidad. */
+    public function getTotalVentasByAsesor($asesorId, $periodo = 'mes') {
+        return $this->getTotalAcuerdosByAsesor($asesorId, $periodo);
+    }
+
+    public function getEstadisticasPorTipoVenta($asesorId, $periodo = 'mes') {
+        [$inicio, $fin] = $this->rangoFechasPeriodo($periodo);
+        $stmt = $this->pdo->prepare($this->hasNormColumns() ? "
+            SELECT
+                COALESCE(NULLIF(TRIM(a.tipo_acuerdo), ''), 'sin_tipo') AS tipo_venta,
+                COUNT(*) AS cantidad,
+                COALESCE(SUM(a.valor_acuerdo), 0) AS monto_total
+            FROM acuerdos a
+            INNER JOIN historial_gestiones hg ON a.gestion_id = hg.id_gestion
+            WHERE hg.asesor_cedula = ?
+              AND hg.resultado_contacto_norm IN ('acuerdo_pago','acuerdo_de_pago')
+              AND hg.fecha_creacion >= ?
+              AND hg.fecha_creacion <= ?
+            GROUP BY tipo_venta
+            ORDER BY cantidad DESC
+        " : "
+            SELECT
+                COALESCE(NULLIF(TRIM(a.tipo_acuerdo), ''), 'sin_tipo') AS tipo_venta,
+                COUNT(*) AS cantidad,
+                COALESCE(SUM(a.valor_acuerdo), 0) AS monto_total
+            FROM acuerdos a
+            INNER JOIN historial_gestiones hg ON a.gestion_id = hg.id_gestion
+            WHERE hg.asesor_cedula = ?
+              AND LOWER(REPLACE(TRIM(hg.resultado_contacto), '_', ' ')) = 'acuerdo pago'
+              AND hg.fecha_creacion >= ?
+              AND hg.fecha_creacion <= ?
+            GROUP BY tipo_venta
+            ORDER BY cantidad DESC
+        ");
+        $stmt->execute([(string)$asesorId, (string)$inicio, (string)$fin]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $out = [];
+        foreach ($rows as $r) {
+            $out[] = [
+                'tipo' => (string)($r['tipo_venta'] ?? ''),
+                'tipo_venta' => (string)($r['tipo_venta'] ?? ''),
+                'cantidad' => (int)($r['cantidad'] ?? 0),
+                'monto_total' => (float)($r['monto_total'] ?? 0),
+            ];
+        }
+        return $out;
+    }
+
+    public function getEstadisticasPorRechazo($asesorId, $periodo = 'mes') {
+        [$inicio, $fin] = $this->rangoFechasPeriodo($periodo);
+        $stmt = $this->pdo->prepare("
+            SELECT
+                COALESCE(NULLIF(TRIM(hg.razon_especifica), ''), 'Sin razón específica') AS razon,
+                COUNT(*) AS cantidad
+            FROM historial_gestiones hg
+            WHERE hg.asesor_cedula = ?
+              AND hg.fecha_creacion BETWEEN ? AND ?
+              AND NOT EXISTS (
+                  SELECT 1 FROM acuerdos a WHERE a.gestion_id = hg.id_gestion
+              )
+            GROUP BY razon
+            ORDER BY cantidad DESC
+            LIMIT 25
+        ");
+        $stmt->execute([(string)$asesorId, (string)$inicio, (string)$fin]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $out = [];
+        foreach ($rows as $r) {
+            $out[] = [
+                'rechazo' => (string)($r['razon'] ?? ''),
+                'razon' => (string)($r['razon'] ?? ''),
+                'cantidad' => (int)($r['cantidad'] ?? 0),
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Listado para modal coordinador: clientes asignados por bases + última gestión del asesor, con filtros.
+     *
+     * @param string $asesorCedula Cédula del asesor (usuarios.cedula)
+     * @param array $filtros gestion|tipificacion_especifica|contacto|tipificacion|busqueda
+     */
+    public function getGestionByAsesorAndFechasConFiltros(
+        $asesorCedula,
+        $fechaInicio = null,
+        $fechaFin = null,
+        array $filtros = []
+    ) {
+        $ced = trim((string)$asesorCedula);
+        if ($ced === '') {
             return [];
         }
+
+        $gestion = strtolower(trim((string)($filtros['gestion'] ?? 'gestionado')));
+        $busqueda = trim((string)($filtros['busqueda'] ?? ''));
+        $tipEsp = trim((string)($filtros['tipificacion_especifica'] ?? 'todos'));
+        $contacto = trim((string)($filtros['contacto'] ?? 'todos'));
+        $tipificacion = trim((string)($filtros['tipificacion'] ?? 'todos'));
+        $fi = trim((string)$fechaInicio);
+        $ff = trim((string)$fechaFin);
+
+        if ($gestion === 'no_gestionado') {
+            return $this->queryClientesAsignadosSinGestionModal($ced, $busqueda);
+        }
+        if ($gestion === 'todos') {
+            return $this->queryClientesAsignadosConUltimaGestionModal(
+                $ced,
+                $fi,
+                $ff,
+                $tipEsp,
+                $contacto,
+                $tipificacion,
+                $busqueda
+            );
+        }
+
+        return $this->queryClientesGestionadosUltimaGestionModal(
+            $ced,
+            $fi,
+            $ff,
+            $tipEsp,
+            $contacto,
+            $tipificacion,
+            $busqueda
+        );
+    }
+
+    private function queryClientesAsignadosSinGestionModal(string $ced, string $busqueda): array {
+        $params = [$ced, $ced];
+        $sql = "
+            SELECT
+                NULL AS id_gestion,
+                0 AS id,
+                c.id_cliente,
+                c.nombre AS cliente_nombre,
+                c.nombre,
+                c.cedula,
+                c.tel1 AS telefono,
+                c.tel2 AS celular2,
+                NULL AS fecha_gestion,
+                '' AS resultado,
+                c.id_cliente AS asignacion_id
+            FROM clientes c
+            INNER JOIN base_clientes b ON b.id_base = c.base_id AND b.estado = 'activo'
+            INNER JOIN asignacion_base_asesores aba
+                ON aba.base_id = c.base_id AND aba.estado = 'activa' AND aba.asesor_cedula = ?
+            WHERE c.estado = 'activo'
+              AND NOT EXISTS (
+                  SELECT 1 FROM historial_gestiones h
+                  WHERE h.cliente_id = c.id_cliente AND h.asesor_cedula = ?
+              )
+        ";
+        if ($busqueda !== '') {
+            $like = '%' . $busqueda . '%';
+            $sql .= " AND (c.nombre LIKE ? OR c.cedula LIKE ? OR c.tel1 LIKE ? OR c.tel2 LIKE ? OR c.tel3 LIKE ?) ";
+            array_push($params, $like, $like, $like, $like, $like);
+        }
+        $sql .= " ORDER BY c.nombre ASC LIMIT 2000";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    private function queryClientesGestionadosUltimaGestionModal(
+        string $ced,
+        string $fi,
+        string $ff,
+        string $tipEsp,
+        string $contacto,
+        string $tipificacion,
+        string $busqueda
+    ): array {
+        $params = [$ced, $ced];
+        $sql = "
+            SELECT
+                hg.id_gestion,
+                hg.id_gestion AS id,
+                c.id_cliente,
+                c.nombre AS cliente_nombre,
+                c.nombre,
+                c.cedula,
+                c.tel1 AS telefono,
+                c.tel2 AS celular2,
+                hg.fecha_creacion AS fecha_gestion,
+                COALESCE(hg.resultado_contacto, '') AS resultado,
+                c.id_cliente AS asignacion_id
+            FROM historial_gestiones hg
+            INNER JOIN clientes c ON c.id_cliente = hg.cliente_id
+            INNER JOIN base_clientes b ON b.id_base = c.base_id AND b.estado = 'activo'
+            INNER JOIN asignacion_base_asesores aba
+                ON aba.base_id = c.base_id AND aba.estado = 'activa' AND aba.asesor_cedula = hg.asesor_cedula
+            WHERE hg.asesor_cedula = ?
+              AND hg.id_gestion = (
+                  SELECT MAX(h2.id_gestion)
+                  FROM historial_gestiones h2
+                  WHERE h2.cliente_id = hg.cliente_id AND h2.asesor_cedula = ?
+              )
+        ";
+
+        if ($fi !== '' && $ff !== '') {
+            $sql .= " AND DATE(hg.fecha_creacion) BETWEEN ? AND ? ";
+            $params[] = substr($fi, 0, 10);
+            $params[] = substr($ff, 0, 10);
+        }
+
+        if ($tipEsp !== '' && strcasecmp($tipEsp, 'todos') !== 0 && strcasecmp($tipEsp, 'sin_gestion') !== 0) {
+            $sql .= " AND (
+                hg.resultado_contacto = ?
+                OR hg.razon_especifica = ?
+                OR hg.resultado_contacto LIKE ?
+                OR hg.razon_especifica LIKE ?
+            ) ";
+            $like = '%' . $tipEsp . '%';
+            array_push($params, $tipEsp, $tipEsp, $like, $like);
+        }
+
+        if ($contacto !== '' && strcasecmp($contacto, 'todos') !== 0) {
+            $sql .= " AND (hg.forma_contacto = ? OR hg.tipo_contacto LIKE ?) ";
+            $params[] = $contacto;
+            $params[] = '%' . $contacto . '%';
+        }
+
+        if ($tipificacion !== '' && strcasecmp($tipificacion, 'todos') !== 0) {
+            $sql .= " AND hg.resultado_contacto LIKE ? ";
+            $params[] = '%' . $tipificacion . '%';
+        }
+
+        if ($busqueda !== '') {
+            $like = '%' . $busqueda . '%';
+            $sql .= " AND (c.nombre LIKE ? OR c.cedula LIKE ? OR c.tel1 LIKE ? OR c.tel2 LIKE ? OR c.tel3 LIKE ?) ";
+            array_push($params, $like, $like, $like, $like, $like);
+        }
+
+        $sql .= " ORDER BY hg.fecha_creacion DESC, c.nombre ASC LIMIT 2000";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    private function queryClientesAsignadosConUltimaGestionModal(
+        string $ced,
+        string $fi,
+        string $ff,
+        string $tipEsp,
+        string $contacto,
+        string $tipificacion,
+        string $busqueda
+    ): array {
+        $params = [$ced, $ced, $ced];
+        $sql = "
+            SELECT
+                hg.id_gestion,
+                COALESCE(hg.id_gestion, 0) AS id,
+                c.id_cliente,
+                c.nombre AS cliente_nombre,
+                c.nombre,
+                c.cedula,
+                c.tel1 AS telefono,
+                c.tel2 AS celular2,
+                hg.fecha_creacion AS fecha_gestion,
+                COALESCE(hg.resultado_contacto, '') AS resultado,
+                c.id_cliente AS asignacion_id
+            FROM clientes c
+            INNER JOIN base_clientes b ON b.id_base = c.base_id AND b.estado = 'activo'
+            INNER JOIN asignacion_base_asesores aba
+                ON aba.base_id = c.base_id AND aba.estado = 'activa' AND aba.asesor_cedula = ?
+            LEFT JOIN historial_gestiones hg ON hg.asesor_cedula = ?
+              AND hg.id_gestion = (
+                  SELECT MAX(h3.id_gestion)
+                  FROM historial_gestiones h3
+                  WHERE h3.cliente_id = c.id_cliente AND h3.asesor_cedula = ?
+              )
+            WHERE c.estado = 'activo'
+        ";
+
+        if ($fi !== '' && $ff !== '') {
+            $sql .= " AND (hg.id_gestion IS NULL OR DATE(hg.fecha_creacion) BETWEEN ? AND ?) ";
+            $params[] = substr($fi, 0, 10);
+            $params[] = substr($ff, 0, 10);
+        }
+
+        if ($tipEsp !== '' && strcasecmp($tipEsp, 'todos') !== 0) {
+            if (strcasecmp($tipEsp, 'sin_gestion') === 0) {
+                $sql .= " AND hg.id_gestion IS NULL ";
+            } else {
+                $sql .= " AND hg.id_gestion IS NOT NULL AND (
+                    hg.resultado_contacto = ?
+                    OR hg.razon_especifica = ?
+                    OR hg.resultado_contacto LIKE ?
+                    OR hg.razon_especifica LIKE ?
+                ) ";
+                $like = '%' . $tipEsp . '%';
+                array_push($params, $tipEsp, $tipEsp, $like, $like);
+            }
+        }
+
+        if ($contacto !== '' && strcasecmp($contacto, 'todos') !== 0) {
+            $sql .= " AND hg.id_gestion IS NOT NULL AND (hg.forma_contacto = ? OR hg.tipo_contacto LIKE ?) ";
+            $params[] = $contacto;
+            $params[] = '%' . $contacto . '%';
+        }
+
+        if ($tipificacion !== '' && strcasecmp($tipificacion, 'todos') !== 0) {
+            $sql .= " AND hg.id_gestion IS NOT NULL AND hg.resultado_contacto LIKE ? ";
+            $params[] = '%' . $tipificacion . '%';
+        }
+
+        if ($busqueda !== '') {
+            $like = '%' . $busqueda . '%';
+            $sql .= " AND (c.nombre LIKE ? OR c.cedula LIKE ? OR c.tel1 LIKE ? OR c.tel2 LIKE ? OR c.tel3 LIKE ?) ";
+            array_push($params, $like, $like, $like, $like, $like);
+        }
+
+        $sql .= " ORDER BY (hg.id_gestion IS NULL) ASC, hg.fecha_creacion DESC, c.nombre ASC LIMIT 2000";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
     /**
-     * Obtiene el total de gestiones de hoy
+     * Observaciones de una gestión (historial_gestiones). Sin tabla aparte en emermedica_cobranza.
      */
-    public function getTotalGestionesHoy() {
-        try {
-            $stmt = $this->pdo->query("
-                SELECT COUNT(*) as total 
-                FROM historial_gestion 
-                WHERE DATE(fecha_gestion) = CURDATE()
-            ");
-            $result = $stmt->fetch(PDO::FETCH_ASSOC);
-            return $result['total'];
-        } catch (Exception $e) {
-            error_log("Error en getTotalGestionesHoy: " . $e->getMessage());
-            return 0;
+    public function getObservacionesGestion($gestionId) {
+        $id = (int)$gestionId;
+        if ($id <= 0) {
+            return ['comentarios' => '', 'proxima_fecha' => '', 'proxima_hora' => ''];
         }
+        $stmt = $this->pdo->prepare("SELECT observaciones FROM historial_gestiones WHERE id_gestion = ? LIMIT 1");
+        $stmt->execute([$id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $texto = (string)($row['observaciones'] ?? '');
+        return [
+            'comentarios' => $texto,
+            'proxima_fecha' => '',
+            'proxima_hora' => '',
+        ];
     }
 
-    /**
-     * Obtiene el total de gestiones del mes
-     */
-    public function getTotalGestionesMes() {
-        try {
-            $stmt = $this->pdo->query("
-                SELECT COUNT(*) as total
-                FROM historial_gestion
-                WHERE YEAR(fecha_gestion) = YEAR(CURDATE())
-                AND MONTH(fecha_gestion) = MONTH(CURDATE())
-            ");
-            $result = $stmt->fetch(PDO::FETCH_ASSOC);
-            return $result['total'];
-        } catch (Exception $e) {
-            error_log("Error en getTotalGestionesMes: " . $e->getMessage());
-            return 0;
-        }
+    public function getTotalGestionesByAsesorAndCliente($asesorId, $clienteId) {
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*) AS n
+            FROM historial_gestiones
+            WHERE asesor_cedula = ? AND cliente_id = ?
+        ");
+        $stmt->execute([(string)$asesorId, (int)$clienteId]);
+        return (int)($stmt->fetch(PDO::FETCH_ASSOC)['n'] ?? 0);
     }
 
-    /**
-     * Obtiene todos los asesores que tienen gestiones en un período específico
-     * Para exportación completa sin filtrar por coordinador
-     */
-    public function getAsesoresConGestionesEnPeriodo($fechaInicio, $fechaFin) {
-        try {
-            $sql = "SELECT DISTINCT u.id, u.nombre_completo, u.usuario, u.rol, u.estado
-                    FROM usuarios u
-                    INNER JOIN asignaciones_clientes ac ON u.id = ac.asesor_id
-                    INNER JOIN historial_gestion hg ON ac.id = hg.asignacion_id
-                    WHERE u.rol = 'asesor'
-                    AND u.estado = 'Activo'
-                    AND DATE(hg.fecha_gestion) BETWEEN ? AND ?
-                    ORDER BY u.nombre_completo";
-
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([$fechaInicio, $fechaFin]);
-            return $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        } catch (Exception $e) {
-            error_log("Error en getAsesoresConGestionesEnPeriodo: " . $e->getMessage());
-            return [];
-        }
-    }
+    public function crearGestionSimple($data) { return $this->crearGestion($data); }
 }
-?>
+

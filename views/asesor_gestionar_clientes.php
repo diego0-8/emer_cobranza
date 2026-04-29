@@ -42,6 +42,7 @@
             <?php else: ?>
                 <div class="bases-list">
                     <?php foreach ($basesAsignadas as $base): ?>
+                        <?php if (($base['estado_base'] ?? 'activo') !== 'activo') continue; ?>
                         <div class="base-item">
                             <div class="base-info">
                                 <h4><?php echo htmlspecialchars($base['nombre_cargue']); ?></h4>

@@ -6,29 +6,74 @@ class CargaExcelModel {
         $this->pdo = $pdo;
     }
 
+    /**
+     * El sistema histórico usaba `cargas_excel`. En el dump nuevo la entidad equivalente es `base_clientes`.
+     * Para no tocar vistas/controladores, devolvemos aliases con los nombres antiguos.
+     */
+    private function mapBaseRow(?array $row): ?array {
+        if (!$row) return null;
+
+        $estadoDb = $row['estado'] ?? 'activo';
+        $estadoUi = $estadoDb === 'activo' ? 'activa' : ($estadoDb === 'inactivo' ? 'inactiva' : $estadoDb);
+
+        return [
+            'id' => (int)($row['id_base'] ?? 0),
+            'nombre_cargue' => $row['nombre'] ?? null,
+            'usuario_id' => $row['creado_por'] ?? null,
+            'usuario_coordinador_id' => $row['creado_por'] ?? null,
+            'fecha_cargue' => $row['fecha_actualizacion'] ?? null,
+            'estado' => $estadoUi,
+            // En el dump no existe; asumimos habilitado si la base está activa.
+            'estado_habilitado' => ($estadoDb === 'activo') ? 'habilitado' : 'deshabilitado',
+
+            // Campos propios del dump
+            'total_clientes' => (int)($row['total_clientes'] ?? 0),
+            'total_obligaciones' => (int)($row['total_obligaciones'] ?? 0),
+            'estado_db' => $estadoDb,
+        ];
+    }
+
     public function getAllCargas() {
-        $stmt = $this->pdo->query("SELECT ce.*, u.nombre_completo as coordinador_nombre FROM cargas_excel ce JOIN usuarios u ON ce.usuario_coordinador_id = u.id ORDER BY ce.fecha_cargue DESC");
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $stmt = $this->pdo->query("
+            SELECT b.*, u.nombre as coordinador_nombre
+            FROM base_clientes b
+            LEFT JOIN usuarios u ON b.creado_por = u.cedula
+            ORDER BY b.fecha_actualizacion DESC
+        ");
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $mapped = array_values(array_filter(array_map([$this, 'mapBaseRow'], $rows)));
+        // Inyectar coordinador_nombre para compatibilidad con vistas existentes si lo usan.
+        foreach ($mapped as $i => $m) {
+            $mapped[$i]['coordinador_nombre'] = $rows[$i]['coordinador_nombre'] ?? null;
+        }
+        return $mapped;
     }
 
     /**
      * Obtiene solo las cargas del coordinador específico
      */
     public function getCargasByCoordinador($coordinadorId, $soloHabilitadas = true) {
-        $sql = "SELECT ce.*, u.nombre_completo as coordinador_nombre 
-                FROM cargas_excel ce 
-                JOIN usuarios u ON ce.usuario_coordinador_id = u.id 
-                WHERE ce.usuario_coordinador_id = ?";
-        
+        $sql = "
+            SELECT b.*, u.nombre as coordinador_nombre
+            FROM base_clientes b
+            LEFT JOIN usuarios u ON b.creado_por = u.cedula
+            WHERE b.creado_por = ?
+        ";
+
         if ($soloHabilitadas) {
-            $sql .= " AND ce.estado_habilitado = 'habilitado'";
+            $sql .= " AND b.estado = 'activo'";
         }
-        
-        $sql .= " ORDER BY ce.fecha_cargue DESC";
-        
+
+        $sql .= " ORDER BY b.fecha_actualizacion DESC";
+
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$coordinadorId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $stmt->execute([(string)$coordinadorId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $mapped = array_values(array_filter(array_map([$this, 'mapBaseRow'], $rows)));
+        foreach ($mapped as $i => $m) {
+            $mapped[$i]['coordinador_nombre'] = $rows[$i]['coordinador_nombre'] ?? null;
+        }
+        return $mapped;
     }
 
     /**
@@ -36,60 +81,75 @@ class CargaExcelModel {
      * Se usa desde el dashboard del administrador para cargas masivas de gestión.
      */
     public function getCargasActivas() {
-        $sql = "SELECT ce.*, u.nombre_completo as coordinador_nombre
-                FROM cargas_excel ce
-                LEFT JOIN usuarios u ON ce.usuario_coordinador_id = u.id
-                WHERE ce.estado = 'activa'
-                  AND ce.estado_habilitado = 'habilitado'
-                ORDER BY ce.nombre_cargue ASC, ce.fecha_cargue DESC";
+        $sql = "
+            SELECT b.*, u.nombre as coordinador_nombre
+            FROM base_clientes b
+            LEFT JOIN usuarios u ON b.creado_por = u.cedula
+            WHERE b.estado = 'activo'
+            ORDER BY b.nombre ASC, b.fecha_actualizacion DESC
+        ";
 
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $mapped = array_values(array_filter(array_map([$this, 'mapBaseRow'], $rows)));
+        foreach ($mapped as $i => $m) {
+            $mapped[$i]['coordinador_nombre'] = $rows[$i]['coordinador_nombre'] ?? null;
+        }
+        return $mapped;
     }
 
     /**
      * Obtiene una carga específica verificando que pertenezca al coordinador
      */
     public function getCargaByIdAndCoordinador($cargaId, $coordinadorId) {
-        $stmt = $this->pdo->prepare("SELECT ce.*, u.nombre_completo as coordinador_nombre 
-                                    FROM cargas_excel ce 
-                                    JOIN usuarios u ON ce.usuario_coordinador_id = u.id 
-                                    WHERE ce.id = ? AND ce.usuario_coordinador_id = ?");
-        $stmt->execute([$cargaId, $coordinadorId]);
-        return $stmt->fetch(PDO::FETCH_ASSOC);
+        $stmt = $this->pdo->prepare("
+            SELECT b.*, u.nombre as coordinador_nombre
+            FROM base_clientes b
+            LEFT JOIN usuarios u ON b.creado_por = u.cedula
+            WHERE b.id_base = ? AND b.creado_por = ?
+            LIMIT 1
+        ");
+        $stmt->execute([(int)$cargaId, (string)$coordinadorId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $mapped = $this->mapBaseRow($row);
+        if ($mapped) {
+            $mapped['coordinador_nombre'] = $row['coordinador_nombre'] ?? null;
+        }
+        return $mapped;
     }
 
     /**
      * Obtiene una carga por nombre y coordinador
      */
     public function getCargaByNombre($nombreCargue, $coordinadorId) {
-        $sql = "SELECT * FROM cargas_excel WHERE nombre_cargue = ? AND usuario_coordinador_id = ? LIMIT 1";
+        $sql = "SELECT * FROM base_clientes WHERE nombre = ? AND creado_por = ? LIMIT 1";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$nombreCargue, $coordinadorId]);
-        return $stmt->fetch(PDO::FETCH_ASSOC);
+        $stmt->execute([(string)$nombreCargue, (string)$coordinadorId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $this->mapBaseRow(is_array($row) ? $row : null);
     }
 
     /**
      * Obtiene la carga consolidada del coordinador (solo una)
      */
     public function getCargaConsolidada($coordinadorId) {
-        $sql = "SELECT * FROM cargas_excel WHERE usuario_coordinador_id = ? AND nombre_cargue = 'BASE_DATOS_CONSOLIDADA' LIMIT 1";
+        $sql = "SELECT * FROM base_clientes WHERE creado_por = ? AND nombre = 'BASE_DATOS_CONSOLIDADA' LIMIT 1";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$coordinadorId]);
-        return $stmt->fetch(PDO::FETCH_ASSOC);
+        $stmt->execute([(string)$coordinadorId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $this->mapBaseRow(is_array($row) ? $row : null);
     }
 
     /**
      * Crea la carga consolidada del coordinador
      */
     public function crearCargaConsolidada($coordinadorId) {
-        $sql = "INSERT INTO cargas_excel (nombre_cargue, usuario_id, usuario_coordinador_id, fecha_cargue, estado) 
-                VALUES ('BASE_DATOS_CONSOLIDADA', ?, ?, NOW(), 'Activa')";
+        $sql = "INSERT INTO base_clientes (nombre, total_clientes, total_obligaciones, creado_por, estado)
+                VALUES ('BASE_DATOS_CONSOLIDADA', 0, 0, ?, 'activo')";
         $stmt = $this->pdo->prepare($sql);
-        
-        if ($stmt->execute([$coordinadorId, $coordinadorId])) {
-            return $this->pdo->lastInsertId();
+        if ($stmt->execute([(string)$coordinadorId])) {
+            return (int)$this->pdo->lastInsertId();
         }
         return false;
     }
@@ -98,22 +158,11 @@ class CargaExcelModel {
      * Crea una nueva carga
      */
     public function crearCarga($nombreCargue, $coordinadorId) {
-        // Verificar si la columna tipo_base_datos existe
-        $checkColumn = $this->pdo->query("SHOW COLUMNS FROM cargas_excel LIKE 'tipo_base_datos'");
-        $columnExists = $checkColumn->rowCount() > 0;
-        
-        if ($columnExists) {
-            $sql = "INSERT INTO cargas_excel (nombre_cargue, usuario_id, usuario_coordinador_id, fecha_cargue, estado, tipo_base_datos) 
-                    VALUES (?, ?, ?, NOW(), 'Activa', 'independiente')";
-        } else {
-            $sql = "INSERT INTO cargas_excel (nombre_cargue, usuario_id, usuario_coordinador_id, fecha_cargue, estado) 
-                    VALUES (?, ?, ?, NOW(), 'Activa')";
-        }
-        
+        $sql = "INSERT INTO base_clientes (nombre, total_clientes, total_obligaciones, creado_por, estado)
+                VALUES (?, 0, 0, ?, 'activo')";
         $stmt = $this->pdo->prepare($sql);
-        
-        if ($stmt->execute([$nombreCargue, $coordinadorId, $coordinadorId])) {
-            return $this->pdo->lastInsertId();
+        if ($stmt->execute([(string)$nombreCargue, (string)$coordinadorId])) {
+            return (int)$this->pdo->lastInsertId();
         }
         return false;
     }
@@ -122,64 +171,40 @@ class CargaExcelModel {
      * Crea una nueva base de datos independiente
      */
     public function crearBaseDatosIndependiente($nombreBaseDatos, $coordinadorId) {
-        // Verificar si la columna tipo_base_datos existe
-        $checkColumn = $this->pdo->query("SHOW COLUMNS FROM cargas_excel LIKE 'tipo_base_datos'");
-        $columnExists = $checkColumn->rowCount() > 0;
-        
-        if ($columnExists) {
-            $sql = "INSERT INTO cargas_excel (nombre_cargue, usuario_id, usuario_coordinador_id, fecha_cargue, estado, tipo_base_datos) 
-                    VALUES (?, ?, ?, NOW(), 'Activa', 'independiente')";
-        } else {
-            $sql = "INSERT INTO cargas_excel (nombre_cargue, usuario_id, usuario_coordinador_id, fecha_cargue, estado) 
-                    VALUES (?, ?, ?, NOW(), 'Activa')";
-        }
-        
-        $stmt = $this->pdo->prepare($sql);
-        
-        if ($stmt->execute([$nombreBaseDatos, $coordinadorId, $coordinadorId])) {
-            return $this->pdo->lastInsertId();
-        }
-        return false;
+        return $this->crearCarga($nombreBaseDatos, $coordinadorId);
     }
 
     /**
      * Obtiene estadísticas de una base de datos
      */
     public function getEstadisticasBaseDatos($cargaId) {
-        // Total de clientes en la base de datos
-        $stmt = $this->pdo->prepare("SELECT COUNT(*) as total_clientes FROM clientes WHERE carga_excel_id = ?");
-        $stmt->execute([$cargaId]);
-        $totalClientes = $stmt->fetch(PDO::FETCH_ASSOC)['total_clientes'];
+        $baseId = (int)$cargaId;
 
-        // Clientes asignados (solo los que tienen asesor_id y asignación activa)
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) as total_clientes FROM clientes WHERE base_id = ?");
+        $stmt->execute([$baseId]);
+        $totalClientes = (int)($stmt->fetch(PDO::FETCH_ASSOC)['total_clientes'] ?? 0);
+
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) as total_obligaciones FROM obligaciones WHERE base_id = ?");
+        $stmt->execute([$baseId]);
+        $totalObligaciones = (int)($stmt->fetch(PDO::FETCH_ASSOC)['total_obligaciones'] ?? 0);
+
+        // En el dump no existe asignación por cliente. Usamos 0 para compatibilidad.
+        $clientesAsignados = 0;
+        $clientesPorAsignar = $totalClientes;
+
         $stmt = $this->pdo->prepare("
-            SELECT COUNT(DISTINCT c.id) as clientes_asignados 
-            FROM clientes c 
-            INNER JOIN asignaciones_clientes ac ON c.id = ac.cliente_id 
-            WHERE c.carga_excel_id = ? 
-            AND c.asesor_id IS NOT NULL 
-            AND ac.estado = 'asignado'
+            SELECT u.cedula as id, u.nombre as nombre_completo, u.usuario
+            FROM asignacion_base_asesores aba
+            JOIN usuarios u ON aba.asesor_cedula = u.cedula
+            WHERE aba.base_id = ? AND aba.estado = 'activa'
+            ORDER BY u.nombre
         ");
-        $stmt->execute([$cargaId]);
-        $clientesAsignados = $stmt->fetch(PDO::FETCH_ASSOC)['clientes_asignados'];
-
-        // Clientes por asignar
-        $clientesPorAsignar = $totalClientes - $clientesAsignados;
-
-        // Asesores asignados a esta base de datos (acceso completo a la base)
-        $stmt = $this->pdo->prepare("
-            SELECT DISTINCT u.id, u.nombre_completo, u.usuario
-            FROM usuarios u
-            INNER JOIN asignaciones_base_asesor aba ON u.id = aba.asesor_id
-            WHERE aba.carga_id = ? 
-            AND u.rol = 'asesor' 
-            AND aba.estado = 'activa'
-        ");
-        $stmt->execute([$cargaId]);
+        $stmt->execute([$baseId]);
         $asesoresAsignados = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         return [
             'total_clientes' => $totalClientes,
+            'total_obligaciones' => $totalObligaciones,
             'clientes_asignados' => $clientesAsignados,
             'clientes_por_asignar' => $clientesPorAsignar,
             'asesores_asignados' => $asesoresAsignados
@@ -190,43 +215,39 @@ class CargaExcelModel {
      * Asigna un asesor a una base de datos
      */
     public function asignarAsesorABaseDatos($cargaId, $asesorId) {
+        $baseId = (int)$cargaId;
+        $asesorCedula = (string)$asesorId;
+
         $this->pdo->beginTransaction();
         try {
-            // 1. Crear o actualizar asignación de base completa
+            // Si existe, reactivar; si no, insertar.
             $stmt = $this->pdo->prepare("
-                INSERT INTO asignaciones_base_asesor (carga_id, asesor_id, coordinador_id, fecha_asignacion, estado, acceso_completo) 
-                VALUES (?, ?, (SELECT usuario_coordinador_id FROM cargas_excel WHERE id = ?), NOW(), 'activa', 1)
-                ON DUPLICATE KEY UPDATE 
-                estado = 'activa', 
-                acceso_completo = 1, 
-                fecha_asignacion = NOW()
+                SELECT id_base_asesor
+                FROM asignacion_base_asesores
+                WHERE base_id = ? AND asesor_cedula = ?
+                LIMIT 1
             ");
-            $stmt->execute([$cargaId, $asesorId, $cargaId]);
+            $stmt->execute([$baseId, $asesorCedula]);
+            $existing = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            // 2. Obtener todos los clientes no asignados de esta base de datos
-            $stmt = $this->pdo->prepare("
-                SELECT c.id as cliente_id 
-                FROM clientes c 
-                LEFT JOIN asignaciones_clientes ac ON c.id = ac.cliente_id AND ac.estado != 'no_interesado'
-                WHERE c.carga_excel_id = ? AND ac.cliente_id IS NULL
-            ");
-            $stmt->execute([$cargaId]);
-            $clientesNoAsignados = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-            // 3. Crear asignaciones individuales de clientes
-            $asignacionesCreadas = 0;
-            foreach ($clientesNoAsignados as $cliente) {
+            if ($existing) {
                 $stmt = $this->pdo->prepare("
-                    INSERT INTO asignaciones_clientes (cliente_id, asesor_id, fecha_asignacion, estado) 
-                    VALUES (?, ?, NOW(), 'asignado')
+                    UPDATE asignacion_base_asesores
+                    SET estado = 'activa', fecha_actualizacion = CURRENT_TIMESTAMP
+                    WHERE id_base_asesor = ?
                 ");
-                if ($stmt->execute([$cliente['cliente_id'], $asesorId])) {
-                    $asignacionesCreadas++;
-                }
+                $stmt->execute([(int)$existing['id_base_asesor']]);
+            } else {
+                $stmt = $this->pdo->prepare("
+                    INSERT INTO asignacion_base_asesores (base_id, asesor_cedula, estado, fecha_asignacion)
+                    VALUES (?, ?, 'activa', CURRENT_TIMESTAMP)
+                ");
+                $stmt->execute([$baseId, $asesorCedula]);
             }
 
             $this->pdo->commit();
-            return $asignacionesCreadas;
+            // Compatibilidad: antes devolvía #asignaciones por cliente; ahora 1 base asignada.
+            return 1;
         } catch (Exception $e) {
             $this->pdo->rollBack();
             error_log("Error al asignar asesor a base de datos: " . $e->getMessage());
@@ -240,50 +261,25 @@ class CargaExcelModel {
     public function liberarAsesorDeBaseDatos($cargaId, $asesorId) {
         $this->pdo->beginTransaction();
         try {
+            $baseId = (int)$cargaId;
             $asignacionesActualizadas = 0;
 
             if ($asesorId === null) {
-                // Liberar todos los asesores de esta base de datos
-
-                // 1. Desactivar asignaciones de base completa
                 $stmt = $this->pdo->prepare("
-                    UPDATE asignaciones_base_asesor
-                    SET estado = 'inactiva'
-                    WHERE carga_id = ? AND estado = 'activa'
+                    UPDATE asignacion_base_asesores
+                    SET estado = 'inactiva', fecha_actualizacion = CURRENT_TIMESTAMP
+                    WHERE base_id = ? AND estado = 'activa'
                 ");
-                $stmt->execute([$cargaId]);
-
-                // 2. Cambiar estado de asignaciones individuales de clientes a 'liberado'
-                $stmt = $this->pdo->prepare("
-                    UPDATE asignaciones_clientes ac
-                    INNER JOIN clientes c ON ac.cliente_id = c.id
-                    SET ac.estado = 'liberado'
-                    WHERE c.carga_excel_id = ? AND ac.estado = 'asignado'
-                ");
-                if ($stmt->execute([$cargaId])) {
-                    $asignacionesActualizadas = $stmt->rowCount();
-                }
+                $stmt->execute([$baseId]);
+                $asignacionesActualizadas = $stmt->rowCount();
             } else {
-                // Liberar solo el asesor específico
-
-                // 1. Desactivar asignación de base completa
                 $stmt = $this->pdo->prepare("
-                    UPDATE asignaciones_base_asesor
-                    SET estado = 'inactiva'
-                    WHERE carga_id = ? AND asesor_id = ? AND estado = 'activa'
+                    UPDATE asignacion_base_asesores
+                    SET estado = 'inactiva', fecha_actualizacion = CURRENT_TIMESTAMP
+                    WHERE base_id = ? AND asesor_cedula = ? AND estado = 'activa'
                 ");
-                $stmt->execute([$cargaId, $asesorId]);
-
-                // 2. Cambiar estado de asignaciones individuales de clientes a 'liberado'
-                $stmt = $this->pdo->prepare("
-                    UPDATE asignaciones_clientes ac
-                    INNER JOIN clientes c ON ac.cliente_id = c.id
-                    SET ac.estado = 'liberado'
-                    WHERE c.carga_excel_id = ? AND ac.asesor_id = ? AND ac.estado = 'asignado'
-                ");
-                if ($stmt->execute([$cargaId, $asesorId])) {
-                    $asignacionesActualizadas = $stmt->rowCount();
-                }
+                $stmt->execute([$baseId, (string)$asesorId]);
+                $asignacionesActualizadas = $stmt->rowCount();
             }
 
             $this->pdo->commit();
@@ -300,35 +296,40 @@ class CargaExcelModel {
      * Excluye los asesores que ya tienen acceso a la base de datos especificada
      */
     public function getAsesoresDisponibles($coordinadorId, $cargaId = null) {
+        $coordinadorCedula = (string)$coordinadorId;
+
         if ($cargaId) {
-            // Excluir asesores que ya tienen acceso a esta base
+            $baseId = (int)$cargaId;
             $stmt = $this->pdo->prepare("
-                SELECT u.id, u.nombre_completo, u.usuario
+                SELECT u.cedula as id, u.nombre as nombre_completo, u.usuario
                 FROM usuarios u
-                INNER JOIN asignaciones_asesor_coordinador aac ON u.id = aac.asesor_id
-                WHERE aac.coordinador_id = ? 
-                AND aac.estado = 'Activa' 
-                AND u.rol = 'asesor'
-                AND u.id NOT IN (
-                    SELECT DISTINCT aba.asesor_id
-                    FROM asignaciones_base_asesor aba
-                    WHERE aba.carga_id = ? 
-                    AND aba.estado = 'activa'
-                )
-                ORDER BY u.nombre_completo
+                INNER JOIN asignaciones_cordinador ac ON u.cedula = ac.asesor_cedula
+                WHERE ac.cordinador_cedula = ?
+                  AND ac.estado = 'activo'
+                  AND u.rol = 'asesor'
+                  AND u.estado = 'activo'
+                  AND u.cedula NOT IN (
+                    SELECT DISTINCT aba.asesor_cedula
+                    FROM asignacion_base_asesores aba
+                    WHERE aba.base_id = ? AND aba.estado = 'activa'
+                  )
+                ORDER BY u.nombre
             ");
-            $stmt->execute([$coordinadorId, $cargaId]);
-        } else {
-            // Si no se especifica carga_id, devolver todos los asesores del coordinador
-            $stmt = $this->pdo->prepare("
-                SELECT u.id, u.nombre_completo, u.usuario
-                FROM usuarios u
-                INNER JOIN asignaciones_asesor_coordinador aac ON u.id = aac.asesor_id
-                WHERE aac.coordinador_id = ? AND aac.estado = 'Activa' AND u.rol = 'asesor'
-                ORDER BY u.nombre_completo
-            ");
-            $stmt->execute([$coordinadorId]);
+            $stmt->execute([$coordinadorCedula, $baseId]);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
+
+        $stmt = $this->pdo->prepare("
+            SELECT u.cedula as id, u.nombre as nombre_completo, u.usuario
+            FROM usuarios u
+            INNER JOIN asignaciones_cordinador ac ON u.cedula = ac.asesor_cedula
+            WHERE ac.cordinador_cedula = ?
+              AND ac.estado = 'activo'
+              AND u.rol = 'asesor'
+              AND u.estado = 'activo'
+            ORDER BY u.nombre
+        ");
+        $stmt->execute([$coordinadorCedula]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -336,11 +337,10 @@ class CargaExcelModel {
      * Obtiene una carga por ID
      */
     public function getCargaById($cargaId) {
-        $stmt = $this->pdo->prepare("
-            SELECT * FROM cargas_excel WHERE id = ?
-        ");
-        $stmt->execute([$cargaId]);
-        return $stmt->fetch(PDO::FETCH_ASSOC);
+        $stmt = $this->pdo->prepare("SELECT * FROM base_clientes WHERE id_base = ? LIMIT 1");
+        $stmt->execute([(int)$cargaId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $this->mapBaseRow(is_array($row) ? $row : null);
     }
 
     /**
@@ -348,18 +348,13 @@ class CargaExcelModel {
      */
     public function getAsesoresAsignadosABase($cargaId) {
         $stmt = $this->pdo->prepare("
-            SELECT DISTINCT u.id, u.nombre_completo, u.usuario
+            SELECT DISTINCT u.cedula as id, u.nombre as nombre_completo, u.usuario
             FROM usuarios u
-            INNER JOIN asignaciones_clientes ac ON u.id = ac.asesor_id
-            INNER JOIN clientes c ON ac.cliente_id = c.id
-            WHERE c.carga_excel_id = ? AND ac.estado = 'asignado'
-            UNION
-            SELECT DISTINCT u.id, u.nombre_completo, u.usuario
-            FROM usuarios u
-            INNER JOIN asignaciones_base_asesor aba ON u.id = aba.asesor_id
-            WHERE aba.carga_id = ? AND aba.estado = 'activa'
+            INNER JOIN asignacion_base_asesores aba ON u.cedula = aba.asesor_cedula
+            WHERE aba.base_id = ? AND aba.estado = 'activa'
+            ORDER BY u.nombre
         ");
-        $stmt->execute([$cargaId, $cargaId]);
+        $stmt->execute([(int)$cargaId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -369,20 +364,19 @@ class CargaExcelModel {
      */
     public function getAsesoresAsignadosABaseParaCoordinador($cargaId, $coordinadorId) {
         $stmt = $this->pdo->prepare("
-            SELECT DISTINCT u.id, u.nombre_completo, u.usuario
+            SELECT DISTINCT u.cedula as id, u.nombre as nombre_completo, u.usuario
             FROM usuarios u
-            INNER JOIN asignaciones_asesor_coordinador aac ON u.id = aac.asesor_id AND aac.coordinador_id = ? AND aac.estado = 'Activa'
-            INNER JOIN asignaciones_base_asesor aba ON u.id = aba.asesor_id AND aba.carga_id = ? AND aba.estado = 'activa'
-            WHERE u.rol = 'asesor'
-            UNION
-            SELECT DISTINCT u.id, u.nombre_completo, u.usuario
-            FROM usuarios u
-            INNER JOIN asignaciones_asesor_coordinador aac ON u.id = aac.asesor_id AND aac.coordinador_id = ? AND aac.estado = 'Activa'
-            INNER JOIN asignaciones_clientes ac ON u.id = ac.asesor_id
-            INNER JOIN clientes c ON ac.cliente_id = c.id AND c.carga_excel_id = ?
-            WHERE ac.estado = 'asignado' AND u.rol = 'asesor'
+            INNER JOIN asignaciones_cordinador ac ON u.cedula = ac.asesor_cedula
+            INNER JOIN asignacion_base_asesores aba ON u.cedula = aba.asesor_cedula
+            WHERE ac.cordinador_cedula = ?
+              AND ac.estado = 'activo'
+              AND aba.base_id = ?
+              AND aba.estado = 'activa'
+              AND u.rol = 'asesor'
+              AND u.estado = 'activo'
+            ORDER BY u.nombre
         ");
-        $stmt->execute([$coordinadorId, $cargaId, $coordinadorId, $cargaId]);
+        $stmt->execute([(string)$coordinadorId, (int)$cargaId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -392,48 +386,47 @@ class CargaExcelModel {
     public function eliminarBaseDatos($cargaId) {
         $this->pdo->beginTransaction();
         try {
-            // 1. Eliminar asignaciones de clientes
-            $stmt = $this->pdo->prepare("
-                DELETE ac FROM asignaciones_clientes ac
-                INNER JOIN clientes c ON ac.cliente_id = c.id
-                WHERE c.carga_excel_id = ?
-            ");
-            $stmt->execute([$cargaId]);
+            $baseId = (int)$cargaId;
 
-            // 2. Eliminar asignaciones de base completa
-            $stmt = $this->pdo->prepare("
-                DELETE FROM asignaciones_base_asesor WHERE carga_id = ?
-            ");
-            $stmt->execute([$cargaId]);
+            // 1. Eliminar asignaciones de asesores a la base.
+            $stmt = $this->pdo->prepare("DELETE FROM asignacion_base_asesores WHERE base_id = ?");
+            $stmt->execute([$baseId]);
 
-            // 3. Eliminar historial de gestiones
+            // 2. Eliminar historial de gestiones asociado a obligaciones/clientes de la base.
             $stmt = $this->pdo->prepare("
-                DELETE hg FROM historial_gestion hg
-                INNER JOIN asignaciones_clientes ac ON hg.asignacion_id = ac.id
-                INNER JOIN clientes c ON ac.cliente_id = c.id
-                WHERE c.carga_excel_id = ?
+                DELETE hg
+                FROM historial_gestiones hg
+                INNER JOIN obligaciones o ON hg.obligacion_id = o.id_obligacion
+                WHERE o.base_id = ?
             ");
-            $stmt->execute([$cargaId]);
+            $stmt->execute([$baseId]);
 
-            // 4. Eliminar facturas de los clientes
+            // 3. Eliminar acuerdos asociados a gestiones (si aplica por FK).
+            // En dump: acuerdos.gestion_id referencia historial? (según FK fk_acuerdo_gestion).
+            // Para evitar errores por FK, borramos por join si existe coincidencia directa.
             $stmt = $this->pdo->prepare("
-                DELETE f FROM facturas f
-                INNER JOIN clientes c ON f.cliente_id = c.id
-                WHERE c.carga_excel_id = ?
+                DELETE a
+                FROM acuerdos a
+                LEFT JOIN historial_gestiones hg ON a.gestion_id = hg.id_gestion
+                LEFT JOIN obligaciones o ON hg.obligacion_id = o.id_obligacion
+                WHERE o.base_id = ?
             ");
-            $stmt->execute([$cargaId]);
+            $stmt->execute([$baseId]);
 
-            // 5. Eliminar clientes
-            $stmt = $this->pdo->prepare("
-                DELETE FROM clientes WHERE carga_excel_id = ?
-            ");
-            $stmt->execute([$cargaId]);
+            // 4. Eliminar obligaciones y clientes.
+            $stmt = $this->pdo->prepare("DELETE FROM obligaciones WHERE base_id = ?");
+            $stmt->execute([$baseId]);
 
-            // 6. Eliminar la carga
-            $stmt = $this->pdo->prepare("
-                DELETE FROM cargas_excel WHERE id = ?
-            ");
-            $stmt->execute([$cargaId]);
+            $stmt = $this->pdo->prepare("DELETE FROM clientes WHERE base_id = ?");
+            $stmt->execute([$baseId]);
+
+            // 5. Eliminar tareas asociadas.
+            $stmt = $this->pdo->prepare("DELETE FROM tareas WHERE base_id = ?");
+            $stmt->execute([$baseId]);
+
+            // 6. Eliminar la base.
+            $stmt = $this->pdo->prepare("DELETE FROM base_clientes WHERE id_base = ?");
+            $stmt->execute([$baseId]);
 
             $this->pdo->commit();
             return true;

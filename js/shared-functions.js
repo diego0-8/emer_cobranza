@@ -86,7 +86,6 @@ function cargarEstadisticasProductos() {
     const totalRecaudado = document.getElementById('total-recaudado-productos');
     
     if (!totalProductos || !totalRecaudado) {
-        console.warn('Elementos de estadísticas de productos no encontrados');
         return;
     }
     
@@ -143,7 +142,4 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
-    
-    // Cargar estadísticas de productos si los elementos existen
-    cargarEstadisticasProductos();
 });

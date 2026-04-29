@@ -7,7 +7,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?php echo htmlspecialchars($page_title); ?></title>
+    <title>Gestión de Cargas</title>
     <?php include 'views/shared_styles.php'; ?>
     <style>
         .upload-options {
@@ -356,9 +356,20 @@
     
     <div class="container">
         <div class="page-header">
-            <h1><?php echo htmlspecialchars($page_title); ?></h1>
+            <h1>Gestión de Cargas</h1>
             <p class="page-description">Gestiona tus bases de datos de clientes subiendo archivos CSV</p>
         </div>
+
+        <?php $cargas = $cargas ?? []; ?>
+
+        <?php
+        $error_message = $_SESSION['error_message'] ?? '';
+        $success_message = $_SESSION['success_message'] ?? '';
+        $info_message = $_SESSION['info_message'] ?? '';
+        $warning_message = $_SESSION['warning_message'] ?? '';
+        $autoHide = isset($_SESSION['success_auto_hide']);
+        unset($_SESSION['error_message'], $_SESSION['success_message'], $_SESSION['info_message'], $_SESSION['warning_message'], $_SESSION['success_auto_hide']);
+        ?>
 
         <?php if (!empty($error_message)): ?>
             <div class="alert alert-error">
@@ -367,28 +378,32 @@
         <?php endif; ?>
 
         <?php if (!empty($success_message)): ?>
-            <div class="alert alert-success <?php echo isset($_SESSION['success_auto_hide']) ? 'auto-hide' : ''; ?>" 
-                 <?php echo isset($_SESSION['success_auto_hide']) ? 'data-auto-hide="true"' : ''; ?>>
+            <div class="alert alert-success <?php echo $autoHide ? 'auto-hide' : ''; ?>" <?php echo $autoHide ? 'data-auto-hide="true"' : ''; ?>>
                 <strong>Éxito:</strong> <?php echo $success_message; ?>
             </div>
-            <?php unset($_SESSION['success_auto_hide']); ?>
         <?php endif; ?>
 
         <?php if (!empty($info_message)): ?>
-            <div class="alert alert-info <?php echo isset($_SESSION['success_auto_hide']) ? 'auto-hide' : ''; ?>" 
-                 <?php echo isset($_SESSION['success_auto_hide']) ? 'data-auto-hide="true"' : ''; ?>>
+            <div class="alert alert-info <?php echo $autoHide ? 'auto-hide' : ''; ?>" <?php echo $autoHide ? 'data-auto-hide="true"' : ''; ?>>
                 <strong>Información:</strong> <?php echo $info_message; ?>
             </div>
-            <?php unset($_SESSION['success_auto_hide']); ?>
         <?php endif; ?>
 
         <?php if (!empty($warning_message)): ?>
-            <div class="alert alert-warning <?php echo isset($_SESSION['success_auto_hide']) ? 'auto-hide' : ''; ?>" 
-                 <?php echo isset($_SESSION['success_auto_hide']) ? 'data-auto-hide="true"' : ''; ?>>
+            <div class="alert alert-warning <?php echo $autoHide ? 'auto-hide' : ''; ?>" <?php echo $autoHide ? 'data-auto-hide="true"' : ''; ?>>
                 <strong>Advertencia:</strong> <?php echo $warning_message; ?>
             </div>
-            <?php unset($_SESSION['success_auto_hide']); ?>
         <?php endif; ?>
+
+        <div class="alert alert-info" style="margin-top: 12px;">
+            <strong>Archivo de prueba:</strong>
+            <a href="carga_base_prueba.csv" download style="font-weight: 600; text-decoration: underline;">
+                Descargar CSV de ejemplo
+            </a>
+            <div style="margin-top: 6px; font-size: 0.95em;">
+                Incluye columnas: <strong>cedula</strong>, <strong>NUMERO FACTURA</strong> y <strong>TELEFONO</strong> (obligatorias) + campos opcionales del dump.
+            </div>
+        </div>
 
         <!-- Instructivo de estructura del archivo CSV -->
         <div class="instructivo">
@@ -408,8 +423,8 @@
                     </h4>
                     <ol>
                         <li><span class="campo-obligatorio">cedula</span> - Número de cédula (sin puntos ni guiones)</li>
-                        <li><span class="campo-obligatorio">nombre</span> - <strong>Nombre completo del cliente</strong></li>
                         <li><span class="campo-obligatorio">numero_factura</span> - Número de factura/obligación</li>
+                        <li><span class="campo-obligatorio">telefono</span> - Algún teléfono (TEL1/TELÉFONO/TEL/CEL). También acepta <strong>telefono2</strong> o <strong>telefonos_3</strong>.</li>
                     </ol>
                     
                     <h4 style="margin-top: 20px;">
@@ -471,9 +486,9 @@
             <div class="upload-option existente" onclick="selectUploadOption('existente')">
                 <div class="icon">📁</div>
                 <h3>Agregar a Base Existente</h3>
-                <p>Selecciona una base de datos específica para agregar clientes</p>
+                <p>Selecciona una base de datos habilitada para agregar/actualizar clientes y obligaciones</p>
             </div>
-            
+
             <div class="upload-option nueva" onclick="selectUploadOption('nueva')">
                 <div class="icon">🗄️</div>
                 <h3>Crear Nueva Base de Datos</h3>
@@ -508,8 +523,10 @@
                                 <p class="text-muted">o haz clic para seleccionar archivo</p>
                                 <small class="text-muted">Formatos soportados: .csv</small>
                             </div>
-                            <input type="file" id="archivo_excel_nueva" name="archivo_excel_nueva" 
-                                   accept=".csv" style="display: none;" required>
+                            <input type="file" id="archivo_excel_nueva" name="archivo_excel_nueva"
+                                   accept=".csv"
+                                   style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;"
+                                   aria-hidden="true">
                             <div class="file-info" id="fileInfoNueva">
                                 <div class="d-flex justify-content-between align-items-center">
                                     <span id="fileNameNueva"></span>
@@ -542,18 +559,20 @@
                 <div class="card-body">
                     <form method="POST" action="index.php" enctype="multipart/form-data" id="formExistenteForm">
                         <input type="hidden" name="action" value="agregar_a_base_existente">
-                        <input type="hidden" name="carga_id" id="carga_id_seleccionada">
-                        
+
                         <div class="form-group">
-                            <label for="base_seleccionada">Base de Datos Seleccionada *</label>
-                            <div class="selected-base-display" id="selectedBaseDisplay">
-                                <div class="alert alert-info">
-                                    <i class="fas fa-info-circle"></i>
-                                    Selecciona una base de datos de la lista de abajo
-                                </div>
-                            </div>
+                            <label for="carga_id_seleccionada">Base de Datos *</label>
+                            <select id="carga_id_seleccionada" name="carga_id" class="form-control" required>
+                                <option value="">Selecciona una base habilitada</option>
+                                <?php foreach ((array)$cargas as $carga): ?>
+                                    <option value="<?php echo (int)($carga['id'] ?? 0); ?>">
+                                        <?php echo htmlspecialchars((string)($carga['nombre_cargue'] ?? '')); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <small class="form-help">Solo se muestran bases habilitadas (estado activo) de tu coordinación.</small>
                         </div>
-                        
+
                         <div class="form-group">
                             <label>Archivo CSV *</label>
                             <div class="file-upload-area" id="fileUploadAreaExistente" onclick="document.getElementById('archivo_excel_existente').click()">
@@ -562,8 +581,10 @@
                                 <p class="text-muted">o haz clic para seleccionar archivo</p>
                                 <small class="text-muted">Formatos soportados: .csv</small>
                             </div>
-                            <input type="file" id="archivo_excel_existente" name="archivo_excel_existente" 
-                                   accept=".csv" style="display: none;" required>
+                            <input type="file" id="archivo_excel_existente" name="archivo_excel_existente"
+                                   accept=".csv"
+                                   style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;"
+                                   aria-hidden="true">
                             <div class="file-info" id="fileInfoExistente">
                                 <div class="d-flex justify-content-between align-items-center">
                                     <span id="fileNameExistente"></span>
@@ -573,35 +594,19 @@
                                 </div>
                             </div>
                         </div>
-                        
+
                         <div class="form-actions">
                             <a href="index.php?action=list_cargas" class="btn btn-secondary">
                                 <i class="fas fa-arrow-left"></i> Volver
                             </a>
-                            <button type="submit" class="btn btn-success" id="btnAgregarExistente" disabled>
-                                <i class="fas fa-plus"></i> Agregar Clientes
+                            <button type="submit" class="btn btn-success">
+                                <i class="fas fa-plus"></i> Agregar/Actualizar
                             </button>
                         </div>
                     </form>
                 </div>
             </div>
         </div>
-
-        <!-- Mostrar bases existentes si hay -->
-        <?php if (!empty($cargas)): ?>
-        <div class="existing-bases">
-            <h4><i class="fas fa-database"></i> Bases de Datos Existentes</h4>
-            <div class="base-list">
-                <?php foreach ($cargas as $carga): ?>
-                <div class="base-item" onclick="selectExistingBase(<?php echo $carga['id']; ?>, '<?php echo htmlspecialchars($carga['nombre_cargue']); ?>')">
-                    <strong><?php echo htmlspecialchars($carga['nombre_cargue']); ?></strong>
-                    <br>
-                    <small><?php echo date('d/m/Y H:i', strtotime($carga['fecha_cargue'])); ?></small>
-                </div>
-                <?php endforeach; ?>
-            </div>
-        </div>
-        <?php endif; ?>
 
         <!-- Botón de gestión de estado de bases -->
         <div class="row mt-4">
@@ -627,11 +632,8 @@
 
     <script>
         let selectedOption = null;
-        let selectedBaseId = null;
 
         function selectUploadOption(option) {
-            console.log('Seleccionando opción:', option);
-            
             // Remover selección anterior
             document.querySelectorAll('.upload-option').forEach(el => el.classList.remove('selected'));
             document.querySelectorAll('.upload-form').forEach(el => el.classList.remove('active'));
@@ -640,41 +642,16 @@
             const optionElement = document.querySelector(`.upload-option.${option}`);
             if (optionElement) {
                 optionElement.classList.add('selected');
-                console.log('Opción seleccionada:', optionElement);
-            } else {
-                console.error('No se encontró el elemento:', `.upload-option.${option}`);
             }
             
             // Mostrar el formulario correspondiente
-            const formId = option === 'nueva' ? 'formNueva' : 'formExistente';
+            const formId = option === 'existente' ? 'formExistente' : 'formNueva';
             const formElement = document.getElementById(formId);
             if (formElement) {
                 formElement.classList.add('active');
-                console.log('Formulario activado:', formId);
-            } else {
-                console.error('No se encontró el formulario:', formId);
             }
             
             selectedOption = option;
-            console.log('Opción seleccionada:', selectedOption);
-        }
-
-        function selectExistingBase(baseId, baseName) {
-            selectedBaseId = baseId;
-            document.querySelectorAll('.base-item').forEach(el => el.classList.remove('selected'));
-            event.target.closest('.base-item').classList.add('selected');
-            
-            // Actualizar el formulario de base existente
-            if (selectedOption === 'existente') {
-                document.getElementById('carga_id_seleccionada').value = baseId;
-                document.getElementById('selectedBaseDisplay').innerHTML = `
-                    <div class="alert alert-success">
-                        <i class="fas fa-check-circle"></i>
-                        <strong>Base seleccionada:</strong> ${baseName}
-                    </div>
-                `;
-                document.getElementById('btnAgregarExistente').disabled = false;
-            }
         }
 
 
@@ -684,6 +661,7 @@
         const fileInfoNueva = document.getElementById('fileInfoNueva');
         const fileNameNueva = document.getElementById('fileNameNueva');
 
+        if (fileUploadAreaNueva) {
         fileUploadAreaNueva.addEventListener('dragover', function(e) {
             e.preventDefault();
             this.classList.add('dragover');
@@ -700,10 +678,13 @@
             const files = e.dataTransfer.files;
             handleFilesNueva(files);
         });
+        }
 
-        fileInputNueva.addEventListener('change', function(e) {
-            handleFilesNueva(e.target.files);
-        });
+        if (fileInputNueva) {
+            fileInputNueva.addEventListener('change', function(e) {
+                handleFilesNueva(e.target.files);
+            });
+        }
 
         function handleFilesNueva(files) {
             if (files.length > 0) {
@@ -730,26 +711,30 @@
         const fileInfoExistente = document.getElementById('fileInfoExistente');
         const fileNameExistente = document.getElementById('fileNameExistente');
 
-        fileUploadAreaExistente.addEventListener('dragover', function(e) {
-            e.preventDefault();
-            this.classList.add('dragover');
-        });
+        if (fileUploadAreaExistente) {
+            fileUploadAreaExistente.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                this.classList.add('dragover');
+            });
 
-        fileUploadAreaExistente.addEventListener('dragleave', function(e) {
-            e.preventDefault();
-            this.classList.remove('dragover');
-        });
+            fileUploadAreaExistente.addEventListener('dragleave', function(e) {
+                e.preventDefault();
+                this.classList.remove('dragover');
+            });
 
-        fileUploadAreaExistente.addEventListener('drop', function(e) {
-            e.preventDefault();
-            this.classList.remove('dragover');
-            const files = e.dataTransfer.files;
-            handleFilesExistente(files);
-        });
+            fileUploadAreaExistente.addEventListener('drop', function(e) {
+                e.preventDefault();
+                this.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                handleFilesExistente(files);
+            });
+        }
 
-        fileInputExistente.addEventListener('change', function(e) {
-            handleFilesExistente(e.target.files);
-        });
+        if (fileInputExistente) {
+            fileInputExistente.addEventListener('change', function(e) {
+                handleFilesExistente(e.target.files);
+            });
+        }
 
         function handleFilesExistente(files) {
             if (files.length > 0) {
@@ -771,7 +756,8 @@
         }
 
         // Validación de formularios
-        document.getElementById('formNuevaForm').addEventListener('submit', function(e) {
+        const formNuevaFormEl = document.getElementById('formNuevaForm');
+        (formNuevaFormEl || { addEventListener: function(){} }).addEventListener('submit', function(e) {
             const nombre = document.getElementById('nombre_base_datos').value.trim();
             if (!nombre) {
                 e.preventDefault();
@@ -785,43 +771,23 @@
             }
         });
 
-        document.getElementById('formExistenteForm').addEventListener('submit', function(e) {
-            const cargaId = document.getElementById('carga_id_seleccionada').value;
-            if (!cargaId) {
+        const formExistenteFormEl = document.getElementById('formExistenteForm');
+        (formExistenteFormEl || { addEventListener: function(){} }).addEventListener('submit', function(e) {
+            const cargaId = (document.getElementById('carga_id_seleccionada') || {}).value || '';
+            if (!String(cargaId).trim()) {
                 e.preventDefault();
-                alert('Por favor selecciona una base de datos de la lista');
+                alert('Por favor selecciona una base de datos');
                 return;
             }
-            if (!fileInputExistente.files.length) {
+            if (!fileInputExistente || !fileInputExistente.files || !fileInputExistente.files.length) {
                 e.preventDefault();
                 alert('Por favor selecciona un archivo CSV');
                 return;
             }
         });
 
-        // Auto-ocultar mensajes de éxito después de 5 segundos
+        // Auto-ocultar mensajes después de 5 segundos
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('DOM cargado, inicializando JavaScript...');
-            
-            // Verificar que todos los elementos necesarios existen
-            const uploadOptions = document.querySelectorAll('.upload-option');
-            const uploadForms = document.querySelectorAll('.upload-form');
-            
-            console.log('Opciones de carga encontradas:', uploadOptions.length);
-            console.log('Formularios encontrados:', uploadForms.length);
-            
-            // Verificar elementos específicos
-            const formNueva = document.getElementById('formNueva');
-            const formExistente = document.getElementById('formExistente');
-            const formNuevaForm = document.getElementById('formNuevaForm');
-            const formExistenteForm = document.getElementById('formExistenteForm');
-            
-            console.log('formNueva:', formNueva ? 'OK' : 'NO ENCONTRADO');
-            console.log('formExistente:', formExistente ? 'OK' : 'NO ENCONTRADO');
-            console.log('formNuevaForm:', formNuevaForm ? 'OK' : 'NO ENCONTRADO');
-            console.log('formExistenteForm:', formExistenteForm ? 'OK' : 'NO ENCONTRADO');
-            
-            // Auto-ocultar mensajes de éxito
             const successMessages = document.querySelectorAll('.alert-success, .alert-info, .alert-warning');
             successMessages.forEach(function(message) {
                 // Verificar si el mensaje debe auto-ocultarse
@@ -835,8 +801,6 @@
                     }, 5000); // 5 segundos
                 }
             });
-            
-            console.log('JavaScript inicializado correctamente');
         });
     </script>
 </body>

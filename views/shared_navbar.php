@@ -14,6 +14,15 @@ function getNavbar($currentPage = '', $userRole = '') {
     if (empty($userRole)) {
         $userRole = $_SESSION['user_role'] ?? '';
     }
+
+    // Normalizar rol: en BD el enum puede ser `cordinador` (typo histórico) pero el resto del sistema usa `coordinador`.
+    $userRole = strtolower(trim((string) $userRole));
+    if ($userRole === 'cordinador') {
+        $userRole = 'coordinador';
+    }
+
+    // Ruta canónica a la vista de resultados del equipo (views/coordinador_resultados_equipo.php vía CoordinadorController::resultadosEquipo).
+    $urlResultadosCoordinador = 'index.php?action=resultados_equipo';
     
     $menuItems = [];
     
@@ -35,7 +44,7 @@ function getNavbar($currentPage = '', $userRole = '') {
             $menuItems = [
                 'Inicio' => 'index.php?action=dashboard',
                 'Gestión' => 'index.php?action=list_cargas',
-                'Resultados' => 'index.php?action=resultados_equipo',
+                'Resultados' => $urlResultadosCoordinador,
                 'Tareas' => 'index.php?action=tareas_coordinador',
                 'Reportes CSV' => 'index.php?action=reportes_exportacion',
                 'Reporte TMO' => 'index.php?action=reporte_tmo'

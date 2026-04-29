@@ -126,7 +126,11 @@ if (!isset($pdo)) {
                                     <td><?= date('d/m/Y H:i', strtotime($base['fecha_cargue'])) ?></td>
                                     <td><?= (int)($base['total_clientes'] ?? 0) ?></td>
                                     <td>
-                                        <?php if ($base['estado_habilitado'] === 'habilitado'): ?>
+                                        <?php
+                                        $estadoRaw = (string)($base['estado_habilitado'] ?? $base['estado'] ?? '');
+                                        $estaHabilitada = in_array($estadoRaw, ['habilitado', 'activo', '1', 'true'], true);
+                                        ?>
+                                        <?php if ($estaHabilitada): ?>
                                             <span class="badge badge-success">
                                                 <i class="fas fa-check-circle"></i> Habilitado
                                             </span>
@@ -138,13 +142,13 @@ if (!isset($pdo)) {
                                     </td>
                                     <td>
                                         <div class="btn-group" role="group">
-                                            <?php if ($base['estado_habilitado'] === 'habilitado'): ?>
-                                                <button class="btn btn-sm btn-deshabilitar" onclick="cambiarEstado(<?= $base['id'] ?>, 'deshabilitado')" 
+                                            <?php if ($estaHabilitada): ?>
+                                                <button class="btn btn-sm btn-deshabilitar" onclick="cambiarEstado(<?= $base['id'] ?>, 'inactivo')" 
                                                         title="Deshabilitar Base de Datos">
                                                     <i class="fas fa-ban"></i> Deshabilitar
                                                 </button>
                                             <?php else: ?>
-                                                <button class="btn btn-sm btn-habilitar" onclick="cambiarEstado(<?= $base['id'] ?>, 'habilitado')" 
+                                                <button class="btn btn-sm btn-habilitar" onclick="cambiarEstado(<?= $base['id'] ?>, 'activo')" 
                                                         title="Habilitar Base de Datos">
                                                     <i class="fas fa-check"></i> Habilitar
                                                 </button>
@@ -235,13 +239,15 @@ function mostrarResultados(bases) {
     
     let html = '';
     bases.forEach(base => {
-        const estadoBadge = base.estado_habilitado === 'habilitado' 
+        const estadoRaw = String(base.estado_habilitado || base.estado || '');
+        const estaHabilitada = (estadoRaw === 'habilitado' || estadoRaw === 'activo' || estadoRaw === '1' || estadoRaw === 'true');
+        const estadoBadge = estaHabilitada 
             ? '<span class="badge badge-success"><i class="fas fa-check-circle"></i> Habilitado</span>'
             : '<span class="badge badge-danger"><i class="fas fa-times-circle"></i> Deshabilitado</span>';
         
-        const botonAccion = base.estado_habilitado === 'habilitado'
-            ? `<button class="btn btn-sm btn-deshabilitar" onclick="cambiarEstado(${base.id}, 'deshabilitado')" title="Deshabilitar Base de Datos"><i class="fas fa-ban"></i> Deshabilitar</button>`
-            : `<button class="btn btn-sm btn-habilitar" onclick="cambiarEstado(${base.id}, 'habilitado')" title="Habilitar Base de Datos"><i class="fas fa-check"></i> Habilitar</button>`;
+        const botonAccion = estaHabilitada
+            ? `<button class="btn btn-sm btn-deshabilitar" onclick="cambiarEstado(${base.id}, 'inactivo')" title="Deshabilitar Base de Datos"><i class="fas fa-ban"></i> Deshabilitar</button>`
+            : `<button class="btn btn-sm btn-habilitar" onclick="cambiarEstado(${base.id}, 'activo')" title="Habilitar Base de Datos"><i class="fas fa-check"></i> Habilitar</button>`;
         
         html += `
             <tr data-base-id="${base.id}">
@@ -297,7 +303,7 @@ function cerrarModalEstado() {
 
 // Cambiar estado de la base: se ejecuta directo y se muestra modal informativo al frente
 function cambiarEstado(baseId, nuevoEstado) {
-    const accion = nuevoEstado === 'habilitado' ? 'Habilitar' : 'Deshabilitar';
+    const accion = nuevoEstado === 'activo' ? 'Habilitar' : 'Deshabilitar';
     mostrarModalEstado('Procesando', accion + ' base de datos...');
 
     const formData = new FormData();
@@ -310,7 +316,7 @@ function cambiarEstado(baseId, nuevoEstado) {
     })
     .then(response => response.text())
     .then(data => {
-        const ok = nuevoEstado === 'habilitado'
+        const ok = nuevoEstado === 'activo'
             ? 'Base habilitada correctamente.'
             : 'Base deshabilitada correctamente. Los asesores ya no tendrán acceso a esta base.';
         mostrarModalEstado('Listo', ok);
@@ -362,6 +368,38 @@ document.getElementById('soloHabilitadas').addEventListener('change', buscarBase
 document.addEventListener('DOMContentLoaded', function() {
     buscarBases();
 });
+</script>
+
+<script>
+// #region debug d200d9 gestionar_estado_bases
+function dbglog_estadoBases(location, message, data, hypothesisId, runId) {
+    try {
+        fetch('http://127.0.0.1:7559/ingest/0bcc0192-fe61-4fb0-b109-b4792228bcf7', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'b7eaa7' },
+            body: JSON.stringify({
+                sessionId: 'b7eaa7',
+                runId: runId || 'pre',
+                hypothesisId: hypothesisId || 'B0',
+                location,
+                message,
+                data: data || {},
+                timestamp: Date.now()
+            })
+        }).catch(function(){});
+    } catch (e) {}
+}
+dbglog_estadoBases('views/gestionar_estado_bases.php:bootstrap', 'loaded', {
+    basesCount: <?php echo (int)count($bases_datos); ?>,
+    estadosSample: <?php
+        $vals = [];
+        foreach (array_slice($bases_datos, 0, 10) as $b) {
+            $vals[] = (string)($b['estado_habilitado'] ?? $b['estado'] ?? '');
+        }
+        echo json_encode($vals, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    ?>
+}, 'B1');
+// #endregion
 </script>
 
 <?php include __DIR__ . '/shared_footer.php'; ?>

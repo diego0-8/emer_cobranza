@@ -7,6 +7,10 @@ require_once __DIR__ . '/config.php';
 // Obtener la acción antes de enviar headers
 $action = $_GET['action'] ?? $_POST['action'] ?? 'login';
 
+// #region agent log
+error_log('[AGENTLOG a2fdce R0] index boot method=' . ($_SERVER['REQUEST_METHOD'] ?? 'unknown') . ' action=' . (string)$action);
+// #endregion
+
 // NO enviar headers HTML si es una acción de exportación o API (dejar que el controlador maneje los headers)
 $accionesExportacion = [
     'exportar_gestion_asesor',
@@ -30,7 +34,9 @@ $accionesAPI = [
     'obtener_break_activo',
     'registrar_break',
     'verificar_contrasena_desbloqueo',
-    'agregar_informacion_cliente'
+    'agregar_informacion_cliente',
+    // Debug dashboard asesor (d54ef5)
+    'client_debug_log_d54ef5'
 ];
 
 if (!in_array($action, $accionesExportacion) && !in_array($action, $accionesAPI)) {
@@ -67,12 +73,20 @@ try {
 $user_role = isset($_SESSION['user_role']) ? $_SESSION['user_role'] : '';
 
 // Control de sesión
-if (!isset($_SESSION['user_id']) && $action !== 'login') {
+// Permitir acciones públicas sin sesión (login + procesamiento del login).
+$accionesPublicas = ['login', 'process_login'];
+if (!isset($_SESSION['user_id']) && !in_array($action, $accionesPublicas, true)) {
+    // #region agent log
+    error_log('[AGENTLOG a2fdce S1] redirect_to_login missing_user_id action=' . (string)$action);
+    // #endregion
     header('Location: index.php?action=login');
     exit;
 }
 
 if (isset($_SESSION['user_id']) && empty($_SESSION['user_role'])) {
+    // #region agent log
+    error_log('[AGENTLOG a2fdce S2] destroy_session empty_user_role user_id_set=1 action=' . (string)$action);
+    // #endregion
     session_unset();
     session_destroy();
     header('Location: index.php?action=login');
@@ -100,9 +114,16 @@ if (!function_exists('requireRole')) {
 // Manejar acciones POST primero
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['action'])) {
     $action = $_POST['action'];
+
+    // #region agent log
+    error_log('[AGENTLOG a2fdce R1] index POST action=' . (string)$action . ' hasUsuario=' . (isset($_POST['usuario']) ? '1' : '0') . ' hasContrasena=' . (isset($_POST['contrasena']) ? '1' : '0'));
+    // #endregion
     
     switch ($action) {
         case 'process_login':
+            // #region agent log
+            error_log('[AGENTLOG a2fdce R1] route=process_login enter');
+            // #endregion
             $controller = new AdminController($pdo);
             $controller->processLogin();
             break;
@@ -155,6 +176,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['action']))
             break;
 
         default:
+            // #region agent log
+            error_log('[AGENTLOG a2fdce R1] index POST default route action=' . (string)$action);
+            // #endregion
             redirectToLogin();
     }
     exit;
@@ -173,6 +197,23 @@ switch ($action) {
         break;
         
     case 'dashboard':
+        // #region debug d200d9 index route
+        try {
+            @file_put_contents(__DIR__ . '/debug-d200d9.log', json_encode([
+                'sessionId' => 'd200d9',
+                'runId' => 'pre-fix',
+                'hypothesisId' => 'R1',
+                'location' => 'index.php:GET:dashboard',
+                'message' => 'route',
+                'data' => [
+                    'action' => (string)$action,
+                    'userRole' => (string)($user_role ?? ''),
+                    'hasSessionUserId' => isset($_SESSION['user_id']) ? 1 : 0,
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+        } catch (Throwable $e) {}
+        // #endregion
         if ($user_role === 'administrador') {
             $controller = new AdminController($pdo);
         } elseif ($user_role === 'coordinador') {
@@ -219,14 +260,17 @@ switch ($action) {
     case 'tareas_coordinador':
     case 'gestionar_tareas':
     case 'crear_tarea':
+    case 'crear_tarea_csv':
     case 'asignar_base_completa':
     case 'liberar_base':
     case 'get_clientes_carga':
     case 'get_asesores_disponibles_carga':
     case 'get_bases_asignadas_asesor':
     case 'actualizar_estado_tarea':
+    case 'get_detalles_tarea':
     case 'get_asesores_base':
     case 'get_clientes_no_gestionados':
+    case 'get_opciones_filtros_tarea':
     case 'gestionar_traspasos':
     case 'subir_excel':
     case 'crear_nueva_base':
@@ -257,6 +301,7 @@ switch ($action) {
     case 'cambiar_estado_base':
     case 'buscar_bases_datos':
     case 'transferir_recordatorio':
+    case 'obtener_obligaciones_cliente':
         requireRole('coordinador');
         $controller = new CoordinadorController($pdo);
         
@@ -264,14 +309,17 @@ switch ($action) {
             case 'tareas_coordinador':
             case 'gestionar_tareas': $controller->gestionarTareas(); break;
             case 'crear_tarea': $controller->crearTarea(); break;
+            case 'crear_tarea_csv': $controller->crearTareaCsv(); break;
             case 'asignar_base_completa': $controller->asignarBaseCompleta(); break;
             case 'liberar_base': $controller->liberarBase(); break;
             case 'get_clientes_carga': $controller->getClientesCarga(); break;
             case 'get_asesores_disponibles_carga': $controller->getAsesoresDisponiblesCarga(); break;
             case 'get_bases_asignadas_asesor': $controller->getBasesAsignadasAsesor(); break;
             case 'actualizar_estado_tarea': $controller->actualizarEstadoTarea(); break;
+            case 'get_detalles_tarea': $controller->getDetallesTarea(); break;
             case 'get_asesores_base': $controller->getAsesoresBase(); break;
             case 'get_clientes_no_gestionados': $controller->getClientesNoGestionados(); break;
+            case 'get_opciones_filtros_tarea': $controller->getOpcionesFiltrosTarea(); break;
             case 'gestionar_traspasos': $controller->gestionarTraspasos(); break;
             case 'subir_excel': $controller->uploadExcel(); break;
             case 'crear_nueva_base': $controller->crearNuevaBase(); break;
@@ -302,6 +350,7 @@ switch ($action) {
             case 'cambiar_estado_base': $controller->cambiarEstadoBase(); break;
             case 'buscar_bases_datos': $controller->buscarBasesDatos(); break;
             case 'transferir_recordatorio': $controller->transferirRecordatorio(); break;
+            case 'obtener_obligaciones_cliente': $controller->obtenerObligacionesCliente(); break;
         }
         break;
         
@@ -326,6 +375,8 @@ switch ($action) {
     case 'registrar_break':
     case 'obtener_break_activo':
     case 'verificar_contrasena_desbloqueo':
+    case 'client_debug_log':
+    case 'client_debug_log_d54ef5':
         requireRole('asesor');
         $controller = new AsesorController($pdo);
         
@@ -350,6 +401,8 @@ switch ($action) {
             case 'registrar_break': $controller->registrarBreak(); break;
             case 'obtener_break_activo': $controller->obtenerBreakActivo(); break;
             case 'verificar_contrasena_desbloqueo': $controller->verificarContrasenaDesbloqueo(); break;
+            case 'client_debug_log': $controller->clientDebugLog(); break;
+            case 'client_debug_log_d54ef5': $controller->clientDebugLogD54ef5(); break;
         }
         break;
         

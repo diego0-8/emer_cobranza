@@ -377,8 +377,8 @@
                     <div class="stat-label">Total Gestiones</div>
                 </div>
                 <div class="stat-item">
-                    <div class="stat-number"><?php echo $total_ventas ?? 0; ?></div>
-                    <div class="stat-label">Total Ventas</div>
+                    <div class="stat-number"><?php echo $total_acuerdos ?? ($total_ventas ?? 0); ?></div>
+                    <div class="stat-label">Total acuerdos</div>
                 </div>
             </div>
         </div>

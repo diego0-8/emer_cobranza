@@ -10,6 +10,10 @@ class CoordinadorController extends BaseController {
     }
 
     public function dashboard() {
+        // #region agent log b7eaa7 coord dashboard entry
+        try { @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode(['sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'H0','location'=>'controllers/CoordinadorController.php:dashboard:entry','message'=>'enter','data'=>['hasSessionUserId'=>isset($_SESSION['user_id'])?1:0,'userIdLen'=>strlen((string)($_SESSION['user_id']??'')),'periodo'=>(string)($_GET['periodo']??'total'),'hasFechaIni'=>isset($_GET['fecha_inicio'])?1:0,'hasFechaFin'=>isset($_GET['fecha_fin'])?1:0,'buscarLen'=>strlen((string)($_GET['buscar']??''))],'timestamp'=>(int) round(microtime(true)*1000)], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
+        // #endregion
+
         $page_title = "Dashboard Coordinador";
         $coordinador_id = $_SESSION['user_id'];
         
@@ -29,6 +33,22 @@ class CoordinadorController extends BaseController {
         
         // Obtener asesores asignados al coordinador
         $asesores = $this->usuarioModel->getAsesoresByCoordinador($coordinador_id);
+
+        // #region agent log b7eaa7 asesores source count
+        try {
+            @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode([
+                'sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'H1',
+                'location'=>'controllers/CoordinadorController.php:dashboard:asesores',
+                'message'=>'getAsesoresByCoordinador',
+                'data'=>[
+                    'count'=>is_array($asesores)?count($asesores):-1,
+                    'firstKeys'=>(is_array($asesores)&&isset($asesores[0])&&is_array($asesores[0]))?array_slice(array_keys($asesores[0]),0,20):[],
+                    'firstIdLen'=>(is_array($asesores)&&isset($asesores[0]['id']))?strlen((string)$asesores[0]['id']):null,
+                ],
+                'timestamp'=>(int) round(microtime(true)*1000)
+            ], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND);
+        } catch (Throwable $e) {}
+        // #endregion
         
         // Filtrar por término de búsqueda si se proporciona
         $terminoBusqueda = $this->getGet('buscar');
@@ -38,6 +58,10 @@ class CoordinadorController extends BaseController {
                        stripos($asesor['usuario'], $terminoBusqueda) !== false;
             });
         }
+
+        // #region agent log b7eaa7 asesores after search filter
+        try { @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode(['sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'H2','location'=>'controllers/CoordinadorController.php:dashboard:asesores','message'=>'after_search_filter','data'=>['buscarProvided'=>!empty($terminoBusqueda)?1:0,'count'=>is_array($asesores)?count($asesores):-1],'timestamp'=>(int) round(microtime(true)*1000)], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
+        // #endregion
         
         // Calcular métricas para cada asesor usando el nuevo método
         foreach ($asesores as $key => $asesor) {
@@ -55,6 +79,29 @@ class CoordinadorController extends BaseController {
                 } else {
                     $asesores[$key]['metricas'] = $this->gestionModel->getMetricasAsesor($asesor['id'], $periodo);
                 }
+
+                // #region agent log b7eaa7 metricas per-asesor sample (solo primeros 3)
+                if ((int)$key < 3) {
+                    try {
+                        $m = $asesores[$key]['metricas'] ?? null;
+                        @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode([
+                            'sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'H3',
+                            'location'=>'controllers/CoordinadorController.php:dashboard:loop',
+                            'message'=>'metricas_sample',
+                            'data'=>[
+                                'idx'=>(int)$key,
+                                'asesorIdLen'=>strlen((string)($asesor['id']??'')),
+                                'metricasType'=>is_array($m)?'array':gettype($m),
+                                'metricasKeys'=>is_array($m)?array_slice(array_keys($m),0,20):[],
+                                'total_clientes'=>is_array($m)?(int)($m['total_clientes']??-1):null,
+                                'total_gestiones'=>is_array($m)?(int)($m['total_gestiones']??-1):null,
+                                'ventas_exitosas'=>is_array($m)?(int)($m['ventas_exitosas']??-1):null,
+                            ],
+                            'timestamp'=>(int) round(microtime(true)*1000)
+                        ], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND);
+                    } catch (Throwable $e) {}
+                }
+                // #endregion
                 
                 // Obtener información de tareas pendientes
                 $tareasPendientes = $this->tareaModel->getTareasPendientesByAsesor($asesor['id']);
@@ -66,18 +113,34 @@ class CoordinadorController extends BaseController {
                     $clientesPendientesTareas += count($tarea['cliente_ids']);
                 }
                 $asesores[$key]['clientes_pendientes_tareas'] = $clientesPendientesTareas;
-                
-                // Obtener métricas del día si no tiene tareas
-                if ($asesores[$key]['tareas_pendientes'] == 0) {
-                    $gestionesHoy = $this->gestionModel->getGestionesPorDia($asesor['id'], 'dia');
-                    
-                    // Si hay gestiones, usar los datos del primer registro (más reciente)
-                    if (!empty($gestionesHoy) && isset($gestionesHoy[0])) {
-                        $asesores[$key]['gestiones_hoy'] = $gestionesHoy[0]['total_gestiones'] ?? 0;
-                        $asesores[$key]['contactos_efectivos_hoy'] = $gestionesHoy[0]['contactos_efectivos'] ?? 0;
-                        $asesores[$key]['acuerdos_hoy'] = $gestionesHoy[0]['ventas'] ?? 0;
-                    }
+
+                // Resumen de actividad HOY (siempre, tenga o no tareas) desde historial_gestiones (reglas solicitadas)
+                $hoy = $this->gestionModel->getResumenActividadHoyAsesor($asesor['id']);
+                $asesores[$key]['gestiones_hoy'] = (int)($hoy['gestiones_hoy'] ?? 0);
+                $asesores[$key]['contactos_efectivos_hoy'] = (int)($hoy['contactos_efectivos_hoy'] ?? 0);
+                $asesores[$key]['acuerdos_hoy'] = (int)($hoy['acuerdos_hoy'] ?? 0);
+
+                // #region agent log b7eaa7 actividad hoy sample (solo primeros 3)
+                if ((int)$key < 3) {
+                    try {
+                        @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode([
+                            'sessionId' => 'b7eaa7',
+                            'runId' => 'pre',
+                            'hypothesisId' => 'H6',
+                            'location' => 'controllers/CoordinadorController.php:dashboard:loop',
+                            'message' => 'actividad_hoy',
+                            'data' => [
+                                'idx' => (int)$key,
+                                'gestiones_hoy' => (int)$asesores[$key]['gestiones_hoy'],
+                                'contactos_efectivos_hoy' => (int)$asesores[$key]['contactos_efectivos_hoy'],
+                                'acuerdos_hoy' => (int)$asesores[$key]['acuerdos_hoy'],
+                                'tareas_pendientes' => (int)$asesores[$key]['tareas_pendientes'],
+                            ],
+                            'timestamp' => (int) round(microtime(true) * 1000),
+                        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+                    } catch (Throwable $e) {}
                 }
+                // #endregion
                 
                 // LÓGICA CORREGIDA SEGÚN REQUERIMIENTOS:
                 // 1. Total de clientes: Si tiene tareas, mostrar clientes en tareas; si no, mostrar clientes gestionados
@@ -192,39 +255,167 @@ class CoordinadorController extends BaseController {
             'total_llamadas_pendientes_hoy' => $totalLlamadasPendientesHoy,
             'asesores_disponibles' => $asesoresDisponibles
         ];
+
+        // #region agent log b7eaa7 before render table
+        try {
+            $countAs = is_array($asesores) ? count($asesores) : -1;
+            $sumTotalClientes = 0;
+            $sumLlamadas = 0;
+            if (is_array($asesores)) {
+                foreach ($asesores as $a) {
+                    $sumTotalClientes += (int)($a['total_clientes'] ?? 0);
+                    $sumLlamadas += (int)($a['llamadas_realizadas'] ?? 0);
+                }
+            }
+            @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode([
+                'sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'H4',
+                'location'=>'controllers/CoordinadorController.php:dashboard:render',
+                'message'=>'view_vars',
+                'data'=>[
+                    'asesoresCount'=>$countAs,
+                    'sumTotalClientes'=>$sumTotalClientes,
+                    'sumLlamadas'=>$sumLlamadas,
+                    'total_asesores'=>(int)($total_asesores??-1),
+                    'total_clientes'=>(int)($total_clientes??-1),
+                    'total_llamadas'=>(int)($total_llamadas??-1),
+                    'total_ventas'=>(int)($total_ventas??-1),
+                ],
+                'timestamp'=>(int) round(microtime(true)*1000)
+            ], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND);
+        } catch (Throwable $e) {}
+        // #endregion
         
         require __DIR__ . '/../views/coordinador_dashboard.php';
     }
     
     public function listCargas() {
         $page_title = "Gestión de Bases de Datos";
-        $coordinador_id = $_SESSION['user_id'];
-        $cargas = $this->clienteModel->getCargasByCoordinador($coordinador_id, true); // Solo bases habilitadas
-        
-        // Obtener información del coordinador
-        $coordinador = $this->usuarioModel->getUsuarioById($coordinador_id);
-        
-        // Calcular estadísticas para cada carga
-        $cargas_con_stats = [];
-        foreach ($cargas as $carga) {
-            $carga['total_clientes'] = $this->clienteModel->getTotalClientsByCargaIdAndCoordinador($carga['id'], $coordinador_id);
-            $carga['clientes_asignados'] = $this->clienteModel->getTotalClientsAsignadosByCargaIdAndCoordinador($carga['id'], $coordinador_id);
-            $carga['clientes_pendientes'] = $carga['total_clientes'] - $carga['clientes_asignados'];
-            $carga['coordinador_nombre'] = $coordinador['nombre_completo'] ?? 'Coordinador';
-            $cargas_con_stats[] = $carga;
+        $agentLogPath = __DIR__ . '/../debug-a2fdce.log';
+
+        try {
+            $coordinador_id = $_SESSION['user_id'] ?? null;
+
+            // #region agent log
+            @file_put_contents($agentLogPath, json_encode([
+                'sessionId' => 'a2fdce',
+                'runId' => 'pre-fix',
+                'hypothesisId' => 'C1',
+                'location' => 'controllers/CoordinadorController.php:listCargas:entry',
+                'message' => 'listCargas entry',
+                'data' => [
+                    'hasUserId' => $coordinador_id !== null && $coordinador_id !== '',
+                    'userIdLen' => strlen((string)$coordinador_id),
+                    'userRole' => (string)($_SESSION['user_role'] ?? ''),
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+            // #endregion
+
+            $cargas = $this->clienteModel->getCargasByCoordinador($coordinador_id, true); // Solo bases habilitadas
+
+            // #region agent log
+            @file_put_contents($agentLogPath, json_encode([
+                'sessionId' => 'a2fdce',
+                'runId' => 'pre-fix',
+                'hypothesisId' => 'C1',
+                'location' => 'controllers/CoordinadorController.php:listCargas:after_getCargas',
+                'message' => 'getCargasByCoordinador result',
+                'data' => [
+                    'count' => is_array($cargas) ? count($cargas) : null,
+                    'type' => gettype($cargas),
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+            // #endregion
+
+            // Obtener información del coordinador
+            $coordinador = $this->usuarioModel->getUsuarioById($coordinador_id);
+
+            // #region agent log
+            @file_put_contents($agentLogPath, json_encode([
+                'sessionId' => 'a2fdce',
+                'runId' => 'pre-fix',
+                'hypothesisId' => 'C2',
+                'location' => 'controllers/CoordinadorController.php:listCargas:after_getUsuario',
+                'message' => 'getUsuarioById result',
+                'data' => [
+                    'found' => is_array($coordinador) && !empty($coordinador),
+                    'hasNombre' => is_array($coordinador) && !empty($coordinador['nombre_completo']),
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+            // #endregion
+
+            // Calcular estadísticas para cada carga
+            $cargas_con_stats = [];
+            foreach ((array)$cargas as $carga) {
+                $cargaId = $carga['id'] ?? null;
+
+                // #region agent log
+                @file_put_contents($agentLogPath, json_encode([
+                    'sessionId' => 'a2fdce',
+                    'runId' => 'pre-fix',
+                    'hypothesisId' => 'C3',
+                    'location' => 'controllers/CoordinadorController.php:listCargas:loop',
+                    'message' => 'processing carga',
+                    'data' => [
+                        'hasId' => $cargaId !== null && $cargaId !== '',
+                        'idType' => gettype($cargaId),
+                    ],
+                    'timestamp' => (int) round(microtime(true) * 1000),
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+                // #endregion
+
+                $carga['total_clientes'] = $this->clienteModel->getTotalClientsByCargaIdAndCoordinador($cargaId, $coordinador_id);
+                $carga['clientes_asignados'] = $this->clienteModel->getTotalClientsAsignadosByCargaIdAndCoordinador($cargaId, $coordinador_id);
+                $carga['clientes_pendientes'] = $carga['total_clientes'] - $carga['clientes_asignados'];
+                $carga['coordinador_nombre'] = $coordinador['nombre_completo'] ?? 'Coordinador';
+                $cargas_con_stats[] = $carga;
+            }
+            $cargas = $cargas_con_stats;
+
+            // #region agent log
+            @file_put_contents($agentLogPath, json_encode([
+                'sessionId' => 'a2fdce',
+                'runId' => 'pre-fix',
+                'hypothesisId' => 'C4',
+                'location' => 'controllers/CoordinadorController.php:listCargas:before_view',
+                'message' => 'about to require view',
+                'data' => [
+                    'cargasCount' => is_array($cargas) ? count($cargas) : null,
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+            // #endregion
+
+            require __DIR__ . '/../views/cargas_excel_list.php';
+        } catch (Throwable $e) {
+            // #region agent log
+            @file_put_contents($agentLogPath, json_encode([
+                'sessionId' => 'a2fdce',
+                'runId' => 'pre-fix',
+                'hypothesisId' => 'C5',
+                'location' => 'controllers/CoordinadorController.php:listCargas:catch',
+                'message' => 'listCargas exception',
+                'data' => [
+                    'type' => get_class($e),
+                    'code' => (int) $e->getCode(),
+                    'message' => substr((string)$e->getMessage(), 0, 300),
+                    'file' => $e->getFile(),
+                    'line' => (int) $e->getLine(),
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+            // #endregion
+
+            throw $e;
         }
-        $cargas = $cargas_con_stats;
-        
-        require __DIR__ . '/../views/cargas_excel_list.php';
     }
 
     public function gestionCargas() {
-        $page_title = "Gestión de Cargas de Archivos";
-        $coordinador_id = $_SESSION['user_id'];
-        
-        // Obtener cargas existentes para mostrar en la interfaz
-        $cargas = $this->cargaExcelModel->getCargasByCoordinador($coordinador_id);
-        
+        $coordinador_id = $_SESSION['user_id'] ?? null;
+        // Solo bases habilitadas del coordinador (estado = activo)
+        $cargas = $this->cargaExcelModel->getCargasByCoordinador($coordinador_id, true);
         require __DIR__ . '/../views/gestion_cargas_integrada.php';
     }
 
@@ -421,11 +612,12 @@ class CoordinadorController extends BaseController {
             $tamañoLote = 1000;
             
             while (($data = fgetcsv($handle, 0, $delimitador)) !== FALSE) {
-                if (count($data) >= 3) { // Mínimo nombre, cedula y numero_factura
+                if (count($data) >= 3) { // Mínimo cedula, numero_factura y algún teléfono
                     $cliente = [
                         // Campos obligatorios nuevos
                         'cedula' => trim($data[$indices['cedula']] ?? ''),
-                        'nombre' => trim($data[$indices['nombre']] ?? ''),
+                        // En el esquema nuevo, clientes.nombre es NOT NULL
+                        'nombre' => trim($data[$indices['nombre']] ?? '') ?: 'SIN NOMBRE',
                         'numero_factura' => trim($data[$indices['numero_factura']] ?? ''),
                         // Campos opcionales nuevos
                         'rmt' => trim($data[$indices['rmt']] ?? ''),
@@ -452,8 +644,9 @@ class CoordinadorController extends BaseController {
                         'linea' => $linea
                     ];
                     
-                    // Solo agregar si tiene datos mínimos obligatorios
-                    if (!empty($cliente['nombre']) && !empty($cliente['cedula']) && !empty($cliente['numero_factura'])) {
+                    // Solo agregar si tiene datos mínimos obligatorios (nuevo requerimiento)
+                    $tieneTelefono = (!empty($cliente['telefono']) || !empty($cliente['telefono2']) || !empty($cliente['telefonos_3']) || !empty($cliente['celular2']));
+                    if (!empty($cliente['cedula']) && !empty($cliente['numero_factura']) && $tieneTelefono) {
                         $clientes[] = $cliente;
                     }
                 }
@@ -490,7 +683,9 @@ class CoordinadorController extends BaseController {
             'telefono' => -1,
             'numero_contrato' => -1,
             'saldo' => -1,
+            // Compatibilidad: a veces el código usa dias_en_mora, otras dias_mora
             'dias_mora' => -1,
+            'dias_en_mora' => -1,
             'franja' => -1,
             'telefono2' => -1,
             'telefonos_3' => -1,
@@ -511,6 +706,10 @@ class CoordinadorController extends BaseController {
         
         // Buscar encabezados específicos
         foreach ($encabezados as $index => $encabezado) {
+            // Quitar BOM UTF-8 si el CSV lo trae (Excel suele agregarlo)
+            if (is_string($encabezado)) {
+                $encabezado = preg_replace('/^\xEF\xBB\xBF/', '', $encabezado);
+            }
             // Limpiar el encabezado: quitar espacios extra y convertir a minúsculas
             $encabezado_limpio = strtolower(preg_replace('/\s+/', ' ', trim($encabezado)));
             
@@ -536,6 +735,7 @@ class CoordinadorController extends BaseController {
                 $indices['saldo'] = $index;
             } elseif (strpos($encabezado_limpio, 'dias en mora') !== false || strpos($encabezado_limpio, 'dias_en_mora') !== false) {
                 $indices['dias_en_mora'] = $index;
+                $indices['dias_mora'] = $index;
             } elseif (strpos($encabezado_limpio, 'franja') !== false) {
                 $indices['franja'] = $index;
             }
@@ -800,57 +1000,32 @@ class CoordinadorController extends BaseController {
                         $duplicados++;
                         $clienteId = $clienteExistente['id'];
                         
-                        // Si se debe actualizar, actualizar todos los datos excepto el nombre
+                        // Si se debe actualizar, actualizar datos del cliente (excepto la cédula)
                         if ($actualizarExistentes) {
                             $datosActualizacion = [];
                             
-                            // Actualizar teléfonos básicos (solo si tienen valor)
-                            if (isset($grupo['info_cliente']['telefono']) && !empty($grupo['info_cliente']['telefono'])) {
-                                $datosActualizacion['telefono'] = $grupo['info_cliente']['telefono'];
-                            }
-                            if (isset($grupo['info_cliente']['celular2']) && !empty($grupo['info_cliente']['celular2'])) {
-                                $datosActualizacion['celular2'] = $grupo['info_cliente']['celular2'];
-                            }
+                            // Campos reales en tabla `clientes`: nombre/email/ciudad son editables
+                            if (!empty($grupo['info_cliente']['nombre'])) $datosActualizacion['nombre'] = $grupo['info_cliente']['nombre'];
+                            if (!empty($grupo['info_cliente']['email'])) $datosActualizacion['email'] = $grupo['info_cliente']['email'];
+                            if (!empty($grupo['info_cliente']['ciudad'])) $datosActualizacion['ciudad'] = $grupo['info_cliente']['ciudad'];
+
+                            // Teléfonos reales: tel1..tel10 (NOT NULL). Solo actualizamos si llega valor.
+                            $tel1 = (string)($grupo['info_cliente']['telefono'] ?? '');
+                            $tel2 = (string)($grupo['info_cliente']['celular2'] ?? '');
+                            if ($tel1 !== '') $datosActualizacion['tel1'] = $tel1;
+                            if ($tel2 !== '') $datosActualizacion['tel2'] = $tel2;
                             
-                            // Actualizar email, dirección y ciudad (solo si tienen valor)
-                            if (isset($grupo['info_cliente']['email']) && !empty($grupo['info_cliente']['email'])) {
-                                $datosActualizacion['email'] = $grupo['info_cliente']['email'];
-                            }
-                            if (isset($grupo['info_cliente']['direccion']) && !empty($grupo['info_cliente']['direccion'])) {
-                                $datosActualizacion['direccion'] = $grupo['info_cliente']['direccion'];
-                            }
-                            if (isset($grupo['info_cliente']['ciudad']) && !empty($grupo['info_cliente']['ciudad'])) {
-                                $datosActualizacion['ciudad'] = $grupo['info_cliente']['ciudad'];
-                            }
-                            
-                            // Buscar teléfonos adicionales (cel3 a cel11) en el CSV original
+                            // Teléfono 3: en el parser viene como `telefonos_3`
+                            $tel3 = '';
                             foreach ($clientes as $clienteCSV) {
-                                if ($clienteCSV['cedula'] == $cedula) {
-                                    // Mapear teléfonos adicionales del CSV
-                                    for ($i = 3; $i <= 11; $i++) {
-                                        $campoCel = 'cel' . $i;
-                                        // Buscar en diferentes variaciones del nombre del campo
-                                        $variaciones = [
-                                            'telefono' . $i,
-                                            'cel' . $i,
-                                            'celular' . $i,
-                                            'telefono_' . $i,
-                                            'cel_' . $i,
-                                            'telefonos_' . $i
-                                        ];
-                                        
-                                        foreach ($variaciones as $variacion) {
-                                            if (isset($clienteCSV[$variacion]) && !empty($clienteCSV[$variacion])) {
-                                                $datosActualizacion[$campoCel] = $clienteCSV[$variacion];
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    break; // Solo necesitamos el primer registro de esta cédula
+                                if (($clienteCSV['cedula'] ?? null) == $cedula) {
+                                    $tel3 = trim((string)($clienteCSV['telefonos_3'] ?? ''));
+                                    break;
                                 }
                             }
+                            if ($tel3 !== '') $datosActualizacion['tel3'] = $tel3;
                             
-                            // Actualizar el cliente (sin cambiar el nombre)
+                            // Actualizar el cliente
                             if (!empty($datosActualizacion)) {
                                 $this->clienteModel->actualizarCliente($clienteId, $datosActualizacion);
                             }
@@ -911,15 +1086,6 @@ class CoordinadorController extends BaseController {
                             if ($actualizarExistentes) {
                                 $datosFacturaUpdate = [];
                                 
-                                // Actualizar cédula y nombre en facturas
-                                if (isset($cedula) && !empty($cedula)) {
-                                    $datosFacturaUpdate['cedula'] = $cedula;
-                                }
-                                if (isset($grupo['info_cliente']['nombre']) && !empty($grupo['info_cliente']['nombre'])) {
-                                    // NOTA: El nombre en facturas SÍ se actualiza (a diferencia del nombre del cliente)
-                                    $datosFacturaUpdate['nombre'] = $grupo['info_cliente']['nombre'];
-                                }
-                                
                                 // Actualizar datos financieros de la factura
                                 if (isset($obligacion['saldo']) && $obligacion['saldo'] !== null) {
                                     $datosFacturaUpdate['saldo'] = $obligacion['saldo'];
@@ -937,25 +1103,9 @@ class CoordinadorController extends BaseController {
                                     $datosFacturaUpdate['franja'] = $obligacion['franja'];
                                 }
                                 
-                                // Actualizar teléfonos en facturas
-                                if (isset($grupo['info_cliente']['telefono']) && !empty($grupo['info_cliente']['telefono'])) {
-                                    $datosFacturaUpdate['telefono'] = $grupo['info_cliente']['telefono'];
-                                }
-                                if (isset($grupo['info_cliente']['celular2']) && !empty($grupo['info_cliente']['celular2'])) {
-                                    $datosFacturaUpdate['telefono2'] = $grupo['info_cliente']['celular2'];
-                                }
-                                
-                                // Buscar telefono3 en el CSV
-                                foreach ($clientes as $clienteCSV) {
-                                    if ($clienteCSV['cedula'] == $cedula && isset($clienteCSV['telefonos_3']) && !empty($clienteCSV['telefonos_3'])) {
-                                        $datosFacturaUpdate['telefono3'] = $clienteCSV['telefonos_3'];
-                                        break;
-                                    }
-                                }
-                                
                                 // Actualizar la factura
                                 if (!empty($datosFacturaUpdate)) {
-                                    $this->facturacionModel->actualizarFactura($facturaExistente['id'], $datosFacturaUpdate);
+                                    $this->facturacionModel->actualizarFactura($facturaExistente['id_obligacion'], $datosFacturaUpdate);
                                     $obligacionesCreadas++; // Contar como procesada (actualizada)
                                 } else {
                                     $obligacionesDuplicadas++; // No había cambios
@@ -969,9 +1119,8 @@ class CoordinadorController extends BaseController {
                     
                         // Crear factura nueva
                         if ($this->facturacionModel->crearFactura(array_merge($obligacion, [
+                            'base_id' => $cargaId,
                             'cliente_id' => $clienteId,
-                            'cedula' => $cedula,
-                            'nombre' => $grupo['info_cliente']['nombre'],
                             'estado_factura' => 'pendiente'
                         ]))) {
                             $obligacionesCreadas++;
@@ -1373,6 +1522,17 @@ class CoordinadorController extends BaseController {
     }
 
     /**
+     * Normaliza la cédula del asesor (identificador real en BD y en mapUsuarioRow['id']).
+     */
+    private function sanitizeAsesorCedulaParam($raw): ?string {
+        $s = preg_replace('/\D+/', '', (string)$raw);
+        if ($s === '' || strlen($s) < 4 || strlen($s) > 12) {
+            return null;
+        }
+        return $s;
+    }
+
+    /**
      * Exporta la gestión de un asesor específico a CSV
      */
     public function exportarGestionAsesor($asesorId, $fechaInicio = null, $fechaFin = null, $filtros = []) {
@@ -1583,13 +1743,11 @@ class CoordinadorController extends BaseController {
         if (!$fechaInicio) { $fechaInicio = date('Y-m-01'); }
         if (!$fechaFin) { $fechaFin = date('Y-m-t'); }
         
-        // Obtener TODOS los asesores que tienen gestiones en el período seleccionado
-        // No filtrar solo por asignados al coordinador, para incluir todos los asesores con actividad
-        $asesores = $this->gestionModel->getAsesoresConGestionesEnPeriodo($fechaInicio, $fechaFin);
+        // Asesores formalmente asignados al coordinador (asignaciones_cordinador en emermedica_cobranza.sql)
+        $asesores = $this->usuarioModel->getAsesoresByCoordinador($coordinador_id);
 
         if (empty($asesores)) {
-            // En lugar de redirigir, crear un CSV vacío con mensaje
-            $filename = "Gestion_Equipo_Completo_{$fechaInicio}_a_{$fechaFin}_SIN_GESTIONES.csv";
+            $filename = "Gestion_Equipo_Completo_{$fechaInicio}_a_{$fechaFin}_SIN_ASESORES.csv";
 
             // Configurar headers para descarga CSV
             header('Content-Type: text/csv; charset=utf-8');
@@ -1633,9 +1791,8 @@ class CoordinadorController extends BaseController {
             ];
             fputcsv($output, $headers, ';');
 
-            // Agregar mensaje de que no hay gestiones
             $row = array_fill(0, 26, '');
-            $row[0] = 'NO HAY DATOS PARA EXPORTAR EN EL PERÍODO SELECCIONADO';
+            $row[0] = 'NO HAY ASESORES ACTIVOS ASIGNADOS A SU COORDINACIÓN';
             $row[1] = 'PERÍODO: ' . $fechaInicio . ' A ' . $fechaFin;
             fputcsv($output, $row, ';');
 
@@ -1708,6 +1865,15 @@ class CoordinadorController extends BaseController {
             $fechaB = strtotime($b['fecha_gestion'] ?? '1970-01-01');
             return $fechaB - $fechaA; // DESC: más reciente primero
         });
+
+        if (empty($todasLasGestiones)) {
+            $row = array_fill(0, 26, '');
+            $row[0] = 'NO HAY GESTIONES EN EL PERÍODO PARA LOS ASESORES DE SU EQUIPO';
+            $row[1] = 'PERÍODO: ' . $fechaInicio . ' A ' . $fechaFin;
+            fputcsv($output, $row, ';');
+            fclose($output);
+            exit;
+        }
         
         // Escribir todas las filas ya ordenadas
         foreach ($todasLasGestiones as $gestion) {
@@ -1769,9 +1935,9 @@ class CoordinadorController extends BaseController {
             $coordinador_id,
             $filtros['fecha_inicio'],
             $filtros['fecha_fin'],
-            $filtros['asesor_id'],
-            $filtros['resultado'],
-            $filtros['tipo_gestion']
+            $filtros['asesor_id'] ?? null,
+            $filtros['resultado'] ?? null,
+            $filtros['tipo_gestion'] ?? null
         );
         
         if (empty($gestiones)) {
@@ -2073,41 +2239,84 @@ class CoordinadorController extends BaseController {
     }
 
     public function resultadosEquipo() {
+        // #region agent log d200d9 acuerdos_pago
+        $dbgPath = __DIR__ . '/../debug-d200d9.log';
+        $dbg = function($hypothesisId, $location, $message, $data = []) use ($dbgPath) {
+            try {
+                @file_put_contents($dbgPath, json_encode([
+                    'sessionId' => 'd200d9',
+                    'runId' => 'post-fix',
+                    'hypothesisId' => $hypothesisId,
+                    'location' => $location,
+                    'message' => $message,
+                    'data' => $data,
+                    'timestamp' => (int) round(microtime(true) * 1000),
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND | LOCK_EX);
+            } catch (Throwable $e) {}
+        };
+        $dbg('C1', 'controllers/CoordinadorController.php:resultadosEquipo:entry', 'entry', [
+            'has_user_id' => isset($_SESSION['user_id']) ? 1 : 0,
+            'user_id_suffix' => substr((string)($_SESSION['user_id'] ?? ''), -3),
+        ]);
+        // #endregion
         $page_title = "Resultados del Equipo";
         $coordinador_id = $_SESSION['user_id'];
-        
-        // Obtener asesores asignados al coordinador
+
+        // Asesores del equipo (cédula en campo id por mapUsuarioRow)
         $asesores = $this->usuarioModel->getAsesoresByCoordinador($coordinador_id);
-        
-        // Calcular métricas detalladas para cada asesor
+        // #region agent log d200d9 acuerdos_pago
+        $dbg('C2', 'controllers/CoordinadorController.php:resultadosEquipo:asesores', 'asesores cargados', [
+            'count' => is_array($asesores) ? count($asesores) : -1,
+        ]);
+        // #endregion
+
         foreach ($asesores as $key => $asesor) {
             $asesores[$key]['total_clientes'] = $this->clienteModel->getTotalClientesByAsesor($asesor['id']);
-            $asesores[$key]['llamadas_realizadas'] = $this->gestionModel->getTotalLlamadasByAsesor($asesor['id']);
-            $asesores[$key]['ventas_realizadas'] = $this->gestionModel->getTotalVentasByAsesor($asesor['id']);
-            
-            // Calcular porcentaje de llamadas
+            // Misma ventana que tipificaciones del mes (rango calendario mes actual)
+            $asesores[$key]['llamadas_realizadas'] = $this->gestionModel->getTotalLlamadasByAsesor($asesor['id'], 'mes');
+            $asesores[$key]['acuerdos_mes'] = $this->gestionModel->getTotalAcuerdosByAsesor($asesor['id'], 'mes');
+            // #region agent log d200d9 acuerdos_pago
+            if ($key < 3) {
+                $dbg('C3', 'controllers/CoordinadorController.php:resultadosEquipo:per_asesor', 'acuerdos_mes por asesor (muestra)', [
+                    'idx' => (int)$key,
+                    'asesor_id_suffix' => substr((string)($asesor['id'] ?? ''), -3),
+                    'acuerdos_mes' => (int)($asesores[$key]['acuerdos_mes'] ?? -1),
+                    'llamadas_mes' => (int)($asesores[$key]['llamadas_realizadas'] ?? -1),
+                ]);
+            }
+            // #endregion
+
             if ($asesores[$key]['total_clientes'] > 0) {
-                $asesores[$key]['porcentaje_llamadas'] = round(($asesores[$key]['llamadas_realizadas'] / $asesores[$key]['total_clientes']) * 100, 1);
+                $asesores[$key]['porcentaje_llamadas'] = round(
+                    ($asesores[$key]['llamadas_realizadas'] / $asesores[$key]['total_clientes']) * 100,
+                    1
+                );
             } else {
                 $asesores[$key]['porcentaje_llamadas'] = 0;
             }
-            
-            // Obtener estadísticas por tipo de resultado
+
             $asesores[$key]['tipificaciones'] = $this->gestionModel->getTipificacionesPorResultado($asesor['id'], 'mes');
             $asesores[$key]['estadisticas_ventas'] = $this->gestionModel->getEstadisticasPorTipoVenta($asesor['id'], 'mes');
             $asesores[$key]['estadisticas_rechazos'] = $this->gestionModel->getEstadisticasPorRechazo($asesor['id'], 'mes');
         }
-        
-        // Calcular estadísticas generales del equipo
+
         $total_asesores = count($asesores);
         $total_clientes = array_sum(array_column($asesores, 'total_clientes'));
         $total_llamadas = array_sum(array_column($asesores, 'llamadas_realizadas'));
-        $total_ventas = array_sum(array_column($asesores, 'ventas_realizadas'));
-        
-        // Calcular promedio de cumplimiento del equipo
+        $total_acuerdos = array_sum(array_column($asesores, 'acuerdos_mes'));
+        // #region agent log d200d9 acuerdos_pago
+        $dbg('C4', 'controllers/CoordinadorController.php:resultadosEquipo:totales', 'totales calculados', [
+            'total_asesores' => (int)$total_asesores,
+            'total_llamadas' => (int)$total_llamadas,
+            'total_acuerdos' => (int)$total_acuerdos,
+        ]);
+        // #endregion
+
         $porcentajes_llamadas = array_column($asesores, 'porcentaje_llamadas');
-        $promedio_cumplimiento = count($porcentajes_llamadas) > 0 ? round(array_sum($porcentajes_llamadas) / count($porcentajes_llamadas), 1) : 0;
-        
+        $promedio_cumplimiento = count($porcentajes_llamadas) > 0
+            ? round(array_sum($porcentajes_llamadas) / count($porcentajes_llamadas), 1)
+            : 0;
+
         require __DIR__ . '/../views/coordinador_resultados_equipo.php';
     }
 
@@ -2118,89 +2327,95 @@ class CoordinadorController extends BaseController {
      */
     public function getDetallesAsesor() {
         try {
-        // Limpiar cualquier output previo
             if (ob_get_level()) {
-        if (ob_get_level()) ob_clean();
+                ob_clean();
             }
-        
-        if (!isset($_GET['asesor_id'])) {
-            http_response_code(400);
-            echo json_encode(['error' => 'ID de asesor no proporcionado']);
-            return;
-        }
 
-        $asesor_id = $this->validarId($_GET['asesor_id'], 'asesor');
-        $coordinador_id = $_SESSION['user_id'];
+            if (!isset($_GET['asesor_id'])) {
+                http_response_code(400);
+                echo json_encode(['error' => 'ID de asesor no proporcionado']);
+                return;
+            }
 
-        // Obtener información básica del asesor
-        $asesor = $this->usuarioModel->getAsesoresByCoordinador($coordinador_id);
-        $asesor = array_filter($asesor, function($a) use ($asesor_id) {
-            return $a['id'] == $asesor_id;
-        });
-        $asesor = reset($asesor);
+            $asesor_cedula = $this->sanitizeAsesorCedulaParam($_GET['asesor_id']);
+            if ($asesor_cedula === null) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Identificador de asesor no válido']);
+                return;
+            }
 
-        if (!$asesor) {
-            http_response_code(403);
-            echo json_encode(['error' => 'No tienes permisos para ver este asesor']);
-            return;
-        }
+            $coordinador_id = $_SESSION['user_id'];
 
-        // Obtener todos los parámetros de filtro
-        $fecha_inicio = $this->getGet('fecha_inicio');
-        $fecha_fin = $this->getGet('fecha_fin');
-        $filtro_gestion = $this->getGet('gestion');
-        $filtro_contacto = $this->getGet('contacto');
-        $filtro_tipificacion = $this->getGet('tipificacion');
-        $filtro_tipificacion_especifica = $this->getGet('tipificacion_especifica');
-            
-            // Por defecto, solo mostrar clientes gestionados (con historial de gestiones)
-            if (empty($filtro_gestion)) {
+            $asesoresEquipo = $this->usuarioModel->getAsesoresByCoordinador($coordinador_id);
+            $asesor = null;
+            foreach ($asesoresEquipo as $a) {
+                if ((string)($a['id'] ?? '') === $asesor_cedula) {
+                    $asesor = $a;
+                    break;
+                }
+            }
+
+            if (!$asesor) {
+                http_response_code(403);
+                echo json_encode(['error' => 'No tienes permisos para ver este asesor']);
+                return;
+            }
+
+            $fecha_inicio = $this->getGet('fecha_inicio');
+            $fecha_fin = $this->getGet('fecha_fin');
+            $filtro_gestion = $this->getGet('gestion');
+            $filtro_contacto = $this->getGet('contacto');
+            $filtro_tipificacion = $this->getGet('tipificacion');
+            $filtro_tipificacion_especifica = $this->getGet('tipificacion_especifica');
+            $busqueda = $this->getGet('busqueda');
+
+            if ($filtro_gestion === null || $filtro_gestion === '') {
                 $filtro_gestion = 'gestionado';
             }
-        
-        // Preparar filtros para el modelo de gestión
-        $filtros = [
-            'fecha_inicio' => $fecha_inicio,
-            'fecha_fin' => $fecha_fin,
-            'gestion' => $filtro_gestion,
-            'contacto' => $filtro_contacto,
-            'tipificacion' => $filtro_tipificacion,
-            'tipificacion_especifica' => $filtro_tipificacion_especifica
-        ];
-        
-        // Obtener gestiones del asesor con filtros usando el nuevo método
-        $gestiones = $this->gestionModel->getGestionByAsesorAndFechasConFiltros(
-            $asesor_id, $fecha_inicio, $fecha_fin, $filtros
-        );
-        
-            // Ensure gestiones is an array
+
+            $filtros = [
+                'fecha_inicio' => $fecha_inicio,
+                'fecha_fin' => $fecha_fin,
+                'gestion' => $filtro_gestion,
+                'contacto' => $filtro_contacto,
+                'tipificacion' => $filtro_tipificacion,
+                'tipificacion_especifica' => $filtro_tipificacion_especifica,
+                'busqueda' => $busqueda,
+            ];
+
+            $gestiones = $this->gestionModel->getGestionByAsesorAndFechasConFiltros(
+                $asesor_cedula,
+                $fecha_inicio,
+                $fecha_fin,
+                $filtros
+            );
+
             if (!is_array($gestiones)) {
                 $gestiones = [];
             }
-            
-            
-            // Agregar información de observaciones y fechas de llamada para cada gestión
+
             foreach ($gestiones as $key => $gestion) {
-                if ($gestion['id']) {
-                    // Obtener observaciones y fecha de próxima llamada
-                    $observaciones = $this->gestionModel->getObservacionesGestion($gestion['id']);
-                    $gestiones[$key]['observaciones'] = $observaciones['comentarios'] ?? '';
-                    $gestiones[$key]['proxima_fecha'] = $observaciones['proxima_fecha'] ?? '';
-                    $gestiones[$key]['proxima_hora'] = $observaciones['proxima_hora'] ?? '';
-            } else {
+                $gid = (int)($gestion['id_gestion'] ?? $gestion['id'] ?? 0);
+                if ($gid > 0) {
+                    $observaciones = $this->gestionModel->getObservacionesGestion($gid);
+                    $gestiones[$key]['observaciones'] = is_array($observaciones)
+                        ? ($observaciones['comentarios'] ?? '')
+                        : '';
+                    $gestiones[$key]['proxima_fecha'] = is_array($observaciones)
+                        ? ($observaciones['proxima_fecha'] ?? '')
+                        : '';
+                    $gestiones[$key]['proxima_hora'] = is_array($observaciones)
+                        ? ($observaciones['proxima_hora'] ?? '')
+                        : '';
+                } else {
                     $gestiones[$key]['observaciones'] = '';
                     $gestiones[$key]['proxima_fecha'] = '';
                     $gestiones[$key]['proxima_hora'] = '';
                 }
             }
-        
-            // Solo mostrar clientes que han sido gestionados (tienen historial de gestiones)
-            // No mostrar clientes sin gestionar
 
-        // Obtener estadísticas del asesor usando el nuevo método
-        $estadisticas = $this->gestionModel->getMetricasAsesor($asesor_id, 'total'); // Usar total para obtener todas las gestiones
-            
-            // Ensure estadisticas is an array
+            $estadisticas = $this->gestionModel->getMetricasAsesor($asesor_cedula, 'total');
+
             if (!is_array($estadisticas)) {
                 $estadisticas = [
                     'total_clientes' => 0,
@@ -2210,48 +2425,47 @@ class CoordinadorController extends BaseController {
                     'contactos_efectivos' => 0,
                     'tiempo_promedio_conversacion' => 0,
                     'total_ventas_monto' => 0,
-                    'promedio_venta' => 0
+                    'promedio_venta' => 0,
                 ];
             }
-        
-        // Calcular porcentaje de llamadas
-        if ($estadisticas['total_clientes'] > 0) {
-            $estadisticas['porcentaje_llamadas'] = round(
-                ($estadisticas['total_gestiones'] / $estadisticas['total_clientes']) * 100, 1
-            );
-        } else {
-            $estadisticas['porcentaje_llamadas'] = 0;
-        }
 
-        // Preparar respuesta
-        $response = [
-            'asesor' => $asesor,
-            'clientes' => $gestiones,
-            'estadisticas' => $estadisticas,
-            'metricas' => [
-                'clientes_filtrados' => count($gestiones),
-                'total_gestionados' => $estadisticas['total_gestiones'] ?? 0,
-                'total_asignados' => $estadisticas['total_clientes'] ?? 0,
-                'porcentaje' => $estadisticas['total_clientes'] > 0 ? 
-                    round((count($gestiones) / $estadisticas['total_clientes']) * 100, 1) : 0
-            ],
-            'filtros' => [
-                'gestion' => $filtro_gestion ?? 'todos',
-                'tipificacion_especifica' => $filtro_tipificacion_especifica ?? 'todos'
-            ]
-        ];
+            $totalAsignados = (int)$this->clienteModel->getTotalClientesByAsesor($asesor_cedula);
+            $estadisticas['total_clientes'] = $totalAsignados;
 
-        header('Content-Type: application/json');
-        echo json_encode($response);
-            
-        } catch (Exception $e) {
-            // Log the error
+            if ($estadisticas['total_clientes'] > 0) {
+                $estadisticas['porcentaje_llamadas'] = round(
+                    ($estadisticas['total_gestiones'] / $estadisticas['total_clientes']) * 100,
+                    1
+                );
+            } else {
+                $estadisticas['porcentaje_llamadas'] = 0;
+            }
+
+            $response = [
+                'asesor' => $asesor,
+                'clientes' => $gestiones,
+                'estadisticas' => $estadisticas,
+                'metricas' => [
+                    'clientes_filtrados' => count($gestiones),
+                    'total_gestionados' => $estadisticas['total_gestiones'] ?? 0,
+                    'total_asignados' => $totalAsignados,
+                    'porcentaje' => $totalAsignados > 0
+                        ? round((count($gestiones) / $totalAsignados) * 100, 1)
+                        : 0,
+                ],
+                'filtros' => [
+                    'gestion' => $filtro_gestion ?? 'todos',
+                    'tipificacion_especifica' => $filtro_tipificacion_especifica ?? 'todos',
+                ],
+            ];
+
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode($response, JSON_UNESCAPED_UNICODE);
+        } catch (Throwable $e) {
             error_log("Error in getDetallesAsesor: " . $e->getMessage());
-            
-            // Return error response
             http_response_code(500);
-            header('Content-Type: application/json');
-            echo json_encode(['error' => 'Error interno del servidor: ' . $e->getMessage()]);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['error' => 'Error interno del servidor: ' . $e->getMessage()], JSON_UNESCAPED_UNICODE);
         }
     }
     
@@ -2269,12 +2483,12 @@ class CoordinadorController extends BaseController {
         $total_asesores = count($asesores);
         $total_clientes = 0;
         $total_gestiones = 0;
-        $total_ventas = 0;
+        $total_acuerdos = 0;
         
         foreach ($asesores as $asesor) {
             $total_clientes += $this->clienteModel->getTotalClientesByAsesor($asesor['id']);
-            $total_gestiones += $this->gestionModel->getTotalLlamadasByAsesor($asesor['id']);
-            $total_ventas += $this->gestionModel->getTotalVentasByAsesor($asesor['id']);
+            $total_gestiones += $this->gestionModel->getTotalLlamadasByAsesor($asesor['id'], 'total');
+            $total_acuerdos += $this->gestionModel->getTotalAcuerdosByAsesor($asesor['id'], 'total');
         }
         
         require __DIR__ . '/../views/coordinador_descargas.php';
@@ -2771,6 +2985,80 @@ class CoordinadorController extends BaseController {
         }
     }
 
+    public function obtenerObligacionesCliente() {
+        if (ob_get_level()) ob_clean();
+        if (!headers_sent()) header('Content-Type: application/json');
+
+        $logPath = __DIR__ . '/../debug-d200d9.log';
+        $writeLog = function($payload) use ($logPath) {
+            try { @file_put_contents($logPath, json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND); } catch (Throwable $e) {}
+        };
+
+        try {
+            $coordinador_id = $_SESSION['user_id'] ?? '';
+            $carga_id = (int)($this->getGet('carga_id') ?? 0);
+            $cliente_id = (int)($this->getGet('cliente_id') ?? 0);
+
+            $writeLog([
+                'sessionId' => 'd200d9',
+                'runId' => 'pre-modal',
+                'hypothesisId' => 'M2',
+                'location' => 'controllers/CoordinadorController.php:obtenerObligacionesCliente:entry',
+                'message' => 'request',
+                'data' => ['carga_id' => $carga_id, 'cliente_id' => $cliente_id, 'coordinadorLen' => strlen((string)$coordinador_id)],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ]);
+
+            if ($coordinador_id === '' || $carga_id <= 0 || $cliente_id <= 0) {
+                echo json_encode(['success' => false, 'error' => 'Parámetros inválidos']);
+                exit;
+            }
+
+            $carga = $this->cargaExcelModel->getCargaByIdAndCoordinador($carga_id, $coordinador_id);
+            if (!$carga) {
+                echo json_encode(['success' => false, 'error' => 'No tienes acceso a esta base']);
+                exit;
+            }
+
+            // Verificar que el cliente pertenezca a esta base
+            $stmt = $this->pdo->prepare("SELECT id_cliente FROM clientes WHERE id_cliente = ? AND base_id = ? LIMIT 1");
+            $stmt->execute([$cliente_id, $carga_id]);
+            $okCliente = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$okCliente) {
+                echo json_encode(['success' => false, 'error' => 'Cliente no pertenece a esta base']);
+                exit;
+            }
+
+            $obligaciones = $this->facturacionModel->getFacturasByClienteId($cliente_id, $carga_id);
+            $rows = array_map(function($o) {
+                return [
+                    'id_obligacion' => $o['id_obligacion'] ?? null,
+                    'numero_factura' => $o['numero_factura'] ?? null,
+                    'rmt' => $o['rmt'] ?? null,
+                    'numero_contrato' => $o['numero_contrato'] ?? null,
+                    'saldo' => $o['saldo'] ?? null,
+                    'dias_mora' => $o['dias_mora'] ?? null,
+                    'franja' => $o['franja'] ?? null,
+                ];
+            }, (array)$obligaciones);
+
+            echo json_encode(['success' => true, 'obligaciones' => $rows]);
+            exit;
+        } catch (Throwable $e) {
+            $writeLog([
+                'sessionId' => 'd200d9',
+                'runId' => 'pre-modal',
+                'hypothesisId' => 'M4',
+                'location' => 'controllers/CoordinadorController.php:obtenerObligacionesCliente:catch',
+                'message' => 'exception',
+                'data' => ['type' => get_class($e), 'message' => substr((string)$e->getMessage(), 0, 300)],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ]);
+            echo json_encode(['success' => false, 'error' => 'Error interno del servidor']);
+            exit;
+        }
+    }
+
     /**
      * Muestra la vista para asignar clientes de una carga específica
      */
@@ -3251,10 +3539,30 @@ class CoordinadorController extends BaseController {
 
     public function crearNuevaBase() {
         $page_title = "Crear Nueva Base de Datos";
+        $agentLogPath = __DIR__ . '/../debug-a2fdce.log';
 
         if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['archivo_excel_nueva'])) {
             $nombreBaseDatos = $this->getPost('nombre_base_datos');
             $usuarioCoordinadorId = $_SESSION['user_id'];
+
+            // #region agent log
+            @file_put_contents($agentLogPath, json_encode([
+                'sessionId' => 'a2fdce',
+                'runId' => 'pre-fix',
+                'hypothesisId' => 'B1',
+                'location' => 'controllers/CoordinadorController.php:crearNuevaBase:entry',
+                'message' => 'crearNuevaBase POST received',
+                'data' => [
+                    'hasNombre' => trim((string)$nombreBaseDatos) !== '',
+                    'nombreLen' => strlen(trim((string)$nombreBaseDatos)),
+                    'hasFileKey' => isset($_FILES['archivo_excel_nueva']),
+                    'fileNameExt' => isset($_FILES['archivo_excel_nueva']['name']) ? strtolower(pathinfo((string)$_FILES['archivo_excel_nueva']['name'], PATHINFO_EXTENSION)) : null,
+                    'fileSize' => isset($_FILES['archivo_excel_nueva']['size']) ? (int)$_FILES['archivo_excel_nueva']['size'] : null,
+                    'fileError' => isset($_FILES['archivo_excel_nueva']['error']) ? (int)$_FILES['archivo_excel_nueva']['error'] : null,
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+            // #endregion
             
             // Verificar el tamaño del archivo
             $fileSize = $_FILES['archivo_excel_nueva']['size'];
@@ -3274,13 +3582,23 @@ class CoordinadorController extends BaseController {
                 exit;
             }
             
-            // Verificar que el nombre no esté en uso
+            // Validar o crear base: si ya existe con ese nombre para este coordinador, reutilizarla.
             $cargaExistente = $this->cargaExcelModel->getCargaByNombre($nombreBaseDatos, $usuarioCoordinadorId);
-            if ($cargaExistente) {
-                $_SESSION['error_message'] = "❌ Error: Ya existe una base de datos con el nombre '$nombreBaseDatos'.";
-                header('Location: index.php?action=gestion_cargas');
-                exit;
-            }
+            $esNuevaBase = false;
+
+            // #region agent log
+            @file_put_contents($agentLogPath, json_encode([
+                'sessionId' => 'a2fdce',
+                'runId' => 'pre-fix',
+                'hypothesisId' => 'B2',
+                'location' => 'controllers/CoordinadorController.php:crearNuevaBase:pre_create_base',
+                'message' => 'name ok, about to create base',
+                'data' => [
+                    'nombreLen' => strlen(trim((string)$nombreBaseDatos)),
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+            // #endregion
             
             // Procesar el archivo CSV
             $handle = fopen($_FILES['archivo_excel_nueva']['tmp_name'], 'r');
@@ -3324,9 +3642,10 @@ class CoordinadorController extends BaseController {
             
             // Verificar columnas obligatorias con variaciones
             $columnasObligatorias = [
-                'nombre' => ['nombre', 'NOMBRE'],
-                'cedula' => ['cedula', 'cedula ', 'CÉDULA', 'Cedula'],
-                'numero_factura' => ['numero_factura', 'numero factura', 'NUMERO FACTURA', 'numero_factura', 'Número de Factura']
+                'cedula' => ['cedula', 'cedula ', 'cédula', 'cedula identidad', 'dni'],
+                'numero_factura' => ['numero_factura', 'numero factura', 'número factura', 'num factura', 'factura'],
+                // Algún teléfono (aceptamos varias formas comunes)
+                'telefono' => ['telefono', 'tel', 'tel1', 'teléfono', 'cel', 'celular']
             ];
             $columnasFaltantes = [];
             
@@ -3346,20 +3665,47 @@ class CoordinadorController extends BaseController {
             }
             
             if (!empty($columnasFaltantes)) {
-                $_SESSION['error_message'] = "❌ Error en la carga: El archivo CSV debe contener las columnas obligatorias: Nombre, Cédula y Número de Factura.";
+                $_SESSION['error_message'] = "❌ Error en la carga: El archivo CSV debe contener las columnas obligatorias: Cédula, Número de Factura y Teléfono.";
                 fclose($handle);
                 header('Location: index.php?action=gestion_cargas');
                 exit;
             }
             
-            // Crear nueva base de datos independiente
-            $cargaId = $this->cargaExcelModel->crearBaseDatosIndependiente($nombreBaseDatos, $usuarioCoordinadorId);
-            if (!$cargaId) {
-                $_SESSION['error_message'] = "❌ Error en la carga: No se pudo crear la nueva base de datos.";
+            if ($cargaExistente) {
+                $cargaId = (int)($cargaExistente['id'] ?? 0);
+                $esNuevaBase = false;
+            } else {
+                // Crear nueva base de datos independiente
+                $cargaId = $this->cargaExcelModel->crearBaseDatosIndependiente($nombreBaseDatos, $usuarioCoordinadorId);
+                if (!$cargaId) {
+                    $_SESSION['error_message'] = "❌ Error en la carga: No se pudo crear la nueva base de datos.";
+                    fclose($handle);
+                    header('Location: index.php?action=gestion_cargas');
+                    exit;
+                }
+                $esNuevaBase = true;
+            }
+
+            if ((int)$cargaId <= 0) {
+                $_SESSION['error_message'] = "❌ Error en la carga: Base de datos inválida.";
                 fclose($handle);
                 header('Location: index.php?action=gestion_cargas');
                 exit;
             }
+
+            // #region agent log
+            @file_put_contents($agentLogPath, json_encode([
+                'sessionId' => 'a2fdce',
+                'runId' => 'pre-fix',
+                'hypothesisId' => 'B3',
+                'location' => 'controllers/CoordinadorController.php:crearNuevaBase:created_base',
+                'message' => 'base created',
+                'data' => [
+                    'cargaId' => (int)$cargaId,
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+            // #endregion
             
             // Contadores para el resumen
             $clientesNuevos = 0;
@@ -3385,11 +3731,26 @@ class CoordinadorController extends BaseController {
             $obligacionesCreadas = $resultado['obligaciones_creadas'];
             $obligacionesDuplicadas = $resultado['obligaciones_duplicadas'];
             $clientesAgregados = $clientesNuevos + $clientesDuplicados;
+
+            // Sincronizar contadores en base_clientes (tablas correctas: base_clientes/clientes/obligaciones)
+            try {
+                $stmtTotales = $this->pdo->prepare("
+                    UPDATE base_clientes
+                    SET total_clientes = (SELECT COUNT(*) FROM clientes WHERE base_id = ?),
+                        total_obligaciones = (SELECT COUNT(*) FROM obligaciones WHERE base_id = ?)
+                    WHERE id_base = ?
+                ");
+                $stmtTotales->execute([(int)$cargaId, (int)$cargaId, (int)$cargaId]);
+            } catch (Throwable $e) {
+                error_log("No se pudieron actualizar totales de base_clientes ($cargaId): " . $e->getMessage());
+            }
             
             fclose($handle);
             
             // Mensaje de éxito
-            $mensaje = "✅ Base de datos '$nombreBaseDatos' creada exitosamente!<br>";
+            $mensaje = $esNuevaBase
+                ? "✅ Base de datos '$nombreBaseDatos' creada exitosamente!<br>"
+                : "✅ Base de datos '$nombreBaseDatos' actualizada (reutilizada) exitosamente!<br>";
             $mensaje .= "📊 <strong>Resumen:</strong><br>";
             $mensaje .= "• Clientes nuevos: $clientesNuevos<br>";
             $mensaje .= "• Clientes duplicados: $clientesDuplicados<br>";
@@ -3544,8 +3905,14 @@ class CoordinadorController extends BaseController {
         $page_title = "Agregar Clientes a Base Existente";
 
         if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['archivo_excel_existente'])) {
-            $cargaId = $_POST['carga_id'];
+            $cargaId = (int)($this->getPost('carga_id', 0));
             $usuarioCoordinadorId = $_SESSION['user_id'];
+
+            if ($cargaId <= 0) {
+                $_SESSION['error_message'] = "❌ Error: Debes seleccionar una base de datos válida.";
+                header('Location: index.php?action=gestion_cargas');
+                exit;
+            }
             
             // Verificar que la carga pertenezca al coordinador
             $carga = $this->cargaExcelModel->getCargaByIdAndCoordinador($cargaId, $usuarioCoordinadorId);
@@ -3560,7 +3927,7 @@ class CoordinadorController extends BaseController {
             $maxFileSize = 100 * 1024 * 1024; // 100MB
             
             if ($fileSize > $maxFileSize) {
-                $_SESSION['error_message'] = "❌ Error en la carga: El archivo es demasiado grande. El tamaño máximo permitido es 500MB.";
+                $_SESSION['error_message'] = "❌ Error en la carga: El archivo es demasiado grande. El tamaño máximo permitido es 100MB.";
                 header('Location: index.php?action=gestion_cargas');
                 exit;
             }
@@ -3615,9 +3982,10 @@ class CoordinadorController extends BaseController {
             
             // Verificar columnas obligatorias con variaciones
             $columnasObligatorias = [
-                'nombre' => ['nombre', 'NOMBRE'],
                 'cedula' => ['cedula', 'cedula ', 'CÉDULA', 'Cedula'],
-                'numero_factura' => ['numero_factura', 'numero factura', 'NUMERO FACTURA', 'numero_factura', 'Número de Factura']
+                'numero_factura' => ['numero_factura', 'numero factura', 'NUMERO FACTURA', 'número factura', 'num factura', 'factura'],
+                // Algún teléfono (aceptamos varias formas comunes)
+                'telefono' => ['telefono', 'tel', 'tel1', 'teléfono', 'cel', 'celular', 'telefono2', 'telefonos_3']
             ];
             $columnasFaltantes = [];
             
@@ -3637,7 +4005,7 @@ class CoordinadorController extends BaseController {
             }
             
             if (!empty($columnasFaltantes)) {
-                $_SESSION['error_message'] = "❌ Error en la carga: El archivo CSV debe contener las columnas obligatorias: Nombre, Cédula y Número de Factura.";
+                $_SESSION['error_message'] = "❌ Error en la carga: El archivo CSV debe contener las columnas obligatorias: Cédula, Número de Factura y Teléfono.";
                 fclose($handle);
                 header('Location: index.php?action=gestion_cargas');
                 exit;
@@ -3682,8 +4050,8 @@ class CoordinadorController extends BaseController {
         }
         
         // Si no es POST, mostrar la vista de gestión de cargas
-        $coordinador_id = $_SESSION['user_id'];
-        $cargas = $this->cargaExcelModel->getCargasByCoordinador($coordinador_id);
+        $coordinador_id = $_SESSION['user_id'] ?? null;
+        $cargas = $this->cargaExcelModel->getCargasByCoordinador($coordinador_id, true);
         require __DIR__ . '/../views/gestion_cargas_integrada.php';
     }
 
@@ -3697,6 +4065,30 @@ class CoordinadorController extends BaseController {
         // Obtener todas las bases de datos del coordinador (habilitadas y deshabilitadas)
         $bases_datos = $this->clienteModel->getCargasByCoordinador($coordinador_id, false);
         $pdo = $this->pdo;
+
+        // #region debug d200d9 gestionarEstadoBases totals
+        try {
+            $sample = array_slice((array)$bases_datos, 0, 12);
+            $rows = array_map(function($b) {
+                return [
+                    'id' => (int)($b['id'] ?? 0),
+                    'nombreLen' => strlen((string)($b['nombre_cargue'] ?? $b['nombre'] ?? '')),
+                    'estado' => (string)($b['estado_habilitado'] ?? $b['estado'] ?? ''),
+                    'total_clientes' => (int)($b['total_clientes'] ?? -1),
+                    'total_obligaciones' => (int)($b['total_obligaciones'] ?? -1),
+                ];
+            }, $sample);
+            @file_put_contents(__DIR__ . '/../debug-d200d9.log', json_encode([
+                'sessionId' => 'd200d9',
+                'runId' => 'pre-fix',
+                'hypothesisId' => 'T1',
+                'location' => 'controllers/CoordinadorController.php:gestionarEstadoBases:bases_sample',
+                'message' => 'bases loaded',
+                'data' => ['count' => count((array)$bases_datos), 'sample' => $rows],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+        } catch (Throwable $e) {}
+        // #endregion
         
         require __DIR__ . '/../views/gestionar_estado_bases.php';
     }
@@ -3711,7 +4103,28 @@ class CoordinadorController extends BaseController {
         try {
             $coordinador_id = $_SESSION['user_id'];
             $carga_id = (int)$_POST['carga_id'];
-            $nuevo_estado = $_POST['nuevo_estado'];
+            $nuevo_estado = (string)($_POST['nuevo_estado'] ?? '');
+
+            // Normalizar compatibilidad: UI vieja enviaba habilitado/deshabilitado
+            if ($nuevo_estado === 'habilitado') $nuevo_estado = 'activo';
+            if ($nuevo_estado === 'deshabilitado') $nuevo_estado = 'inactivo';
+
+            // #region debug d200d9 cambiarEstadoBase
+            try {
+                @file_put_contents(__DIR__ . '/../debug-d200d9.log', json_encode([
+                    'sessionId' => 'd200d9',
+                    'runId' => 'pre-fix',
+                    'hypothesisId' => 'B2',
+                    'location' => 'controllers/CoordinadorController.php:cambiarEstadoBase:input',
+                    'message' => 'post',
+                    'data' => [
+                        'carga_id' => $carga_id,
+                        'nuevo_estado' => $nuevo_estado,
+                    ],
+                    'timestamp' => (int) round(microtime(true) * 1000),
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+            } catch (Throwable $e) {}
+            // #endregion
             
             // Verificar que la carga pertenezca al coordinador
             $carga = $this->cargaExcelModel->getCargaByIdAndCoordinador($carga_id, $coordinador_id);
@@ -3833,13 +4246,60 @@ class CoordinadorController extends BaseController {
         // Obtener asesores asignados
         $asesores = $this->usuarioModel->getAsesoresByCoordinador($coordinador_id);
         
-        // Obtener tareas existentes
+        // Obtener tareas existentes (fuente: tabla tareas + detalle_tareas)
         $tareas = $this->tareaModel->getTareasByCoordinador($coordinador_id);
         
-        // Obtener estadísticas
+        // Obtener estadísticas (fuente: tabla tareas)
         $estadisticas = $this->tareaModel->getEstadisticasTareas($coordinador_id);
         
         require __DIR__ . '/../views/coordinador_gestionar_tareas.php';
+    }
+
+    public function getDetallesTarea() {
+        if (ob_get_level()) ob_clean();
+        header('Content-Type: application/json; charset=UTF-8');
+
+        try {
+            $coordinador_id = $_SESSION['user_id'] ?? '';
+            $tareaId = (int)($_GET['tarea_id'] ?? 0);
+            if ($tareaId <= 0) {
+                echo json_encode(['success' => false, 'error' => 'tarea_id requerido']);
+                exit;
+            }
+
+            $tarea = $this->tareaModel->getTareaByIdAndCoordinador($tareaId, $coordinador_id);
+            if (!$tarea) {
+                echo json_encode(['success' => false, 'error' => 'No tienes permisos o la tarea no existe']);
+                exit;
+            }
+
+            $clientes = $this->tareaModel->getClientesByTarea($tareaId);
+            echo json_encode([
+                'success' => true,
+                'tarea' => [
+                    'id' => (int)($tarea['id'] ?? $tareaId),
+                    'asesor_nombre' => (string)($tarea['asesor_nombre'] ?? ''),
+                    'nombre_cargue' => (string)($tarea['nombre_cargue'] ?? ''),
+                    'estado' => (string)($tarea['estado_ui'] ?? $tarea['estado'] ?? ''),
+                    'total_clientes' => (int)($tarea['total_clientes'] ?? 0),
+                    'clientes_gestionados' => (int)($tarea['clientes_gestionados'] ?? 0),
+                    'fecha_creacion' => (string)($tarea['fecha_creacion'] ?? ''),
+                ],
+                'clientes' => array_map(function ($c) {
+                    return [
+                        'id_cliente' => (int)($c['id_cliente'] ?? 0),
+                        'cedula' => (string)($c['cedula'] ?? ''),
+                        'nombre' => (string)($c['nombre'] ?? ''),
+                        'telefono' => (string)($c['tel1'] ?? ''),
+                        'gestionado' => (string)($c['gestionado'] ?? 'no'),
+                    ];
+                }, $clientes),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            exit;
+        } catch (Throwable $e) {
+            echo json_encode(['success' => false, 'error' => 'server_error']);
+            exit;
+        }
     }
 
     /**
@@ -3854,18 +4314,55 @@ class CoordinadorController extends BaseController {
         $coordinador_id = $_SESSION['user_id'];
         
         // Validar datos
+        $nombre_tarea = isset($_POST['nombre_tarea']) ? trim((string)$_POST['nombre_tarea']) : '';
         $asesor_id = $_POST['asesor_id'] ?? null;
         $carga_id = $_POST['carga_id'] ?? null;
         $cantidad_clientes = intval($_POST['cantidad_clientes'] ?? 0);
 
-        if (!$asesor_id || !$carga_id || $cantidad_clientes <= 0) {
+        // Filtros (obligaciones)
+        $saldo_min = isset($_POST['saldo_min']) && $_POST['saldo_min'] !== '' ? (float)$_POST['saldo_min'] : null;
+        $saldo_max = isset($_POST['saldo_max']) && $_POST['saldo_max'] !== '' ? (float)$_POST['saldo_max'] : null;
+        $mora_min = isset($_POST['mora_min']) && $_POST['mora_min'] !== '' ? (int)$_POST['mora_min'] : null;
+        $mora_max = isset($_POST['mora_max']) && $_POST['mora_max'] !== '' ? (int)$_POST['mora_max'] : null;
+        $franja = isset($_POST['franja']) ? trim((string)$_POST['franja']) : '';
+
+        // Filtros (gestión)
+        $solo_no_gestionados = isset($_POST['solo_no_gestionados']) ? (int)$_POST['solo_no_gestionados'] : 1;
+        $forma_contacto = isset($_POST['forma_contacto']) ? trim((string)$_POST['forma_contacto']) : '';
+        $tipo_contacto = isset($_POST['tipo_contacto']) ? trim((string)$_POST['tipo_contacto']) : '';
+        $resultado_contacto = isset($_POST['resultado_contacto']) ? trim((string)$_POST['resultado_contacto']) : '';
+        $razon_especifica = isset($_POST['razon_especifica']) ? trim((string)$_POST['razon_especifica']) : '';
+
+        // #region agent log b7eaa7 crear_tarea entry
+        try { @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode([
+            'sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'CT1',
+            'location'=>'controllers/CoordinadorController.php:crearTarea:entry',
+            'message'=>'post_received',
+            'data'=>[
+                'hasSessionUserId'=>isset($_SESSION['user_id'])?1:0,
+                'coordinadorIdLen'=>strlen((string)($coordinador_id??'')),
+                'asesorIdLen'=>strlen((string)($asesor_id??'')),
+                'baseId'=>(int)($carga_id??0),
+                'cantidad'=>(int)$cantidad_clientes,
+                'solo_no_gestionados'=>isset($_POST['solo_no_gestionados']) ? (int)$_POST['solo_no_gestionados'] : 1,
+                'hasObligFilters'=>((isset($_POST['saldo_min'])&&$_POST['saldo_min']!=='')||(isset($_POST['saldo_max'])&&$_POST['saldo_max']!=='')||(isset($_POST['mora_min'])&&$_POST['mora_min']!=='')||(isset($_POST['mora_max'])&&$_POST['mora_max']!=='')||((string)($_POST['franja']??'')!==''))?1:0,
+                'hasGestionFilters'=>(((string)($_POST['forma_contacto']??'')!=='')||((string)($_POST['tipo_contacto']??'')!=='')||((string)($_POST['resultado_contacto']??'')!=='')||((string)($_POST['razon_especifica']??'')!==''))?1:0,
+            ],
+            'timestamp'=>(int) round(microtime(true)*1000)
+        ], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
+        // #endregion
+
+        if (!$nombre_tarea || !$asesor_id || !$carga_id || $cantidad_clientes <= 0) {
+            // #region agent log b7eaa7 crear_tarea invalid required
+            try { @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode(['sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'CT2','location'=>'controllers/CoordinadorController.php:crearTarea:req','message'=>'missing_required','data'=>['asesorOk'=>!empty($asesor_id)?1:0,'baseOk'=>!empty($carga_id)?1:0,'cantidadOk'=>$cantidad_clientes>0?1:0],'timestamp'=>(int) round(microtime(true)*1000)], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
+            // #endregion
             $_SESSION['error_message'] = 'Faltan datos requeridos para crear la tarea';
             header('Location: index.php?action=gestionar_tareas');
             exit;
         }
 
         // Verificar que el asesor está asignado a esta base
-        $asesoresBase = $this->tareaModel->getAsesoresByBase($carga_id);
+        $asesoresBase = $this->getAsesoresByBase($carga_id);
         $asesorValido = false;
         foreach ($asesoresBase as $asesor) {
             if ($asesor['id'] == $asesor_id) {
@@ -3875,16 +4372,51 @@ class CoordinadorController extends BaseController {
         }
 
         if (!$asesorValido) {
+            // #region agent log b7eaa7 crear_tarea asesor no valido
+            try { @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode(['sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'CT3','location'=>'controllers/CoordinadorController.php:crearTarea:asesor','message'=>'asesor_no_valido','data'=>['baseId'=>(int)$carga_id,'asesorIdLen'=>strlen((string)$asesor_id),'asesoresBaseCount'=>is_array($asesoresBase)?count($asesoresBase):-1],'timestamp'=>(int) round(microtime(true)*1000)], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
+            // #endregion
             $_SESSION['error_message'] = 'El asesor seleccionado no está asignado a esta base';
             header('Location: index.php?action=gestionar_tareas');
             exit;
         }
 
-        // Obtener clientes no gestionados de la base
-        $clientesNoGestionados = $this->tareaModel->getClientesNoGestionadosBase($carga_id, $cantidad_clientes);
+        $filtros = [
+            'saldo_min' => $saldo_min,
+            'saldo_max' => $saldo_max,
+            'mora_min' => $mora_min,
+            'mora_max' => $mora_max,
+            'franja' => $franja,
+            'solo_no_gestionados' => $solo_no_gestionados ? 1 : 0,
+            'forma_contacto' => $forma_contacto,
+            'tipo_contacto' => $tipo_contacto,
+            'resultado_contacto' => $resultado_contacto,
+            'razon_especifica' => $razon_especifica,
+        ];
+
+        // Validar que el número solicitado no supere el total del filtro
+        $totalFiltrados = $this->contarClientesFiltradosBase((int)$carga_id, $filtros);
+        // #region agent log b7eaa7 crear_tarea total filtrados
+        try { @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode(['sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'CT4','location'=>'controllers/CoordinadorController.php:crearTarea:count','message'=>'total_filtrados','data'=>['baseId'=>(int)$carga_id,'cantidad'=>(int)$cantidad_clientes,'totalFiltrados'=>(int)$totalFiltrados],'timestamp'=>(int) round(microtime(true)*1000)], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
+        // #endregion
+        if ($totalFiltrados <= 0) {
+            $_SESSION['error_message'] = 'No hay clientes que cumplan el filtro seleccionado en esta base';
+            header('Location: index.php?action=gestionar_tareas');
+            exit;
+        }
+        if ($cantidad_clientes > $totalFiltrados) {
+            // #region agent log b7eaa7 crear_tarea cantidad mayor
+            try { @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode(['sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'CT5','location'=>'controllers/CoordinadorController.php:crearTarea:count','message'=>'cantidad_supera_total','data'=>['cantidad'=>(int)$cantidad_clientes,'totalFiltrados'=>(int)$totalFiltrados],'timestamp'=>(int) round(microtime(true)*1000)], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
+            // #endregion
+            $_SESSION['error_message'] = "La cantidad a asignar ({$cantidad_clientes}) no puede ser mayor al total del filtro ({$totalFiltrados}).";
+            header('Location: index.php?action=gestionar_tareas');
+            exit;
+        }
+
+        // Obtener clientes filtrados de la base (aleatorio)
+        $clientesNoGestionados = $this->getClientesFiltradosBase((int)$carga_id, $filtros, $cantidad_clientes);
 
         if (empty($clientesNoGestionados)) {
-            $_SESSION['error_message'] = 'No hay clientes no gestionados disponibles en esta base';
+            $_SESSION['error_message'] = 'No hay clientes disponibles con el filtro seleccionado en esta base';
             header('Location: index.php?action=gestionar_tareas');
             exit;
         }
@@ -3893,6 +4425,7 @@ class CoordinadorController extends BaseController {
             'asesor_id' => $asesor_id,
             'carga_id' => $carga_id,
             'cliente_ids' => array_column($clientesNoGestionados, 'id'),
+            'nombre_tarea' => $nombre_tarea,
             'descripcion' => "Tarea de {$cantidad_clientes} clientes de la base",
             'prioridad' => 'media',
             'fecha_vencimiento' => null,
@@ -3900,6 +4433,21 @@ class CoordinadorController extends BaseController {
         ];
 
         $tarea_id = $this->tareaModel->crearTarea($datos);
+        // #region agent log b7eaa7 crear_tarea insert result
+        try { @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode([
+            'sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'CT6',
+            'location'=>'controllers/CoordinadorController.php:crearTarea:insert',
+            'message'=>'tareaModel_crearTarea_return',
+            'data'=>[
+                'tareaId'=>(int)($tarea_id?:0),
+                'clienteIdsCount'=>is_array($datos['cliente_ids']??null)?count($datos['cliente_ids']):-1,
+                'coordinadorIdLen'=>strlen((string)$coordinador_id),
+                'asesorIdLen'=>strlen((string)$asesor_id),
+                'baseId'=>(int)$carga_id,
+            ],
+            'timestamp'=>(int) round(microtime(true)*1000)
+        ], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
+        // #endregion
 
         if ($tarea_id) {
             $_SESSION['success_message'] = "Tarea creada exitosamente. Se asignaron {$cantidad_clientes} clientes no gestionados al asesor.";
@@ -3909,6 +4457,298 @@ class CoordinadorController extends BaseController {
 
         header('Location: index.php?action=gestionar_tareas');
         exit;
+    }
+
+    /**
+     * Crear tarea mediante CSV (cédulas)
+     *
+     * Reglas:
+     * - CSV debe contener una columna "cedula" (header).
+     * - Solo se asignan clientes cuya cédula exista en la base seleccionada.
+     * - Se registra el cargue en `carga_csv_tareas`.
+     */
+    public function crearTareaCsv() {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            header('Location: index.php?action=gestionar_tareas');
+            exit;
+        }
+
+        $coordinador_id = $_SESSION['user_id'];
+        $nombre_tarea = isset($_POST['nombre_tarea']) ? trim((string)$_POST['nombre_tarea']) : '';
+        $asesor_id = isset($_POST['asesor_id']) ? (string)$_POST['asesor_id'] : '';
+        $carga_id = isset($_POST['carga_id']) ? (int)$_POST['carga_id'] : 0;
+
+        // Reporte detallado para UI (por qué falló / qué se procesó)
+        $csvReport = [
+            'ok' => false,
+            'base_id' => $carga_id,
+            'asesor' => $asesor_id,
+            'coordinador' => (string)$coordinador_id,
+            'nombre_tarea' => $nombre_tarea,
+            'archivo' => null,
+            'delimiter' => null,
+            'header_detected' => null,
+            'cedula_column_index' => null,
+            'rows_read' => 0,
+            'cedulas_raw_count' => 0,
+            'cedulas_valid_unique' => 0,
+            'cedulas_invalid_count' => 0,
+            'cedulas_found_count' => 0,
+            'cedulas_not_found_count' => 0,
+            'samples' => [
+                'invalid' => [],
+                'not_found' => [],
+            ],
+            'error' => null,
+            'error_detail' => null,
+        ];
+
+        if (!$nombre_tarea || !$asesor_id || $carga_id <= 0) {
+            $csvReport['error'] = 'missing_required';
+            $csvReport['error_detail'] = 'Faltan nombre_tarea, asesor_id o base (carga_id).';
+            $_SESSION['csv_import_report'] = $csvReport;
+            $_SESSION['error_message'] = 'Faltan datos requeridos para crear la tarea por CSV';
+            header('Location: index.php?action=gestionar_tareas');
+            exit;
+        }
+
+        // Verificar que el asesor está asignado a esta base
+        $asesoresBase = $this->getAsesoresByBase($carga_id);
+        $asesorValido = false;
+        foreach ($asesoresBase as $asesor) {
+            if (($asesor['id'] ?? null) == $asesor_id) { $asesorValido = true; break; }
+        }
+        if (!$asesorValido) {
+            $csvReport['error'] = 'asesor_not_assigned_to_base';
+            $csvReport['error_detail'] = 'El asesor no pertenece a la base seleccionada.';
+            $_SESSION['csv_import_report'] = $csvReport;
+            $_SESSION['error_message'] = 'El asesor seleccionado no está asignado a esta base';
+            header('Location: index.php?action=gestionar_tareas');
+            exit;
+        }
+
+        if (!isset($_FILES['csv_cedulas']) || !is_array($_FILES['csv_cedulas'])) {
+            $csvReport['error'] = 'missing_file';
+            $csvReport['error_detail'] = 'No llegó el archivo en $_FILES[csv_cedulas].';
+            $_SESSION['csv_import_report'] = $csvReport;
+            $_SESSION['error_message'] = 'Debes subir un archivo CSV';
+            header('Location: index.php?action=gestionar_tareas');
+            exit;
+        }
+
+        $f = $_FILES['csv_cedulas'];
+        $tmp = (string)($f['tmp_name'] ?? '');
+        $origName = (string)($f['name'] ?? 'cedulas.csv');
+        $err = (int)($f['error'] ?? UPLOAD_ERR_NO_FILE);
+        $csvReport['archivo'] = $origName;
+
+        if ($err !== UPLOAD_ERR_OK || !$tmp || !is_file($tmp)) {
+            $csvReport['error'] = 'upload_error';
+            $csvReport['error_detail'] = 'Error de carga: code=' . $err . '.';
+            $_SESSION['csv_import_report'] = $csvReport;
+            $_SESSION['error_message'] = 'No se pudo leer el CSV (error de carga)';
+            header('Location: index.php?action=gestionar_tareas');
+            exit;
+        }
+
+        // Leer cédulas del CSV
+        $cedulas = [];
+        $cedulasRaw = [];
+        $cedulasInvalidRaw = [];
+        $cedulaIndex = null;
+        $delimiter = ',';
+
+        $fh = @fopen($tmp, 'rb');
+        if (!$fh) {
+            $csvReport['error'] = 'open_failed';
+            $csvReport['error_detail'] = 'No se pudo abrir el archivo temporal.';
+            $_SESSION['csv_import_report'] = $csvReport;
+            $_SESSION['error_message'] = 'No se pudo abrir el CSV';
+            header('Location: index.php?action=gestionar_tareas');
+            exit;
+        }
+
+        $firstRow = fgetcsv($fh, 0, $delimiter);
+        if (is_array($firstRow) && count($firstRow) === 1 && strpos((string)$firstRow[0], ';') !== false) {
+            // Probable CSV con ';'
+            $delimiter = ';';
+            rewind($fh);
+            $firstRow = fgetcsv($fh, 0, $delimiter);
+        }
+        $csvReport['delimiter'] = $delimiter;
+
+        if (!is_array($firstRow) || empty($firstRow)) {
+            fclose($fh);
+            $csvReport['error'] = 'empty_or_invalid_csv';
+            $csvReport['error_detail'] = 'No se pudo leer la primera fila.';
+            $_SESSION['csv_import_report'] = $csvReport;
+            $_SESSION['error_message'] = 'El CSV está vacío o no es válido';
+            header('Location: index.php?action=gestionar_tareas');
+            exit;
+        }
+
+        // Detectar header
+        $header = array_map(function ($v) {
+            $v = is_string($v) ? $v : (string)$v;
+            $v = trim($v);
+            $v = mb_strtolower($v, 'UTF-8');
+            $v = str_replace([' ', '-', '.'], '_', $v);
+            return $v;
+        }, $firstRow);
+
+        foreach ($header as $i => $h) {
+            if ($h === 'cedula' || $h === 'cedulas' || $h === 'documento' || $h === 'documento_identidad') {
+                $cedulaIndex = (int)$i;
+                break;
+            }
+        }
+        if ($cedulaIndex === null) {
+            // Si no hay header, asumimos primera columna como cédula
+            $cedulaIndex = 0;
+            $csvReport['header_detected'] = false;
+            // Procesar también la primera fila como dato
+            $firstVal = $firstRow[$cedulaIndex] ?? '';
+            $cedulasRaw[] = (string)$firstVal;
+        }
+        if ($csvReport['header_detected'] === null) $csvReport['header_detected'] = true;
+        $csvReport['cedula_column_index'] = $cedulaIndex;
+
+        while (($row = fgetcsv($fh, 0, $delimiter)) !== false) {
+            if (!is_array($row) || empty($row)) continue;
+            $v = $row[$cedulaIndex] ?? '';
+            $cedulasRaw[] = (string)$v;
+        }
+        fclose($fh);
+        $csvReport['rows_read'] = count($cedulasRaw) + 1; // aprox: incluye primera fila
+        $csvReport['cedulas_raw_count'] = count($cedulasRaw);
+
+        foreach ($cedulasRaw as $v) {
+            $c = preg_replace('/\D+/', '', (string)$v);
+            $c = trim((string)$c);
+            if ($c === '' || strlen($c) < 5 || strlen($c) > 12) {
+                if (count($cedulasInvalidRaw) < 12 && trim((string)$v) !== '') {
+                    $cedulasInvalidRaw[] = (string)$v;
+                }
+                continue;
+            }
+            $cedulas[$c] = true;
+        }
+
+        $cedulasList = array_keys($cedulas);
+        $totalSubidas = count($cedulasList);
+        $csvReport['cedulas_valid_unique'] = $totalSubidas;
+        $csvReport['cedulas_invalid_count'] = max(0, count($cedulasRaw) - $totalSubidas);
+        $csvReport['samples']['invalid'] = array_slice($cedulasInvalidRaw, 0, 10);
+
+        if ($totalSubidas <= 0) {
+            $this->insertCargaCsvTarea($carga_id, $asesor_id, (string)$coordinador_id, $origName, 0, 0, 0, null);
+            $csvReport['error'] = 'no_valid_cedulas';
+            $csvReport['error_detail'] = 'No se detectaron cédulas válidas (solo números, 5-12 dígitos).';
+            $_SESSION['csv_import_report'] = $csvReport;
+            $_SESSION['error_message'] = 'El CSV no contiene cédulas válidas';
+            header('Location: index.php?action=gestionar_tareas');
+            exit;
+        }
+
+        // Buscar clientes que existan en la base con esas cédulas
+        $clienteIds = [];
+        $cedulasEncontradas = [];
+        $chunkSize = 900;
+        for ($i = 0; $i < $totalSubidas; $i += $chunkSize) {
+            $chunk = array_slice($cedulasList, $i, $chunkSize);
+            if (empty($chunk)) continue;
+            $in = implode(',', array_fill(0, count($chunk), '?'));
+            $sql = "SELECT id_cliente, cedula FROM clientes WHERE base_id = ? AND cedula IN ($in)";
+            $stmt = $this->pdo->prepare($sql);
+            $params = array_merge([(int)$carga_id], array_values($chunk));
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            foreach ($rows as $r) {
+                $idc = (int)($r['id_cliente'] ?? 0);
+                $ced = (string)($r['cedula'] ?? '');
+                if ($idc > 0) $clienteIds[] = $idc;
+                $ced = preg_replace('/\D+/', '', $ced);
+                if ($ced !== '') $cedulasEncontradas[$ced] = true;
+            }
+        }
+        $clienteIds = array_values(array_unique(array_map('intval', $clienteIds)));
+        $totalEncontradas = count($clienteIds);
+        $totalNoEncontradas = max(0, $totalSubidas - count($cedulasEncontradas));
+        $csvReport['cedulas_found_count'] = $totalEncontradas;
+        $csvReport['cedulas_not_found_count'] = $totalNoEncontradas;
+
+        $notFoundSamples = [];
+        if ($totalNoEncontradas > 0) {
+            foreach ($cedulasList as $c) {
+                if (!isset($cedulasEncontradas[$c])) {
+                    $notFoundSamples[] = $c;
+                    if (count($notFoundSamples) >= 10) break;
+                }
+            }
+        }
+        $csvReport['samples']['not_found'] = $notFoundSamples;
+
+        if ($totalEncontradas <= 0) {
+            $this->insertCargaCsvTarea($carga_id, $asesor_id, (string)$coordinador_id, $origName, $totalSubidas, 0, $totalSubidas, null);
+            $csvReport['error'] = 'none_found_in_base';
+            $csvReport['error_detail'] = 'Ninguna cédula del CSV coincide con clientes de la base seleccionada.';
+            $_SESSION['csv_import_report'] = $csvReport;
+            $_SESSION['error_message'] = 'Ninguna cédula del CSV existe en la base seleccionada';
+            header('Location: index.php?action=gestionar_tareas');
+            exit;
+        }
+
+        // Crear tarea con clientes encontrados
+        $datos = [
+            'asesor_id' => $asesor_id,
+            'carga_id' => $carga_id,
+            'cliente_ids' => $clienteIds,
+            'nombre_tarea' => $nombre_tarea,
+            'descripcion' => "Tarea por CSV ({$totalEncontradas} clientes encontrados)",
+            'prioridad' => 'media',
+            'fecha_vencimiento' => null,
+            'coordinador_id' => $coordinador_id,
+        ];
+
+        $tarea_id = $this->tareaModel->crearTarea($datos);
+        $this->insertCargaCsvTarea($carga_id, $asesor_id, (string)$coordinador_id, $origName, $totalSubidas, $totalEncontradas, $totalNoEncontradas, $tarea_id ?: null);
+
+        if ($tarea_id) {
+            $csvReport['ok'] = true;
+            $_SESSION['csv_import_report'] = $csvReport;
+            $_SESSION['success_message'] = "Tarea CSV creada. Subidas: {$totalSubidas}. Encontradas: {$totalEncontradas}. No encontradas: {$totalNoEncontradas}.";
+        } else {
+            $csvReport['error'] = 'tarea_create_failed';
+            $csvReport['error_detail'] = 'El CSV se procesó, pero TareaModel::crearTarea() devolvió false/0.';
+            $_SESSION['csv_import_report'] = $csvReport;
+            $_SESSION['error_message'] = 'Se procesó el CSV, pero ocurrió un error al crear la tarea';
+        }
+
+        header('Location: index.php?action=gestionar_tareas');
+        exit;
+    }
+
+    private function insertCargaCsvTarea(int $baseId, string $asesorCedula, string $coordinadorCedula, string $nombreArchivo, int $subidas, int $encontradas, int $noEncontradas, $tareaId): void {
+        try {
+            $stmt = $this->pdo->prepare("
+                INSERT INTO carga_csv_tareas
+                    (base_id, asesor_cedula, coordinador_cedula, nombre_archivo, cedulas_subidas, cedulas_encontradas, cedulas_no_encontradas, tarea_id)
+                VALUES
+                    (?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $stmt->execute([
+                (int)$baseId,
+                (string)$asesorCedula,
+                (string)$coordinadorCedula,
+                (string)$nombreArchivo,
+                (int)$subidas,
+                (int)$encontradas,
+                (int)$noEncontradas,
+                $tareaId !== null ? (int)$tareaId : null,
+            ]);
+        } catch (Throwable $e) {
+            // No romper el flujo por fallo de logging de carga
+        }
     }
 
     /**
@@ -4055,7 +4895,7 @@ class CoordinadorController extends BaseController {
             }
 
             // Obtener asesores asignados a esta base específica
-            $asesores = $this->tareaModel->getAsesoresByBase($carga_id);
+            $asesores = $this->getAsesoresByBase($carga_id);
             
             echo json_encode([
                 'success' => true,
@@ -4098,12 +4938,28 @@ class CoordinadorController extends BaseController {
             }
 
             // Obtener estadísticas de clientes
-            $estadisticas = $this->tareaModel->getEstadisticasClientesBase($carga_id);
+            $estadisticas = $this->getEstadisticasClientesBase($carga_id);
+
+            // Aplicar filtro opcional (mismo payload que el modal)
+            $filtros = [
+                'saldo_min' => isset($_GET['saldo_min']) && $_GET['saldo_min'] !== '' ? (float)$_GET['saldo_min'] : null,
+                'saldo_max' => isset($_GET['saldo_max']) && $_GET['saldo_max'] !== '' ? (float)$_GET['saldo_max'] : null,
+                'mora_min' => isset($_GET['mora_min']) && $_GET['mora_min'] !== '' ? (int)$_GET['mora_min'] : null,
+                'mora_max' => isset($_GET['mora_max']) && $_GET['mora_max'] !== '' ? (int)$_GET['mora_max'] : null,
+                'franja' => isset($_GET['franja']) ? trim((string)$_GET['franja']) : '',
+                'solo_no_gestionados' => isset($_GET['solo_no_gestionados']) ? (int)$_GET['solo_no_gestionados'] : 1,
+                'forma_contacto' => isset($_GET['forma_contacto']) ? trim((string)$_GET['forma_contacto']) : '',
+                'tipo_contacto' => isset($_GET['tipo_contacto']) ? trim((string)$_GET['tipo_contacto']) : '',
+                'resultado_contacto' => isset($_GET['resultado_contacto']) ? trim((string)$_GET['resultado_contacto']) : '',
+                'razon_especifica' => isset($_GET['razon_especifica']) ? trim((string)$_GET['razon_especifica']) : '',
+            ];
+            $totalFiltrados = $this->contarClientesFiltradosBase((int)$carga_id, $filtros);
             
             echo json_encode([
                 'success' => true,
-                'total_clientes' => $estadisticas['total_clientes'],
-                'total_no_gestionados' => $estadisticas['total_no_gestionados']
+                'total_clientes' => (int)($estadisticas['total_clientes'] ?? 0),
+                'total_no_gestionados' => (int)($estadisticas['total_no_gestionados'] ?? 0),
+                'total_filtrados' => (int)$totalFiltrados
             ]);
             exit;
         } catch (Exception $e) {
@@ -4162,7 +5018,7 @@ class CoordinadorController extends BaseController {
         }
 
         // Verificar que la tarea pertenece al coordinador
-        $tareas = $this->tareaModel->getTareasByCoordinador($coordinador_id);
+        $tareas = $this->getTareasByCoordinador($coordinador_id);
         $tarea_existe = false;
         foreach ($tareas as $tarea) {
             if ($tarea['id'] == $tarea_id) {
@@ -4184,6 +5040,257 @@ class CoordinadorController extends BaseController {
             echo json_encode(['error' => 'Error al actualizar el estado']);
         }
         exit;
+    }
+
+    /**
+     * ===== Helpers internos (evita dependencia de métodos legacy en modelos) =====
+     */
+    private function getTareasByCoordinador($coordinadorCedula) {
+        $sql = "
+            SELECT
+                t.*,
+                b.nombre as nombre_cargue,
+                u.nombre as asesor_nombre
+            FROM tareas t
+            JOIN base_clientes b ON t.base_id = b.id_base
+            LEFT JOIN usuarios u ON t.asesor_cedula = u.cedula
+            WHERE t.coordinador_cedula = ?
+            ORDER BY t.fecha_creacion DESC
+        ";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([(string)$coordinadorCedula]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as &$t) {
+            $t['id'] = $t['id_tarea'];
+            $t['carga_id'] = $t['base_id'];
+            $t['cliente_ids'] = json_decode((string)($t['clientes_asignados'] ?? '[]'), true) ?: [];
+            $t['total_clientes'] = is_array($t['cliente_ids']) ? count($t['cliente_ids']) : 0;
+        }
+        return $rows;
+    }
+
+    private function getEstadisticasTareas($coordinadorCedula) {
+        $sql = "
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN estado = 'pendiente' THEN 1 ELSE 0 END) as pendientes,
+                SUM(CASE WHEN estado = 'en progreso' THEN 1 ELSE 0 END) as en_progreso,
+                SUM(CASE WHEN estado = 'completa' THEN 1 ELSE 0 END) as completas,
+                SUM(CASE WHEN estado = 'cancelada' THEN 1 ELSE 0 END) as canceladas
+            FROM tareas
+            WHERE coordinador_cedula = ?
+        ";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([(string)$coordinadorCedula]);
+        $r = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        return [
+            'total' => (int)($r['total'] ?? 0),
+            'pendientes' => (int)($r['pendientes'] ?? 0),
+            'en_progreso' => (int)($r['en_progreso'] ?? 0),
+            'completas' => (int)($r['completas'] ?? 0),
+            'canceladas' => (int)($r['canceladas'] ?? 0),
+        ];
+    }
+
+    private function getAsesoresByBase($baseId) {
+        $sql = "
+            SELECT
+                u.cedula as id,
+                u.cedula,
+                u.nombre as nombre_completo,
+                u.nombre,
+                aba.estado,
+                aba.fecha_asignacion
+            FROM asignacion_base_asesores aba
+            JOIN usuarios u ON aba.asesor_cedula = u.cedula
+            WHERE aba.base_id = ?
+              AND aba.estado = 'activa'
+              AND u.rol = 'asesor'
+            ORDER BY u.nombre ASC
+        ";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([(int)$baseId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    private function getClientesNoGestionadosBase($baseId, $limit = 100) {
+        $limit = max(1, min(500, (int)$limit));
+        $sql = "
+            SELECT
+                c.id_cliente as id,
+                c.id_cliente,
+                c.base_id,
+                c.cedula,
+                c.nombre,
+                c.email,
+                c.ciudad,
+                c.tel1 as telefono,
+                c.tel2 as celular2,
+                c.estado as estado_cliente
+            FROM clientes c
+            LEFT JOIN historial_gestiones hg ON hg.cliente_id = c.id_cliente
+            WHERE c.base_id = ?
+              AND hg.id_gestion IS NULL
+            ORDER BY c.id_cliente ASC
+            LIMIT $limit
+        ";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([(int)$baseId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    private function buildSqlClientesFiltradosBase(int $baseId, array $filtros): array {
+        $wheres = ["c.base_id = ?"];
+        $params = [$baseId];
+
+        $soloNoGestionados = (int)($filtros['solo_no_gestionados'] ?? 1) === 1;
+        if ($soloNoGestionados) {
+            $wheres[] = "NOT EXISTS (SELECT 1 FROM historial_gestiones hg0 WHERE hg0.cliente_id = c.id_cliente)";
+        }
+
+        // Obligaciones (si hay algún filtro de obligaciones, debe existir al menos una obligación que cumpla)
+        $saldoMin = $filtros['saldo_min'] ?? null;
+        $saldoMax = $filtros['saldo_max'] ?? null;
+        $moraMin = $filtros['mora_min'] ?? null;
+        $moraMax = $filtros['mora_max'] ?? null;
+        $franja = isset($filtros['franja']) ? trim((string)$filtros['franja']) : '';
+
+        $hasObligFilters = ($saldoMin !== null) || ($saldoMax !== null) || ($moraMin !== null) || ($moraMax !== null) || ($franja !== '');
+        if ($hasObligFilters) {
+            $ob = ["o.cliente_id = c.id_cliente", "o.base_id = c.base_id", "o.saldo > 0"];
+            if ($saldoMin !== null) { $ob[] = "o.saldo >= ?"; $params[] = (float)$saldoMin; }
+            if ($saldoMax !== null) { $ob[] = "o.saldo <= ?"; $params[] = (float)$saldoMax; }
+            if ($moraMin !== null)  { $ob[] = "o.dias_mora >= ?"; $params[] = (int)$moraMin; }
+            if ($moraMax !== null)  { $ob[] = "o.dias_mora <= ?"; $params[] = (int)$moraMax; }
+            if ($franja !== '')     { $ob[] = "o.franja = ?"; $params[] = $franja; }
+            $wheres[] = "EXISTS (SELECT 1 FROM obligaciones o WHERE " . implode(" AND ", $ob) . ")";
+        }
+
+        // Gestión (si hay algún filtro de gestión, debe existir al menos una gestión que cumpla)
+        $forma = isset($filtros['forma_contacto']) ? trim((string)$filtros['forma_contacto']) : '';
+        $tipo = isset($filtros['tipo_contacto']) ? trim((string)$filtros['tipo_contacto']) : '';
+        $resultado = isset($filtros['resultado_contacto']) ? trim((string)$filtros['resultado_contacto']) : '';
+        $razon = isset($filtros['razon_especifica']) ? trim((string)$filtros['razon_especifica']) : '';
+        $hasGestionFilters = ($forma !== '') || ($tipo !== '') || ($resultado !== '') || ($razon !== '');
+        if ($hasGestionFilters) {
+            $hg = ["hg.cliente_id = c.id_cliente"];
+            if ($forma !== '')     { $hg[] = "UPPER(TRIM(hg.forma_contacto)) = UPPER(?)"; $params[] = $forma; }
+            if ($tipo !== '')      { $hg[] = "UPPER(TRIM(hg.tipo_contacto)) = UPPER(?)"; $params[] = $tipo; }
+            if ($resultado !== '') { $hg[] = "UPPER(TRIM(hg.resultado_contacto)) = UPPER(?)"; $params[] = $resultado; }
+            if ($razon !== '')     { $hg[] = "UPPER(TRIM(hg.razon_especifica)) = UPPER(?)"; $params[] = $razon; }
+            $wheres[] = "EXISTS (SELECT 1 FROM historial_gestiones hg WHERE " . implode(" AND ", $hg) . ")";
+        }
+
+        return [
+            'where' => implode(" AND ", $wheres),
+            'params' => $params
+        ];
+    }
+
+    private function contarClientesFiltradosBase(int $baseId, array $filtros): int {
+        $built = $this->buildSqlClientesFiltradosBase($baseId, $filtros);
+        $sql = "SELECT COUNT(*) as total FROM clientes c WHERE " . $built['where'];
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($built['params']);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        return (int)($row['total'] ?? 0);
+    }
+
+    private function getClientesFiltradosBase(int $baseId, array $filtros, int $limit = 100): array {
+        $limit = max(1, min(500, (int)$limit));
+        $built = $this->buildSqlClientesFiltradosBase($baseId, $filtros);
+        $sql = "
+            SELECT
+                c.id_cliente as id,
+                c.id_cliente,
+                c.base_id,
+                c.cedula,
+                c.nombre,
+                c.email,
+                c.ciudad,
+                c.tel1 as telefono,
+                c.tel2 as celular2,
+                c.estado as estado_cliente
+            FROM clientes c
+            WHERE {$built['where']}
+            ORDER BY RAND()
+            LIMIT {$limit}
+        ";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($built['params']);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Opciones para filtros del modal (franjas y valores de gestión)
+     */
+    public function getOpcionesFiltrosTarea() {
+        if (ob_get_level()) ob_clean();
+        header('Content-Type: application/json; charset=UTF-8');
+
+        try {
+            $carga_id = $_GET['carga_id'] ?? null;
+            $coordinador_id = $_SESSION['user_id'];
+            if (!$carga_id) {
+                echo json_encode(['success' => false, 'error' => 'ID de carga requerido']);
+                exit;
+            }
+            $carga = $this->cargaExcelModel->getCargaByIdAndCoordinador($carga_id, $coordinador_id);
+            if (!$carga) {
+                echo json_encode(['success' => false, 'error' => 'No tienes permisos para acceder a esta carga']);
+                exit;
+            }
+
+            $baseId = (int)$carga_id;
+
+            $franjas = [];
+            $stmt = $this->pdo->prepare("SELECT DISTINCT franja FROM obligaciones WHERE base_id = ? ORDER BY franja ASC");
+            $stmt->execute([$baseId]);
+            $franjas = array_values(array_filter(array_map('strval', array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'franja'))));
+
+            $op = function(string $col) use ($baseId) {
+                $sql = "
+                    SELECT DISTINCT hg.{$col} as v
+                    FROM historial_gestiones hg
+                    JOIN clientes c ON c.id_cliente = hg.cliente_id
+                    WHERE c.base_id = ?
+                      AND hg.{$col} IS NOT NULL
+                      AND TRIM(hg.{$col}) <> ''
+                    ORDER BY hg.{$col} ASC
+                    LIMIT 250
+                ";
+                $stmt = $this->pdo->prepare($sql);
+                $stmt->execute([$baseId]);
+                return array_values(array_filter(array_map('strval', array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'v'))));
+            };
+
+            echo json_encode([
+                'success' => true,
+                'franjas' => $franjas,
+                'forma_contacto' => $op('forma_contacto'),
+                'tipo_contacto' => $op('tipo_contacto'),
+                'resultado_contacto' => $op('resultado_contacto'),
+                'razon_especifica' => $op('razon_especifica'),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            exit;
+        } catch (Throwable $e) {
+            echo json_encode(['success' => false, 'error' => 'server_error']);
+            exit;
+        }
+    }
+
+    private function getEstadisticasClientesBase($baseId) {
+        $sql = "
+            SELECT
+                COUNT(*) as total_clientes,
+                SUM(CASE WHEN hg.id_gestion IS NULL THEN 1 ELSE 0 END) as total_no_gestionados
+            FROM clientes c
+            LEFT JOIN historial_gestiones hg ON hg.cliente_id = c.id_cliente
+            WHERE c.base_id = ?
+        ";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([(int)$baseId]);
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: ['total_clientes' => 0, 'total_no_gestionados' => 0];
     }
 
     /**
@@ -4488,22 +5595,15 @@ class CoordinadorController extends BaseController {
                 if ($actualizarExistentes && !empty($clientesActualizar)) {
                     foreach ($clientesActualizar as $cedula => $info) {
                         $datosActualizacion = [];
-                        
-                        if (!empty($info['datos']['telefono'])) {
-                            $datosActualizacion['telefono'] = $info['datos']['telefono'];
-                        }
-                        if (!empty($info['datos']['celular2'])) {
-                            $datosActualizacion['celular2'] = $info['datos']['celular2'];
-                        }
-                        if (!empty($info['datos']['email'])) {
-                            $datosActualizacion['email'] = $info['datos']['email'];
-                        }
-                        if (!empty($info['datos']['direccion'])) {
-                            $datosActualizacion['direccion'] = $info['datos']['direccion'];
-                        }
-                        if (!empty($info['datos']['ciudad'])) {
-                            $datosActualizacion['ciudad'] = $info['datos']['ciudad'];
-                        }
+
+                        if (!empty($info['datos']['nombre'])) $datosActualizacion['nombre'] = $info['datos']['nombre'];
+                        if (!empty($info['datos']['email'])) $datosActualizacion['email'] = $info['datos']['email'];
+                        if (!empty($info['datos']['ciudad'])) $datosActualizacion['ciudad'] = $info['datos']['ciudad'];
+
+                        // Tabla real: tel1..tel10
+                        if (!empty($info['datos']['telefono'])) $datosActualizacion['tel1'] = $info['datos']['telefono'];
+                        if (!empty($info['datos']['celular2'])) $datosActualizacion['tel2'] = $info['datos']['celular2'];
+                        if (!empty($info['datos']['telefono3'])) $datosActualizacion['tel3'] = $info['datos']['telefono3'];
                         
                         if (!empty($datosActualizacion)) {
                             $this->clienteModel->actualizarCliente($info['id'], $datosActualizacion);
@@ -4569,12 +5669,10 @@ class CoordinadorController extends BaseController {
                                 if (!empty($obligacion['rmt'])) $datosUpdate['rmt'] = $obligacion['rmt'];
                                 if (!empty($obligacion['numero_contrato'])) $datosUpdate['numero_contrato'] = $obligacion['numero_contrato'];
                                 if (!empty($obligacion['franja'])) $datosUpdate['franja'] = $obligacion['franja'];
-                                if (!empty($infoCliente['telefono'])) $datosUpdate['telefono'] = $infoCliente['telefono'];
-                                if (!empty($infoCliente['celular2'])) $datosUpdate['telefono2'] = $infoCliente['celular2'];
-                                if (!empty($obligacion['telefono3'])) $datosUpdate['telefono3'] = $obligacion['telefono3'];
+                                // En esquema real de obligaciones no existen campos de teléfono/cedula/nombre.
                                 
                                 if (!empty($datosUpdate)) {
-                                    $this->facturacionModel->actualizarFactura($facturaExistente['id'], $datosUpdate);
+                                    $this->facturacionModel->actualizarFactura($facturaExistente['id_obligacion'] ?? $facturaExistente['id'] ?? 0, $datosUpdate);
                                     $obligacionesCreadas++;
                                 } else {
                                     $obligacionesDuplicadas++;
@@ -4585,16 +5683,13 @@ class CoordinadorController extends BaseController {
                         } else {
                             // Factura nueva - preparar para bulk insert
                             $facturasNuevas[] = [
+                                'base_id' => $cargaId,
                                 'cliente_id' => $clienteId,
                                 'numero_factura' => $obligacion['numero_factura'],
-                                'cedula' => $cedula,
-                                'nombre' => $infoCliente['nombre'],
                                 'saldo' => $obligacion['saldo'] ?? null,
                                 'dias_mora' => $obligacion['dias_mora'] ?? null,
                                 'rmt' => $obligacion['rmt'] ?? null,
                                 'numero_contrato' => $obligacion['numero_contrato'] ?? null,
-                                'telefono2' => $infoCliente['celular2'] ?? null,
-                                'telefono3' => $obligacion['telefono3'] ?? null,
                                 'franja' => $obligacion['franja'] ?? null,
                                 'estado_factura' => 'pendiente'
                             ];

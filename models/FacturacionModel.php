@@ -1,7 +1,7 @@
 <?php
 /**
- * Modelo para manejar facturas de clientes
- * Permite múltiples facturas por cliente con cédulas duplicadas
+ * Modelo de "facturación" en el sistema legado.
+ * En la nueva BD (`emermedica_cobranza.sql`) la entidad equivalente es `obligaciones`.
  */
 
 class FacturacionModel {
@@ -12,54 +12,90 @@ class FacturacionModel {
     }
     
     /**
-     * Crear una nueva factura
+     * Crear una nueva obligación (equivalente a factura)
      */
     public function crearFactura($datos) {
-        $sql = "INSERT INTO facturas (cliente_id, numero_factura, cedula, nombre, saldo, dias_mora, rmt, numero_contrato, telefono2, telefono3, franja, estado_factura, fecha_creacion, fecha_actualizacion)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+        $agentLogPath = __DIR__ . '/../debug-a2fdce.log';
+
+        // En el dump: rmt / numero_contrato / franja / dias_mora son NOT NULL.
+        $rmt = trim((string)($datos['rmt'] ?? ''));
+        if ($rmt === '') $rmt = '0';
+        $contrato = trim((string)($datos['numero_contrato'] ?? ''));
+        if ($contrato === '') $contrato = '0';
+        $franja = trim((string)($datos['franja'] ?? ''));
+        if ($franja === '') $franja = 'N/A';
+        $diasMora = (int)($datos['dias_mora'] ?? 0);
+
+        $sql = "INSERT INTO obligaciones (base_id, cliente_id, numero_factura, rmt, numero_contrato, saldo, dias_mora, franja, fecha_creacion, fecha_actualizacion)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
         $stmt = $this->pdo->prepare($sql);
         
-        if ($stmt->execute([
-            $datos['cliente_id'],
-            $datos['numero_factura'] ?? null,
-            $datos['cedula'] ?? null,
-            $datos['nombre'] ?? null,
-            $datos['saldo'] ?? null,
-            $datos['dias_mora'] ?? null,
-            $datos['rmt'] ?? null,
-            $datos['numero_contrato'] ?? null,
-            $datos['telefono2'] ?? null,
-            $datos['telefono3'] ?? null,
-            $datos['franja'] ?? null,
-            $datos['estado_factura'] ?? 'pendiente'
-        ])) {
-            return $this->pdo->lastInsertId();
+        try {
+            if ($stmt->execute([
+                (int)($datos['base_id'] ?? $datos['carga_excel_id'] ?? 0),
+                (int)($datos['cliente_id'] ?? 0),
+                (string)($datos['numero_factura'] ?? ''),
+                $rmt,
+                $contrato,
+                (float)($datos['saldo'] ?? 0),
+                $diasMora,
+                $franja
+            ])) {
+                return $this->pdo->lastInsertId();
+            }
+            return false;
+        } catch (Throwable $e) {
+            // #region agent log
+            @file_put_contents($agentLogPath, json_encode([
+                'sessionId' => 'a2fdce',
+                'runId' => 'pre-fix',
+                'hypothesisId' => 'IC2',
+                'location' => 'models/FacturacionModel.php:crearFactura:catch',
+                'message' => 'crearFactura exception',
+                'data' => [
+                    'type' => get_class($e),
+                    'code' => (int)$e->getCode(),
+                    'message' => substr((string)$e->getMessage(), 0, 300),
+                    'baseId' => (int)($datos['base_id'] ?? $datos['carga_excel_id'] ?? 0),
+                    'clienteId' => (int)($datos['cliente_id'] ?? 0),
+                    'facturaLen' => strlen((string)($datos['numero_factura'] ?? '')),
+                    'rmtWasDefault' => $rmt === '0',
+                    'contratoWasDefault' => $contrato === '0',
+                    'franjaWasDefault' => $franja === 'N/A',
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+            // #endregion
+            throw $e;
         }
-        return false;
     }
     
     /**
-     * Obtener una factura por su ID
+     * Obtener una obligación por su ID
      */
     public function getFacturaById($facturaId) {
-        $sql = "SELECT * FROM facturas WHERE id = ?";
+        $sql = "SELECT o.*,
+                       o.id_obligacion AS id,
+                       CASE WHEN o.saldo > 0 THEN 'pendiente' ELSE 'pagada' END AS estado_factura
+                FROM obligaciones o
+                WHERE o.id_obligacion = ?";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$facturaId]);
+        $stmt->execute([(int)$facturaId]);
         return $stmt->fetch(PDO::FETCH_ASSOC);
     }
     
     /**
-     * Obtener todas las facturas de un cliente por cédula
+     * Obtener obligaciones de un cliente por cédula (todas las bases)
      */
     public function getFacturasByCedula($cedula) {
-        $sql = "SELECT c.*, f.*, ce.nombre_cargue
+        $sql = "SELECT c.cedula, c.nombre, b.nombre as nombre_cargue, o.*
                 FROM clientes c
-                LEFT JOIN facturas f ON c.id = f.cliente_id
-                LEFT JOIN cargas_excel ce ON c.carga_excel_id = ce.id
+                JOIN base_clientes b ON c.base_id = b.id_base
+                LEFT JOIN obligaciones o ON c.id_cliente = o.cliente_id
                 WHERE c.cedula = ?
-                ORDER BY f.fecha_creacion DESC";
+                ORDER BY o.fecha_creacion DESC";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$cedula]);
+        $stmt->execute([(string)$cedula]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
     
@@ -68,22 +104,22 @@ class FacturacionModel {
      * Si se proporciona carga_excel_id, solo se obtienen las facturas de esa base de datos
      */
     public function getFacturasByClienteId($cliente_id, $carga_excel_id = null) {
-        $sql = "SELECT f.*, c.nombre, c.cedula, c.telefono, c.email, ce.nombre_cargue
-                FROM facturas f
-                LEFT JOIN clientes c ON f.cliente_id = c.id
-                LEFT JOIN cargas_excel ce ON c.carga_excel_id = ce.id
-                WHERE f.cliente_id = ?";
-        
-        $params = [$cliente_id];
-        
-        // CRÍTICO: Filtrar por carga_excel_id si se proporciona
-        // Esto asegura que solo se muestren las facturas de la base de datos asignada al asesor
+        $sql = "SELECT o.*,
+                       o.id_obligacion AS id,
+                       CASE WHEN o.saldo > 0 THEN 'pendiente' ELSE 'pagada' END AS estado_factura,
+                       c.nombre, c.cedula, c.tel1 as telefono, c.email, b.nombre as nombre_cargue
+                FROM obligaciones o
+                JOIN clientes c ON o.cliente_id = c.id_cliente
+                JOIN base_clientes b ON o.base_id = b.id_base
+                WHERE o.cliente_id = ?";
+        $params = [(int)$cliente_id];
+
         if ($carga_excel_id !== null) {
-            $sql .= " AND c.carga_excel_id = ?";
-            $params[] = $carga_excel_id;
+            $sql .= " AND o.base_id = ?";
+            $params[] = (int)$carga_excel_id;
         }
-        
-        $sql .= " ORDER BY f.fecha_creacion DESC";
+
+        $sql .= " ORDER BY o.fecha_creacion DESC";
         
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
@@ -94,13 +130,14 @@ class FacturacionModel {
      * Obtener una factura específica por número de factura
      */
     public function getFacturaByNumero($numero_factura) {
-        $sql = "SELECT f.*, c.nombre, c.cedula, c.telefono, c.email, ce.nombre_cargue
-                FROM facturas f
-                LEFT JOIN clientes c ON f.cliente_id = c.id
-                LEFT JOIN cargas_excel ce ON c.carga_excel_id = ce.id
-                WHERE f.numero_factura = ?";
+        $sql = "SELECT o.*, c.nombre, c.cedula, c.tel1 as telefono, c.email, b.nombre as nombre_cargue
+                FROM obligaciones o
+                JOIN clientes c ON o.cliente_id = c.id_cliente
+                JOIN base_clientes b ON o.base_id = b.id_base
+                WHERE o.numero_factura = ?
+                LIMIT 1";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$numero_factura]);
+        $stmt->execute([(string)$numero_factura]);
         return $stmt->fetch(PDO::FETCH_ASSOC);
     }
     
@@ -108,14 +145,32 @@ class FacturacionModel {
      * Obtener una factura específica por número de factura y cliente_id
      */
     public function getFacturaByNumeroAndCliente($numero_factura, $cliente_id) {
-        $sql = "SELECT f.*, c.nombre, c.cedula, c.telefono, c.email, ce.nombre_cargue
-                FROM facturas f
-                LEFT JOIN clientes c ON f.cliente_id = c.id
-                LEFT JOIN cargas_excel ce ON c.carga_excel_id = ce.id
-                WHERE f.numero_factura = ? AND f.cliente_id = ?";
+        $sql = "SELECT o.*, c.nombre, c.cedula, c.tel1 as telefono, c.email, b.nombre as nombre_cargue
+                FROM obligaciones o
+                JOIN clientes c ON o.cliente_id = c.id_cliente
+                JOIN base_clientes b ON o.base_id = b.id_base
+                WHERE o.numero_factura = ? AND o.cliente_id = ?
+                LIMIT 1";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$numero_factura, $cliente_id]);
+        $stmt->execute([(string)$numero_factura, (int)$cliente_id]);
         return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Primera obligación del cliente en una base (para importaciones sin factura explícita).
+     */
+    public function getPrimeraObligacionClienteEnBase($clienteId, $baseId) {
+        $stmt = $this->pdo->prepare("
+            SELECT o.*, c.nombre, c.cedula, c.tel1 as telefono, c.email, b.nombre as nombre_cargue
+            FROM obligaciones o
+            JOIN clientes c ON o.cliente_id = c.id_cliente
+            JOIN base_clientes b ON o.base_id = b.id_base
+            WHERE o.cliente_id = ? AND o.base_id = ?
+            ORDER BY o.id_obligacion ASC
+            LIMIT 1
+        ");
+        $stmt->execute([(int)$clienteId, (int)$baseId]);
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
     
     /**
@@ -126,17 +181,13 @@ class FacturacionModel {
      */
     public function facturaExiste($numero_factura, $cliente_id = null) {
         if ($cliente_id !== null) {
-            // Verificar si la factura existe para este cliente específico
-            // Esto permite que el mismo número de factura exista para diferentes clientes (en diferentes bases)
-            $sql = "SELECT COUNT(*) FROM facturas WHERE numero_factura = ? AND cliente_id = ?";
+            $sql = "SELECT COUNT(*) FROM obligaciones WHERE numero_factura = ? AND cliente_id = ?";
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([$numero_factura, $cliente_id]);
+            $stmt->execute([(string)$numero_factura, (int)$cliente_id]);
         } else {
-            // Verificación global (mantener compatibilidad con código antiguo)
-            // PERO: Esto puede causar problemas si hay múltiples clientes con la misma cédula
-            $sql = "SELECT COUNT(*) FROM facturas WHERE numero_factura = ?";
+            $sql = "SELECT COUNT(*) FROM obligaciones WHERE numero_factura = ?";
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([$numero_factura]);
+            $stmt->execute([(string)$numero_factura]);
         }
         return $stmt->fetchColumn() > 0;
     }
@@ -146,39 +197,26 @@ class FacturacionModel {
      * Permite actualizar cualquier campo de la factura
      */
     public function actualizarFactura($id, $datos) {
-        if (empty($datos)) {
-            return false;
-        }
-        
-        // Construir la consulta dinámicamente para permitir actualizar cualquier campo
+        if (empty($datos)) return false;
+
         $campos = [];
         $valores = [];
-        
-        // Campos permitidos para actualizar
-        $camposPermitidos = [
-            'cedula', 'nombre', 'telefono', 'telefono2', 'telefono3',
-            'saldo', 'dias_mora', 'rmt', 'numero_contrato', 'franja',
-            'propiedad', 'producto', 'medicion', 'estado_factura'
-        ];
-        
+        $permitidos = ['numero_factura', 'rmt', 'numero_contrato', 'saldo', 'dias_mora', 'franja'];
+
         foreach ($datos as $campo => $valor) {
-            if (in_array($campo, $camposPermitidos)) {
+            if (in_array($campo, $permitidos, true)) {
                 $campos[] = "$campo = ?";
                 $valores[] = $valor;
             }
         }
-        
-        if (empty($campos)) {
-            return false;
-        }
-        
-        // Agregar fecha_actualizacion automáticamente
+
+        if (empty($campos)) return false;
+
         $campos[] = "fecha_actualizacion = CURRENT_TIMESTAMP";
-        $valores[] = $id;
-        
-        $sql = "UPDATE facturas SET " . implode(", ", $campos) . " WHERE id = ?";
+        $valores[] = (int)$id;
+
+        $sql = "UPDATE obligaciones SET " . implode(", ", $campos) . " WHERE id_obligacion = ?";
         $stmt = $this->pdo->prepare($sql);
-        
         return $stmt->execute($valores);
     }
     
@@ -186,9 +224,9 @@ class FacturacionModel {
      * Eliminar una factura
      */
     public function eliminarFactura($id) {
-        $sql = "DELETE FROM facturas WHERE id = ?";
+        $sql = "DELETE FROM obligaciones WHERE id_obligacion = ?";
         $stmt = $this->pdo->prepare($sql);
-        return $stmt->execute([$id]);
+        return $stmt->execute([(int)$id]);
     }
     
     /**
@@ -201,10 +239,9 @@ class FacturacionModel {
      */
     public function eliminarFacturasNoIncluidas($cliente_id, $numerosFactura) {
         if (empty($numerosFactura)) {
-            // Si no hay facturas en el CSV, eliminar todas las facturas del cliente
-            $sql = "DELETE FROM facturas WHERE cliente_id = ?";
+            $sql = "DELETE FROM obligaciones WHERE cliente_id = ?";
             $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([$cliente_id]);
+            $stmt->execute([(int)$cliente_id]);
             return $stmt->rowCount();
         }
         
@@ -212,8 +249,8 @@ class FacturacionModel {
         $placeholders = str_repeat('?,', count($numerosFactura) - 1) . '?';
         
         // Eliminar facturas que no están en la lista
-        $sql = "DELETE FROM facturas WHERE cliente_id = ? AND numero_factura NOT IN ($placeholders)";
-        $params = array_merge([$cliente_id], $numerosFactura);
+        $sql = "DELETE FROM obligaciones WHERE cliente_id = ? AND numero_factura NOT IN ($placeholders)";
+        $params = array_merge([(int)$cliente_id], $numerosFactura);
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
         
@@ -227,21 +264,16 @@ class FacturacionModel {
     public function getEstadisticasFacturas($cedula, $carga_excel_id = null) {
         $sql = "SELECT 
                     COUNT(*) as total_facturas,
-                    SUM(saldo) as saldo_total,
-                    COUNT(CASE WHEN f.estado_factura = 'pendiente' THEN 1 END) as facturas_activas,
-                    COUNT(CASE WHEN f.estado_factura = 'pagada' THEN 1 END) as facturas_pagadas,
-                    COUNT(CASE WHEN f.estado_factura = 'eliminada' THEN 1 END) as facturas_canceladas
-                FROM facturas f
-                LEFT JOIN clientes c ON f.cliente_id = c.id
+                    SUM(o.saldo) as saldo_total
+                FROM obligaciones o
+                JOIN clientes c ON o.cliente_id = c.id_cliente
                 WHERE c.cedula = ?";
         
         $params = [$cedula];
         
-        // CRÍTICO: Filtrar por carga_excel_id si se proporciona
-        // Esto asegura que las estadísticas solo incluyan facturas de la base asignada
         if ($carga_excel_id !== null) {
-            $sql .= " AND c.carga_excel_id = ?";
-            $params[] = $carga_excel_id;
+            $sql .= " AND o.base_id = ?";
+            $params[] = (int)$carga_excel_id;
         }
         
         $stmt = $this->pdo->prepare($sql);
@@ -253,11 +285,11 @@ class FacturacionModel {
      * Buscar clientes con múltiples facturas
      */
     public function getClientesConMultiplesFacturas() {
-        $sql = "SELECT c.cedula, c.nombre, COUNT(f.id) as total_facturas
+        $sql = "SELECT c.cedula, c.nombre, COUNT(o.id_obligacion) as total_facturas
                 FROM clientes c
-                INNER JOIN facturas f ON c.id = f.cliente_id
+                INNER JOIN obligaciones o ON c.id_cliente = o.cliente_id
                 GROUP BY c.cedula, c.nombre
-                HAVING COUNT(f.id) > 1
+                HAVING COUNT(o.id_obligacion) > 1
                 ORDER BY total_facturas DESC";
         $stmt = $this->pdo->query($sql);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -267,13 +299,21 @@ class FacturacionModel {
      * Obtener facturas por estado
      */
     public function getFacturasByEstado($estado) {
-        $sql = "SELECT f.*, c.nombre, c.cedula, c.telefono, c.email
-                FROM facturas f
-                LEFT JOIN clientes c ON f.cliente_id = c.id
-                WHERE f.estado_factura = ?
-                ORDER BY f.fecha_creacion DESC";
+        // En el esquema actual no existe `estado_factura`. Se infiere:
+        // - pendiente: saldo > 0
+        // - pagada: saldo <= 0
+        // - eliminada: no aplica (retorna vacío)
+        $estado = strtolower(trim((string)$estado));
+        if ($estado === 'eliminada') return [];
+
+        $cond = ($estado === 'pagada') ? "o.saldo <= 0" : "o.saldo > 0";
+        $sql = "SELECT o.*, c.nombre, c.cedula, c.tel1 as telefono, c.email
+                FROM obligaciones o
+                LEFT JOIN clientes c ON o.cliente_id = c.id_cliente
+                WHERE $cond
+                ORDER BY o.fecha_creacion DESC";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$estado]);
+        $stmt->execute();
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
     
@@ -281,11 +321,12 @@ class FacturacionModel {
      * Obtener facturas con mora alta
      */
     public function getFacturasMoraAlta($dias_mora = 30) {
-        $sql = "SELECT f.*, c.nombre, c.cedula, c.telefono, c.email
-                FROM facturas f
-                LEFT JOIN clientes c ON f.cliente_id = c.id
-                WHERE f.dias_mora > ? AND f.estado_factura = 'pendiente'
-                ORDER BY f.dias_mora DESC";
+        // En el esquema actual no existe `estado_factura`. Se considera "pendiente" cuando saldo > 0.
+        $sql = "SELECT o.*, c.nombre, c.cedula, c.tel1 as telefono, c.email
+                FROM obligaciones o
+                LEFT JOIN clientes c ON o.cliente_id = c.id_cliente
+                WHERE o.dias_mora > ? AND o.saldo > 0
+                ORDER BY o.dias_mora DESC";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([$dias_mora]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -295,15 +336,18 @@ class FacturacionModel {
      * Obtener resumen de facturas para dashboard
      */
     public function getResumenFacturas() {
+        // En el esquema actual no existe `estado_factura`. Se infiere:
+        // - activas/pendientes: saldo > 0
+        // - pagadas: saldo <= 0
         $sql = "SELECT 
                     COUNT(*) as total_facturas,
-                    COUNT(CASE WHEN estado_factura = 'pendiente' THEN 1 END) as facturas_activas,
-                    COUNT(CASE WHEN estado_factura = 'pagada' THEN 1 END) as facturas_pagadas,
-                    COUNT(CASE WHEN estado_factura = 'eliminada' THEN 1 END) as facturas_canceladas,
-                    COUNT(CASE WHEN dias_mora > 30 THEN 1 END) as facturas_mora_alta,
+                    SUM(CASE WHEN saldo > 0 THEN 1 ELSE 0 END) as facturas_activas,
+                    SUM(CASE WHEN saldo <= 0 THEN 1 ELSE 0 END) as facturas_pagadas,
+                    0 as facturas_canceladas,
+                    SUM(CASE WHEN dias_mora > 30 AND saldo > 0 THEN 1 ELSE 0 END) as facturas_mora_alta,
                     SUM(saldo) as saldo_total,
                     AVG(dias_mora) as mora_promedio
-                FROM facturas";
+                FROM obligaciones";
         $stmt = $this->pdo->query($sql);
         return $stmt->fetch(PDO::FETCH_ASSOC);
     }
@@ -330,16 +374,16 @@ class FacturacionModel {
             $params[] = $factura['cliente_id'];
         }
         
-        $sql = "SELECT * FROM facturas WHERE " . implode(' OR ', $conditions);
+        $sql = "SELECT * FROM obligaciones WHERE " . implode(' OR ', $conditions);
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
         
         $resultados = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $indexados = [];
         
-        foreach ($resultados as $factura) {
-            $key = $factura['numero_factura'] . '-' . $factura['cliente_id'];
-            $indexados[$key] = $factura;
+        foreach ($resultados as $obligacion) {
+            $key = ($obligacion['numero_factura'] ?? '') . '-' . ($obligacion['cliente_id'] ?? '');
+            $indexados[$key] = $obligacion;
         }
         
         return $indexados;
@@ -357,25 +401,31 @@ class FacturacionModel {
             return 0;
         }
         
-        // Construir query de INSERT múltiple
-        $sql = "INSERT INTO facturas (cliente_id, numero_factura, cedula, nombre, saldo, dias_mora, rmt, numero_contrato, telefono2, telefono3, franja, estado_factura, fecha_creacion, fecha_actualizacion) VALUES ";
+        // Construir query de INSERT múltiple en obligaciones (schema real)
+        $sql = "INSERT INTO obligaciones (base_id, cliente_id, numero_factura, rmt, numero_contrato, saldo, dias_mora, franja, fecha_creacion, fecha_actualizacion) VALUES ";
         $values = [];
         $params = [];
         
         foreach ($facturas as $factura) {
-            $values[] = "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
-            $params[] = $factura['cliente_id'] ?? null;
-            $params[] = $factura['numero_factura'] ?? null;
-            $params[] = $factura['cedula'] ?? null;
-            $params[] = $factura['nombre'] ?? null;
-            $params[] = $factura['saldo'] ?? null;
-            $params[] = $factura['dias_mora'] ?? null;
-            $params[] = $factura['rmt'] ?? null;
-            $params[] = $factura['numero_contrato'] ?? null;
-            $params[] = $factura['telefono2'] ?? null;
-            $params[] = $factura['telefono3'] ?? null;
-            $params[] = $factura['franja'] ?? null;
-            $params[] = $factura['estado_factura'] ?? 'pendiente';
+            $values[] = "(?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+            $params[] = (int)($factura['base_id'] ?? $factura['carga_excel_id'] ?? 0);
+            $params[] = (int)($factura['cliente_id'] ?? 0);
+            $params[] = (string)($factura['numero_factura'] ?? '');
+
+            $rmt = trim((string)($factura['rmt'] ?? ''));
+            if ($rmt === '') $rmt = '0';
+            $params[] = $rmt;
+
+            $contrato = trim((string)($factura['numero_contrato'] ?? ''));
+            if ($contrato === '') $contrato = '0';
+            $params[] = $contrato;
+
+            $params[] = (float)($factura['saldo'] ?? 0);
+            $params[] = (int)($factura['dias_mora'] ?? 0);
+
+            $franja = trim((string)($factura['franja'] ?? ''));
+            if ($franja === '') $franja = 'N/A';
+            $params[] = $franja;
         }
         
         $sql .= implode(', ', $values);

@@ -343,25 +343,26 @@
             <div class="stat-card">
                 <div class="stat-number"><?php echo $total_asesores ?? 0; ?></div>
                 <div class="stat-label">Total Asesores</div>
-                <p class="mt-20">Asesores activos en el equipo</p>
+                
             </div>
             
             <div class="stat-card">
                 <div class="stat-number"><?php echo $total_clientes ?? 0; ?></div>
                 <div class="stat-label">Total Clientes</div>
-                <p class="mt-20">Clientes asignados al equipo</p>
+                
             </div>
             
             <div class="stat-card">
                 <div class="stat-number"><?php echo $total_llamadas ?? 0; ?></div>
                 <div class="stat-label">Total Llamadas</div>
-                <p class="mt-20">Llamadas realizadas por el equipo</p>
+                
             </div>
             
             <div class="stat-card">
-                <div class="stat-number"><?php echo $total_ventas ?? 0; ?></div>
-                <div class="stat-label">Total Ventas</div>
-                <p class="mt-20">Ventas concretadas por el equipo</p>
+                <div class="stat-number"><?php echo $total_acuerdos ?? ($total_ventas ?? 0); ?></div>
+                <div class="stat-label">Acuerdos de pago (mes)</div>
+                
+                
             </div>
         </div>
         
@@ -379,9 +380,9 @@
                     </div>
                     
                     <div class="stat-card" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">
-                        <div class="stat-number" style="color: white;"><?php echo $total_asesores > 0 ? round(($total_ventas / $total_asesores), 1) : 0; ?></div>
-                        <div class="stat-label" style="color: white;">Promedio Ventas/Asesor</div>
-                        <p class="mt-20" style="color: #dbeafe;">Ventas promedio por asesor</p>
+                        <div class="stat-number" style="color: white;"><?php $ta = $total_acuerdos ?? ($total_ventas ?? 0); echo $total_asesores > 0 ? round(($ta / $total_asesores), 1) : 0; ?></div>
+                        <div class="stat-label" style="color: white;">Promedio acuerdos de pago/asesor</div>
+                        <p class="mt-20" style="color: #dbeafe;">Promedio de gestiones acuerdo_pago en el mes por asesor</p>
                     </div>
                     
                     <div class="stat-card" style="background: linear-gradient(135deg, #f59e0b, #d97706);">
@@ -422,8 +423,8 @@
                                 </div>
                                 
                                 <div style="text-align: center; padding: 15px; background: #f8fafc; border-radius: 8px;">
-                                    <div style="font-size: 1.5rem; font-weight: bold; color: #f59e0b;"><?php echo $asesor['ventas_realizadas'] ?? 0; ?></div>
-                                    <div style="font-size: 0.8rem; color: #6b7280;">Ventas</div>
+                                    <div style="font-size: 1.5rem; font-weight: bold; color: #f59e0b;"><?php echo $asesor['acuerdos_mes'] ?? ($asesor['ventas_realizadas'] ?? 0); ?></div>
+                                    <div style="font-size: 0.8rem; color: #6b7280;">Acuerdos de pago (mes)</div>
                                 </div>
                                 
                                 <div style="text-align: center; padding: 15px; background: #f8fafc; border-radius: 8px;">

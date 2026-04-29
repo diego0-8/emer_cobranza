@@ -252,6 +252,7 @@
                 <?php if (!empty($asesores)): ?>
                     <div class="user-list">
                         <?php foreach ($asesores as $asesor): ?>
+                            <?php if (($asesor['estado'] ?? '') !== 'Activo') continue; ?>
                             <div class="user-item">
                                 <div class="user-info">
                                     <div class="user-name"><?php echo htmlspecialchars($asesor['nombre_completo'] ?? ''); ?></div>
@@ -299,6 +300,7 @@
             <?php if (!empty($asesoresAsignados)): ?>
                 <div class="user-list">
                     <?php foreach ($asesoresAsignados as $asesor): ?>
+                        <?php if (($asesor['estado'] ?? '') !== 'Activo') continue; ?>
                         <div class="user-item" style="background: #f0f9ff; border: 1px solid #bae6fd;">
                             <div class="user-info">
                                 <div class="user-name"><?php echo htmlspecialchars($asesor['nombre_completo'] ?? ''); ?></div>

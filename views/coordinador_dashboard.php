@@ -1136,6 +1136,29 @@
     ?>
     
     <div class="dashboard-container">
+        <!-- #region agent log b7eaa7 coordinador_dashboard render (server-side) -->
+        <?php
+        try {
+            @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode([
+                'sessionId' => 'b7eaa7',
+                'runId' => 'pre',
+                'hypothesisId' => 'H5',
+                'location' => 'views/coordinador_dashboard.php:render',
+                'message' => 'render_vars',
+                'data' => [
+                    'asesoresCount' => isset($asesores) && is_array($asesores) ? count($asesores) : -1,
+                    'total_asesores' => (int)($total_asesores ?? -1),
+                    'total_clientes' => (int)($total_clientes ?? -1),
+                    'total_llamadas' => (int)($total_llamadas ?? -1),
+                    'total_ventas' => (int)($total_ventas ?? -1),
+                    'hasDatosDashboard' => isset($datos_dashboard) ? 1 : 0,
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+        } catch (Throwable $e) {}
+        ?>
+        <!-- #endregion -->
+
         <!-- Header Principal -->
         <div class="dashboard-header fade-in">
             <h1>🎯 Dashboard del Coordinador</h1>

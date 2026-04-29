@@ -6,9 +6,66 @@ class UsuarioModel {
         $this->pdo = $pdo;
     }
 
+    /**
+     * Normaliza un registro de la tabla `usuarios` del dump para que coincida con
+     * las claves que esperan las vistas/controladores actuales (sin tocar vistas).
+     */
+    private function mapUsuarioRow(?array $row): ?array {
+        if (!$row) {
+            return null;
+        }
+
+        $rolDb = $row['rol'] ?? '';
+        $rolUi = $rolDb === 'cordinador' ? 'coordinador' : $rolDb;
+
+        $estadoDb = $row['estado'] ?? '';
+        $estadoUi = $estadoDb === 'activo' ? 'Activo' : ($estadoDb === 'inactivo' ? 'Inactivo' : $estadoDb);
+
+        $extension = (string)($row['estension'] ?? '');
+        $clave = (string)($row['sip_password'] ?? '');
+        $telefonoActivo = ($extension !== '' && $clave !== '') ? 'Si' : 'No';
+
+        return [
+            // Alias para compatibilidad con vistas (antes era int autoincrement).
+            'id' => $row['cedula'] ?? null,
+            'cedula' => $row['cedula'] ?? null,
+            'nombre_completo' => $row['nombre'] ?? null,
+            'nombre' => $row['nombre'] ?? null,
+            'usuario' => $row['usuario'] ?? null,
+            'rol' => $rolUi,
+            'rol_db' => $rolDb,
+            'estado' => $estadoUi,
+            'estado_db' => $estadoDb,
+            'fecha_creacion' => $row['fecha_creacion'] ?? null,
+            'fecha_actualizacion' => $row['fecha_actualizacion'] ?? null,
+
+            // Compatibilidad con pantalla de teléfono
+            'extension_telefono' => $extension,
+            'clave_webrtc' => $clave,
+            'telefono_activo' => $telefonoActivo,
+
+            // Campo original para autenticación
+            'contrasena_hash' => $row['contrasena_hash'] ?? null,
+        ];
+    }
+
+    private function normalizarRolParaDB(string $rolUi): string {
+        $rolUi = trim($rolUi);
+        return $rolUi === 'coordinador' ? 'cordinador' : $rolUi;
+    }
+
+    private function normalizarEstadoParaDB(string $estadoUi): string {
+        $estadoUi = trim($estadoUi);
+        if ($estadoUi === 'Activo') return 'activo';
+        if ($estadoUi === 'Inactivo') return 'inactivo';
+        // Si ya viene en minúsculas o en otro formato, conservar.
+        return $estadoUi;
+    }
+
     public function getAllUsuarios() {
-        $stmt = $this->pdo->query("SELECT * FROM usuarios ORDER BY rol, nombre_completo");
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $stmt = $this->pdo->query("SELECT * FROM usuarios ORDER BY rol, nombre");
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return array_values(array_filter(array_map([$this, 'mapUsuarioRow'], $rows)));
     }
     
     public function getUsuariosWithFilters($search = '', $rol_filter = '', $estado_filter = '') {
@@ -16,7 +73,7 @@ class UsuarioModel {
         $params = [];
         
         if (!empty($search)) {
-            $sql .= " AND (nombre_completo LIKE ? OR usuario LIKE ? OR cedula LIKE ?)";
+            $sql .= " AND (nombre LIKE ? OR usuario LIKE ? OR cedula LIKE ?)";
             $searchTerm = "%$search%";
             $params[] = $searchTerm;
             $params[] = $searchTerm;
@@ -25,40 +82,51 @@ class UsuarioModel {
         
         if (!empty($rol_filter)) {
             $sql .= " AND rol = ?";
-            $params[] = $rol_filter;
+            $params[] = $this->normalizarRolParaDB($rol_filter);
         }
         
         if (!empty($estado_filter)) {
             $sql .= " AND estado = ?";
-            $params[] = $estado_filter;
+            $params[] = $this->normalizarEstadoParaDB($estado_filter);
         }
         
-        $sql .= " ORDER BY rol, nombre_completo";
+        $sql .= " ORDER BY rol, nombre";
         
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return array_values(array_filter(array_map([$this, 'mapUsuarioRow'], $rows)));
     }
     
     public function getUsuariosByRol($rol) {
-        $stmt = $this->pdo->prepare("SELECT * FROM usuarios WHERE rol = ? AND estado = 'Activo' ORDER BY nombre_completo");
-        $stmt->execute([$rol]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $rolDb = $this->normalizarRolParaDB((string)$rol);
+        $stmt = $this->pdo->prepare("SELECT * FROM usuarios WHERE rol = ? AND estado = 'activo' ORDER BY nombre");
+        $stmt->execute([$rolDb]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return array_values(array_filter(array_map([$this, 'mapUsuarioRow'], $rows)));
     }
 
     public function getUsuarioById($id) {
-        $stmt = $this->pdo->prepare("SELECT * FROM usuarios WHERE id = ?");
-        $stmt->execute([$id]);
-        return $stmt->fetch(PDO::FETCH_ASSOC);
+        // En el dump, el identificador es `cedula` (varchar).
+        $stmt = $this->pdo->prepare("SELECT * FROM usuarios WHERE cedula = ? LIMIT 1");
+        $stmt->execute([(string)$id]);
+        return $this->mapUsuarioRow($stmt->fetch(PDO::FETCH_ASSOC));
     }
     
     /**
      * Obtiene los datos de teléfono de un usuario
      */
     public function getDatosTelefono($userId) {
-        $stmt = $this->pdo->prepare("SELECT extension_telefono, clave_webrtc, telefono_activo FROM usuarios WHERE id = ?");
-        $stmt->execute([$userId]);
-        return $stmt->fetch(PDO::FETCH_ASSOC);
+        $stmt = $this->pdo->prepare("SELECT estension, sip_password FROM usuarios WHERE cedula = ? LIMIT 1");
+        $stmt->execute([(string)$userId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $extension = (string)($row['estension'] ?? '');
+        $clave = (string)($row['sip_password'] ?? '');
+        return [
+            'extension_telefono' => $extension,
+            'clave_webrtc' => $clave,
+            'telefono_activo' => ($extension !== '' && $clave !== '') ? 'Si' : 'No'
+        ];
     }
     
     /**
@@ -73,22 +141,58 @@ class UsuarioModel {
 
     public function authenticateUser($usuario, $contrasena) {
         try {
-            $stmt = $this->pdo->prepare("SELECT * FROM usuarios WHERE usuario = ? AND estado = 'Activo' LIMIT 1");
+            $agentLogPath = __DIR__ . '/../debug-a2fdce.log';
+            $stmt = $this->pdo->prepare("SELECT * FROM usuarios WHERE usuario = ? AND estado = 'activo' LIMIT 1");
             $stmt->execute([$usuario]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            // #region agent log
+            @file_put_contents($agentLogPath, json_encode([
+                'sessionId' => 'a2fdce',
+                'runId' => 'pre-fix',
+                'hypothesisId' => 'L2',
+                'location' => 'models/UsuarioModel.php:authenticateUser',
+                'message' => 'User lookup result',
+                'data' => [
+                    'usuarioLen' => strlen((string)$usuario),
+                    'found' => $user ? true : false,
+                    'estadoDb' => $user ? ($user['estado'] ?? null) : null,
+                    'hashLen' => $user ? strlen((string)($user['contrasena_hash'] ?? '')) : 0,
+                    'hashPrefix' => $user ? substr((string)($user['contrasena_hash'] ?? ''), 0, 4) : null,
+                ],
+                'timestamp' => (int) round(microtime(true) * 1000),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+            // #endregion
+
+            // #region agent log
+            error_log('[AGENTLOG a2fdce L2] lookup found=' . ($user ? '1' : '0') . ' estadoDb=' . ($user['estado'] ?? 'null') . ' hashLen=' . ($user ? strlen((string)($user['contrasena_hash'] ?? '')) : 0));
+            // #endregion
             
             if ($user) {
-                // Verificar si la contraseña está hasheada (empieza con $2y$)
-                if (strpos($user['contrasena'], '$2y$') === 0) {
-                    // Contraseña hasheada, usar password_verify
-                    if (password_verify($contrasena, $user['contrasena'])) {
-                        return $user;
-                    }
-                } else {
-                    // Contraseña plana, comparación directa
-                    if ($user['contrasena'] === $contrasena) {
-                        return $user;
-                    }
+                $hash = (string)($user['contrasena_hash'] ?? '');
+                $verified = ($hash !== '' && password_verify((string)$contrasena, $hash));
+
+                // #region agent log
+                @file_put_contents($agentLogPath, json_encode([
+                    'sessionId' => 'a2fdce',
+                    'runId' => 'pre-fix',
+                    'hypothesisId' => 'L2',
+                    'location' => 'models/UsuarioModel.php:authenticateUser',
+                    'message' => 'password_verify result',
+                    'data' => [
+                        'verified' => $verified,
+                        'hashLooksBcrypt' => (strpos($hash, '$2y$') === 0) || (strpos($hash, '$2a$') === 0) || (strpos($hash, '$2b$') === 0),
+                    ],
+                    'timestamp' => (int) round(microtime(true) * 1000),
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+                // #endregion
+
+                // #region agent log
+                error_log('[AGENTLOG a2fdce L2] password_verify verified=' . ($verified ? '1' : '0') . ' hashLooksBcrypt=' . (((strpos($hash, '$2y$') === 0) || (strpos($hash, '$2a$') === 0) || (strpos($hash, '$2b$') === 0)) ? '1' : '0'));
+                // #endregion
+
+                if ($verified) {
+                    return $this->mapUsuarioRow($user);
                 }
             }
             
@@ -104,9 +208,15 @@ class UsuarioModel {
      */
     public function checkUserExists($usuario) {
         try {
-            $stmt = $this->pdo->prepare("SELECT id, usuario, estado FROM usuarios WHERE usuario = ? LIMIT 1");
+            $stmt = $this->pdo->prepare("SELECT cedula, usuario, estado FROM usuarios WHERE usuario = ? LIMIT 1");
             $stmt->execute([$usuario]);
-            return $stmt->fetch(PDO::FETCH_ASSOC);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row) return false;
+            return [
+                'id' => $row['cedula'],
+                'usuario' => $row['usuario'],
+                'estado' => ($row['estado'] ?? '') === 'activo' ? 'Activo' : 'Inactivo'
+            ];
         } catch (PDOException $e) {
             error_log("Error verificando usuario: " . $e->getMessage());
             return false;
@@ -118,19 +228,12 @@ class UsuarioModel {
      */
     public function verificarContrasena($userId, $contrasena) {
         try {
-            $stmt = $this->pdo->prepare("SELECT contrasena FROM usuarios WHERE id = ? AND estado = 'Activo' LIMIT 1");
-            $stmt->execute([$userId]);
+            $stmt = $this->pdo->prepare("SELECT contrasena_hash FROM usuarios WHERE cedula = ? AND estado = 'activo' LIMIT 1");
+            $stmt->execute([(string)$userId]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
             
             if ($user) {
-                // Verificar si la contraseña está hasheada (empieza con $2y$)
-                if (strpos($user['contrasena'], '$2y$') === 0) {
-                    // Contraseña hasheada, usar password_verify
-                    return password_verify($contrasena, $user['contrasena']);
-                } else {
-                    // Contraseña plana, comparación directa
-                    return $user['contrasena'] === $contrasena;
-                }
+                return password_verify((string)$contrasena, (string)($user['contrasena_hash'] ?? ''));
             }
             
             return false;
@@ -142,63 +245,26 @@ class UsuarioModel {
 
     public function createUsuario($data) {
         try {
-            error_log("DEBUG createUsuario - Datos recibidos: " . json_encode($data));
-
-            // Construir SQL dinámicamente para incluir campos de teléfono si están presentes
-            $sql = "INSERT INTO usuarios (nombre_completo, cedula, usuario, contrasena, rol, estado";
-            $placeholders = "?, ?, ?, ?, ?, ?";
-            $params = [
-                $data['nombre_completo'],
-                $data['cedula'],
-                $data['usuario'],
-                password_hash($data['contrasena'], PASSWORD_DEFAULT),
-                $data['rol'],
-                $data['estado'] ?? 'Activo'
-            ];
-            
-            // Agregar campos de teléfono si están presentes
-            if (isset($data['extension_telefono']) || isset($data['clave_webrtc']) || isset($data['telefono_activo'])) {
-                $sql .= ", extension_telefono, clave_webrtc, telefono_activo";
-                $placeholders .= ", ?, ?, ?";
-                $params[] = $data['extension_telefono'] ?? '';
-                $params[] = $data['clave_webrtc'] ?? '';
-                $params[] = $data['telefono_activo'] ?? 'No';
+            if (empty($data['nombre_completo']) || empty($data['cedula']) || empty($data['usuario']) || empty($data['contrasena']) || empty($data['rol'])) {
+                throw new Exception('Faltan campos obligatorios para crear el usuario.');
             }
-            
-            $sql .= ") VALUES ($placeholders)";
-            error_log("DEBUG createUsuario - SQL: " . $sql);
 
+            $sql = "INSERT INTO usuarios (cedula, nombre, usuario, contrasena_hash, estension, sip_password, estado, rol)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
             $stmt = $this->pdo->prepare($sql);
 
-            // Validar datos requeridos
-            if (empty($data['nombre_completo']) || empty($data['cedula']) || empty($data['usuario']) || empty($data['contrasena']) || empty($data['rol'])) {
-                $errorMsg = "Datos requeridos faltantes - nombre_completo: " . ($data['nombre_completo'] ?? 'null') .
-                           ", cedula: " . ($data['cedula'] ?? 'null') .
-                           ", usuario: " . ($data['usuario'] ?? 'null') .
-                           ", contrasena: " . ($data['contrasena'] ?? 'null') .
-                           ", rol: " . ($data['rol'] ?? 'null');
-                error_log("DEBUG createUsuario - " . $errorMsg);
-                throw new Exception($errorMsg);
-            }
+            $cedula = (string)$data['cedula'];
+            $nombre = (string)$data['nombre_completo'];
+            $usuario = (string)$data['usuario'];
+            $hash = password_hash((string)$data['contrasena'], PASSWORD_DEFAULT);
+            $extension = (string)($data['extension_telefono'] ?? '');
+            $clave = (string)($data['clave_webrtc'] ?? '');
+            $estadoDb = $this->normalizarEstadoParaDB((string)($data['estado'] ?? 'Activo'));
+            $rolDb = $this->normalizarRolParaDB((string)$data['rol']);
 
-            error_log("DEBUG createUsuario - Contraseña hasheada generada");
-
-            error_log("DEBUG createUsuario - Parámetros para execute: " . json_encode($params));
-
-            $result = $stmt->execute($params);
-            error_log("DEBUG createUsuario - Resultado de execute: " . ($result ? 'true' : 'false'));
-
-            if ($result) {
-                $lastInsertId = $this->pdo->lastInsertId();
-                error_log("DEBUG createUsuario - Usuario creado exitosamente con ID: " . $lastInsertId);
-                return $lastInsertId;
-            } else {
-                $errorInfo = $stmt->errorInfo();
-                error_log("DEBUG createUsuario - Error en execute: " . json_encode($errorInfo));
-                return false;
-            }
+            $ok = $stmt->execute([$cedula, $nombre, $usuario, $hash, $extension, $clave, $estadoDb, $rolDb]);
+            return $ok ? $cedula : false;
         } catch (Exception $e) {
-            error_log("DEBUG createUsuario - Excepción: " . $e->getMessage());
             error_log("Error en createUsuario: " . $e->getMessage());
             return false;
         }
@@ -206,32 +272,26 @@ class UsuarioModel {
 
     public function updateUsuario($id, $data) {
         try {
-            // Construir SQL dinámicamente
-            $sql = "UPDATE usuarios SET nombre_completo = ?, cedula = ?, usuario = ?, rol = ?, estado = ?";
+            // En el dump no se debe cambiar la PK `cedula` sin un proceso de migración.
+            // Mantendremos la fila identificada por $id (cedula original).
+            $sql = "UPDATE usuarios SET nombre = ?, usuario = ?, rol = ?, estado = ?, estension = ?, sip_password = ?";
             $params = [
-                $data['nombre_completo'], 
-                $data['cedula'], 
-                $data['usuario'], 
-                $data['rol'], 
-                $data['estado'] ?? 'Activo'
+                (string)($data['nombre_completo'] ?? ''),
+                (string)($data['usuario'] ?? ''),
+                $this->normalizarRolParaDB((string)($data['rol'] ?? 'asesor')),
+                $this->normalizarEstadoParaDB((string)($data['estado'] ?? 'Activo')),
+                (string)($data['extension_telefono'] ?? ''),
+                (string)($data['clave_webrtc'] ?? '')
             ];
             
             // Si se proporciona una nueva contraseña, incluirla en la actualización
             if (!empty($data['contrasena'])) {
-                $sql .= ", contrasena = ?";
-                $params[] = password_hash($data['contrasena'], PASSWORD_DEFAULT);
+                $sql .= ", contrasena_hash = ?";
+                $params[] = password_hash((string)$data['contrasena'], PASSWORD_DEFAULT);
             }
-            
-            // Agregar campos de teléfono si están presentes
-            if (isset($data['extension_telefono']) || isset($data['clave_webrtc']) || isset($data['telefono_activo'])) {
-                $sql .= ", extension_telefono = ?, clave_webrtc = ?, telefono_activo = ?";
-                $params[] = $data['extension_telefono'] ?? '';
-                $params[] = $data['clave_webrtc'] ?? '';
-                $params[] = $data['telefono_activo'] ?? 'No';
-            }
-            
-            $sql .= " WHERE id = ?";
-            $params[] = $id;
+
+            $sql .= " WHERE cedula = ?";
+            $params[] = (string)$id;
             
             $stmt = $this->pdo->prepare($sql);
             return $stmt->execute($params);
@@ -240,66 +300,40 @@ class UsuarioModel {
             return false;
         }
     }
-    
-    /**
-     * Detecta si la base de datos usa contraseñas planas o hasheadas
-     * Analiza las contraseñas existentes para determinar el patrón
-     */
-    private function shouldUsePlainPasswords() {
-        try {
-            $stmt = $this->pdo->prepare("SELECT contrasena FROM usuarios WHERE contrasena IS NOT NULL AND contrasena != '' LIMIT 5");
-            $stmt->execute();
-            $passwords = $stmt->fetchAll(PDO::FETCH_COLUMN);
-            
-            $hashedCount = 0;
-            $plainCount = 0;
-            
-            foreach ($passwords as $password) {
-                if (strpos($password, '$2y$') === 0) {
-                    $hashedCount++;
-                } else {
-                    $plainCount++;
-                }
-            }
-            
-            // Si hay más contraseñas planas que hasheadas, usar planas
-            return $plainCount >= $hashedCount;
-        } catch (PDOException $e) {
-            error_log("Error detectando tipo de contraseñas: " . $e->getMessage());
-            // Por defecto, usar contraseñas hasheadas para mayor seguridad
-            return false;
-        }
-    }
 
     public function toggleEstadoUsuario($id) {
         $usuario = $this->getUsuarioById($id);
         if ($usuario) {
-            $nuevo_estado = ($usuario['estado'] == 'Activo') ? 'Inactivo' : 'Activo';
-            $sql = "UPDATE usuarios SET estado = ? WHERE id = ?";
+            $nuevoEstadoUi = ($usuario['estado'] === 'Activo') ? 'Inactivo' : 'Activo';
+            $nuevoEstadoDb = $this->normalizarEstadoParaDB($nuevoEstadoUi);
+            $sql = "UPDATE usuarios SET estado = ? WHERE cedula = ?";
             $stmt = $this->pdo->prepare($sql);
-            return $stmt->execute([$nuevo_estado, $id]);
+            return $stmt->execute([$nuevoEstadoDb, (string)$id]);
         }
         return false;
     }
 
     public function getAsesores() {
-        $stmt = $this->pdo->prepare("SELECT * FROM usuarios WHERE rol = 'asesor' AND estado = 'Activo' ORDER BY nombre_completo");
+        $stmt = $this->pdo->prepare("SELECT * FROM usuarios WHERE rol = 'asesor' AND estado = 'activo' ORDER BY nombre");
         $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return array_values(array_filter(array_map([$this, 'mapUsuarioRow'], $rows)));
     }
     
     /**
      * Obtiene los asesores asignados a un coordinador específico
      */
     public function getAsesoresByCoordinador($coordinador_id) {
-        $sql = "SELECT u.*, aac.fecha_asignacion, aac.estado as estado_asignacion
+        // Tabla real del dump: asignaciones_cordinador (con cédulas).
+        $sql = "SELECT u.*, ac.fecha_asignacion, ac.estado as estado_asignacion
                 FROM usuarios u
-                JOIN asignaciones_asesor_coordinador aac ON u.id = aac.asesor_id
-                WHERE aac.coordinador_id = ? AND aac.estado = 'Activa' AND u.estado = 'Activo'
-                ORDER BY aac.fecha_asignacion DESC, u.nombre_completo";
+                JOIN asignaciones_cordinador ac ON u.cedula = ac.asesor_cedula
+                WHERE ac.cordinador_cedula = ? AND ac.estado = 'activo' AND u.estado = 'activo'
+                ORDER BY ac.fecha_asignacion DESC, u.nombre";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$coordinador_id]);
-        $asesores = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $stmt->execute([(string)$coordinador_id]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $asesores = array_values(array_filter(array_map([$this, 'mapUsuarioRow'], $rows)));
         
         // NO devolver todos los asesores si no hay asignaciones
         // Solo devolver los que estén formalmente asignados
@@ -310,17 +344,18 @@ class UsuarioModel {
      * Obtiene solo los asesores que NO están asignados a ningún coordinador
      */
     public function getAsesoresDisponibles() {
-        $sql = "SELECT u.* FROM usuarios u 
-                WHERE u.rol = 'asesor' AND u.estado = 'Activo' 
-                AND u.id NOT IN (
-                    SELECT DISTINCT aac.asesor_id 
-                    FROM asignaciones_asesor_coordinador aac 
-                    WHERE aac.estado = 'Activa'
+        $sql = "SELECT u.* FROM usuarios u
+                WHERE u.rol = 'asesor' AND u.estado = 'activo'
+                AND u.cedula NOT IN (
+                    SELECT DISTINCT ac.asesor_cedula
+                    FROM asignaciones_cordinador ac
+                    WHERE ac.estado = 'activo'
                 )
-                ORDER BY u.nombre_completo";
+                ORDER BY u.nombre";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return array_values(array_filter(array_map([$this, 'mapUsuarioRow'], $rows)));
     }
     
     /**
@@ -329,28 +364,23 @@ class UsuarioModel {
      */
     public function asignarAsesorACoordinador($asesorId, $coordinadorId) {
         try {
-            // 1. DESACTIVAR TODAS LAS ASIGNACIONES PREVIAS DEL ASESOR (sin importar el coordinador)
-            $sql = "UPDATE asignaciones_asesor_coordinador SET estado = 'Inactiva' WHERE asesor_id = ?";
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([$asesorId]);
-            
-            // 2. Verificar si ya existe la asignación al coordinador actual
-            $sql = "SELECT id FROM asignaciones_asesor_coordinador WHERE asesor_id = ? AND coordinador_id = ?";
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute([$asesorId, $coordinadorId]);
+            // 1. Desactivar cualquier asignación previa activa del asesor.
+            $stmt = $this->pdo->prepare("UPDATE asignaciones_cordinador SET estado = 'inactivo' WHERE asesor_cedula = ?");
+            $stmt->execute([(string)$asesorId]);
+
+            // 2. Si ya existe relación con este coordinador, reactivar; si no, crear fila.
+            $stmt = $this->pdo->prepare("SELECT id_asignacion FROM asignaciones_cordinador WHERE asesor_cedula = ? AND cordinador_cedula = ? LIMIT 1");
+            $stmt->execute([(string)$asesorId, (string)$coordinadorId]);
             $existing = $stmt->fetch(PDO::FETCH_ASSOC);
-            
+
             if ($existing) {
-                // 3a. Reactivar asignación existente
-                $sql = "UPDATE asignaciones_asesor_coordinador SET estado = 'Activa', fecha_asignacion = NOW() WHERE id = ?";
-                $stmt = $this->pdo->prepare($sql);
-                return $stmt->execute([$existing['id']]);
-            } else {
-                // 3b. Crear nueva asignación
-                $sql = "INSERT INTO asignaciones_asesor_coordinador (asesor_id, coordinador_id, estado, fecha_asignacion) VALUES (?, ?, 'Activa', NOW())";
-                $stmt = $this->pdo->prepare($sql);
-                return $stmt->execute([$asesorId, $coordinadorId]);
+                $stmt = $this->pdo->prepare("UPDATE asignaciones_cordinador SET estado = 'activo', fecha_asignacion = NOW() WHERE id_asignacion = ?");
+                return $stmt->execute([(int)$existing['id_asignacion']]);
             }
+
+            $stmt = $this->pdo->prepare("INSERT INTO asignaciones_cordinador (cordinador_cedula, asesor_cedula, estado, fecha_asignacion, fecha_creacion)
+                                          VALUES (?, ?, 'activo', NOW(), NOW())");
+            return $stmt->execute([(string)$coordinadorId, (string)$asesorId]);
         } catch (Exception $e) {
             error_log("Error en asignarAsesorACoordinador: " . $e->getMessage());
             return false;
@@ -361,25 +391,28 @@ class UsuarioModel {
      * Libera un asesor de un coordinador
      */
     public function liberarAsesorDeCoordinador($asesorId, $coordinadorId) {
-        $sql = "UPDATE asignaciones_asesor_coordinador SET estado = 'Inactiva' WHERE asesor_id = ? AND coordinador_id = ? AND estado = 'Activa'";
+        $sql = "UPDATE asignaciones_cordinador
+                SET estado = 'inactivo'
+                WHERE asesor_cedula = ? AND cordinador_cedula = ? AND estado = 'activo'";
         $stmt = $this->pdo->prepare($sql);
-        return $stmt->execute([$asesorId, $coordinadorId]);
+        return $stmt->execute([(string)$asesorId, (string)$coordinadorId]);
     }
     
     public function getCoordinadores() {
-        $stmt = $this->pdo->prepare("SELECT * FROM usuarios WHERE rol = 'coordinador' AND estado = 'Activo' ORDER BY nombre_completo");
+        $stmt = $this->pdo->prepare("SELECT * FROM usuarios WHERE rol = 'cordinador' AND estado = 'activo' ORDER BY nombre");
         $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return array_values(array_filter(array_map([$this, 'mapUsuarioRow'], $rows)));
     }
 
     /**
      * Verifica si un asesor está asignado a un coordinador específico
      */
     public function isAsesorAsignadoACoordinador($asesorId, $coordinadorId) {
-        $sql = "SELECT id FROM asignaciones_asesor_coordinador 
-                WHERE asesor_id = ? AND coordinador_id = ? AND estado = 'Activa'";
+        $sql = "SELECT id_asignacion FROM asignaciones_cordinador 
+                WHERE asesor_cedula = ? AND cordinador_cedula = ? AND estado = 'activo'";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$asesorId, $coordinadorId]);
+        $stmt->execute([(string)$asesorId, (string)$coordinadorId]);
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
         return $result !== false;
     }
@@ -388,10 +421,10 @@ class UsuarioModel {
      * Verifica si un coordinador tiene asesores asignados
      */
     public function tieneCoordinadorAsesoresAsignados($coordinadorId) {
-        $sql = "SELECT COUNT(*) as total FROM asignaciones_asesor_coordinador 
-                WHERE coordinador_id = ? AND estado = 'Activa'";
+        $sql = "SELECT COUNT(*) as total FROM asignaciones_cordinador 
+                WHERE cordinador_cedula = ? AND estado = 'activo'";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$coordinadorId]);
+        $stmt->execute([(string)$coordinadorId]);
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
         return $result['total'] > 0;
     }
@@ -410,7 +443,7 @@ class UsuarioModel {
      */
     public function getTotalUsuariosByRol($rol) {
         $stmt = $this->pdo->prepare("SELECT COUNT(*) as total FROM usuarios WHERE rol = ?");
-        $stmt->execute([$rol]);
+        $stmt->execute([$this->normalizarRolParaDB((string)$rol)]);
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
         return $result['total'];
     }
@@ -420,7 +453,7 @@ class UsuarioModel {
      */
     public function getTotalUsuariosByEstado($estado) {
         $stmt = $this->pdo->prepare("SELECT COUNT(*) as total FROM usuarios WHERE estado = ?");
-        $stmt->execute([$estado]);
+        $stmt->execute([$this->normalizarEstadoParaDB((string)$estado)]);
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
         return $result['total'];
     }
@@ -436,7 +469,8 @@ class UsuarioModel {
             LIMIT $limit
         ");
         $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return array_values(array_filter(array_map([$this, 'mapUsuarioRow'], $rows)));
     }
 
 
@@ -446,13 +480,13 @@ class UsuarioModel {
     public function getAsignacionesAsesorCoordinador() {
         $stmt = $this->pdo->query("
             SELECT 
-                aac.*,
-                u_asesor.nombre_completo as asesor_nombre,
-                u_coordinador.nombre_completo as coordinador_nombre
-            FROM asignaciones_asesor_coordinador aac
-            LEFT JOIN usuarios u_asesor ON aac.asesor_id = u_asesor.id
-            LEFT JOIN usuarios u_coordinador ON aac.coordinador_id = u_coordinador.id
-            ORDER BY aac.fecha_asignacion DESC
+                ac.*,
+                u_asesor.nombre as asesor_nombre,
+                u_coordinador.nombre as coordinador_nombre
+            FROM asignaciones_cordinador ac
+            LEFT JOIN usuarios u_asesor ON ac.asesor_cedula = u_asesor.cedula
+            LEFT JOIN usuarios u_coordinador ON ac.cordinador_cedula = u_coordinador.cedula
+            ORDER BY ac.fecha_asignacion DESC
         ");
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
@@ -461,9 +495,9 @@ class UsuarioModel {
      * Toggle del estado de un usuario
      */
     public function toggleUsuario($id) {
-        $sql = "UPDATE usuarios SET estado = CASE WHEN estado = 'Activo' THEN 'Inactivo' ELSE 'Activo' END WHERE id = ?";
+        $sql = "UPDATE usuarios SET estado = CASE WHEN estado = 'activo' THEN 'inactivo' ELSE 'activo' END WHERE cedula = ?";
         $stmt = $this->pdo->prepare($sql);
-        return $stmt->execute([$id]);
+        return $stmt->execute([(string)$id]);
     }
 }
 ?>

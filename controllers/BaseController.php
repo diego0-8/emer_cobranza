@@ -14,11 +14,17 @@ require_once __DIR__ . '/../models/FacturacionModel.php';
 
 class BaseController {
     protected $pdo;
+    /** @var UsuarioModel */
     protected $usuarioModel;
+    /** @var ClienteModel */
     protected $clienteModel;
+    /** @var GestionModel */
     protected $gestionModel;
+    /** @var TareaModel */
     protected $tareaModel;
+    /** @var CargaExcelModel */
     protected $cargaExcelModel;
+    /** @var FacturacionModel */
     protected $facturacionModel;
 
     public function __construct($pdo) {

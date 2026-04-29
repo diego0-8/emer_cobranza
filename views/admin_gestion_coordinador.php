@@ -282,16 +282,21 @@
         
         <!-- Lista de Asesores Asignados -->
         <div class="asesores-section">
+            <?php
+            $asesoresAsignadosActivos = array_values(array_filter(($asesoresAsignados ?? []), function ($a) {
+                return ($a['estado'] ?? '') === 'Activo';
+            }));
+            ?>
             <h2 class="section-title">
                 👥 Asesores Asignados
                 <span style="font-size: 1rem; color: #6b7280; font-weight: 400;">
-                    (<?php echo $metricas['total_asesores_asignados']; ?> asesores)
+                    (<?php echo count($asesoresAsignadosActivos); ?> asesores)
                 </span>
             </h2>
             
-            <?php if (!empty($asesoresAsignados)): ?>
+            <?php if (!empty($asesoresAsignadosActivos)): ?>
                 <div class="asesores-grid">
-                    <?php foreach ($asesoresAsignados as $asesor): ?>
+                    <?php foreach ($asesoresAsignadosActivos as $asesor): ?>
                         <div class="asesor-card">
                             <div class="asesor-header">
                                 <div class="asesor-avatar">

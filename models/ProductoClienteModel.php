@@ -18,15 +18,15 @@ class ProductoClienteModel {
     public function getProductosByCliente($clienteId, $carga_excel_id = null) {
         try {
             $sql = "SELECT 
-                        o.id,
+                        o.id_obligacion AS id,
                         o.cliente_id,
                         o.producto as nombre_producto,
                         o.saldo_k_obligacion as valor_producto,
                         o.estado as estado_producto,
                         o.fecha_creacion,
                         o.fecha_actualizacion as ultima_gestion,
-                        c.asesor_id,
-                        u.nombre_completo as asesor_nombre,
+                        NULL AS asesor_id,
+                        NULL AS asesor_nombre,
                         o.obligacion,
                         o.capital_cliente,
                         o.pago_total_obligacion,
@@ -34,8 +34,7 @@ class ProductoClienteModel {
                         o.propiedad,
                         o.medicion
                     FROM obligaciones o
-                    JOIN clientes c ON o.cliente_id = c.id
-                    LEFT JOIN usuarios u ON c.asesor_id = u.id
+                    JOIN clientes c ON o.cliente_id = c.id_cliente
                     WHERE o.cliente_id = ? AND o.producto IS NOT NULL";
             
             $params = [$clienteId];
@@ -43,7 +42,7 @@ class ProductoClienteModel {
             // CRÍTICO: Filtrar por carga_excel_id si se proporciona
             // Esto asegura que solo se muestren los productos de la base de datos asignada
             if ($carga_excel_id !== null) {
-                $sql .= " AND c.carga_excel_id = ?";
+                $sql .= " AND c.base_id = ?";
                 $params[] = $carga_excel_id;
             }
             
@@ -250,6 +249,14 @@ class ProductoClienteModel {
      * Obtiene estadísticas de productos por asesor
      */
     public function getEstadisticasProductosByAsesor($asesorId, $fechaInicio = null, $fechaFin = null) {
+        $vacias = [
+            'total_productos' => 0,
+            'productos_pagados' => 0,
+            'productos_pendientes' => 0,
+            'productos_rechazados' => 0,
+            'total_recaudado' => 0,
+            'promedio_pago' => 0,
+        ];
         try {
             $whereClause = "WHERE pc.asesor_id = ?";
             $params = [$asesorId];
@@ -272,10 +279,19 @@ class ProductoClienteModel {
             
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute($params);
-            return $stmt->fetch(PDO::FETCH_ASSOC);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row) {
+                return $vacias;
+            }
+            foreach ($vacias as $k => $v) {
+                if (!array_key_exists($k, $row) || $row[$k] === null) {
+                    $row[$k] = 0;
+                }
+            }
+            return $row;
         } catch (Exception $e) {
             error_log("Error obteniendo estadísticas de productos: " . $e->getMessage());
-            return [];
+            return $vacias;
         }
     }
 
