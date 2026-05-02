@@ -1,0 +1,13 @@
+# Logs y archivos generados
+logs/
+*.log
+
+# Debug artefactos
+debug-*.log
+
+# Cursor / IDE
+.cursor/
+
+# OS
+Thumbs.db
+Desktop.ini
