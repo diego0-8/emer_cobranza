@@ -2871,9 +2871,10 @@ class CoordinadorController extends BaseController {
      */
     public function reporteTMO() {
         $page_title = "Reporte TMO - Tiempo de Sesión y Pausas";
+        $coordinador_id = $_SESSION['user_id'];
         
-        // Obtener TODOS los asesores activos (no solo los asignados al coordinador)
-        $asesores = $this->usuarioModel->getAsesores();
+        // Sincronizado con el resto del módulo: el coordinador solo debe ver sus asesores asignados.
+        $asesores = $this->usuarioModel->getAsesoresByCoordinador($coordinador_id);
         
         // Obtener filtros de fechas
         $fecha_inicio = $_GET['fecha_inicio'] ?? date('Y-m-d', strtotime('-30 days'));
@@ -2893,6 +2894,23 @@ class CoordinadorController extends BaseController {
         }
         
         try {
+            // #region agent log 5eeaae exportarReporteTMO helper
+            $dbgPath_5eeaae = __DIR__ . '/../debug-5eeaae.log';
+            $dbg_5eeaae = function(string $hypothesisId, string $location, string $message, array $data = [], string $runId = 'pre-fix') use ($dbgPath_5eeaae) {
+                try {
+                    @file_put_contents($dbgPath_5eeaae, json_encode([
+                        'sessionId' => '5eeaae',
+                        'runId' => $runId,
+                        'hypothesisId' => $hypothesisId,
+                        'location' => $location,
+                        'message' => $message,
+                        'data' => $data,
+                        'timestamp' => (int) round(microtime(true) * 1000),
+                    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND | LOCK_EX);
+                } catch (Throwable $e) {}
+            };
+            // #endregion
+
             // Desactivar la salida de errores para evitar que se mezclen con el CSV
             error_reporting(0);
             ini_set('display_errors', 0);
@@ -2906,11 +2924,143 @@ class CoordinadorController extends BaseController {
             if (!isset($_SESSION['user_role']) || $_SESSION['user_role'] !== 'coordinador') {
                 throw new Exception('Acceso denegado. Se requiere rol de coordinador.');
             }
+            $coordinador_id = $_SESSION['user_id'];
             
             // Obtener filtros
             $fecha_inicio = $_GET['fecha_inicio'] ?? date('Y-m-d', strtotime('-30 days'));
             $fecha_fin = $_GET['fecha_fin'] ?? date('Y-m-d');
             $asesor_id = $_GET['asesor_id'] ?? '';
+
+            // #region agent log 5eeaae exportarReporteTMO entry
+            $dbg_5eeaae('H1', 'controllers/CoordinadorController.php:exportarReporteTMO:entry', 'entry', [
+                'coordinador_id_suffix' => substr((string)$coordinador_id, -3),
+                'fecha_inicio' => (string)$fecha_inicio,
+                'fecha_fin' => (string)$fecha_fin,
+                'asesor_id_present' => $asesor_id !== '' ? 1 : 0,
+                'asesor_id_suffix' => $asesor_id !== '' ? substr((string)$asesor_id, -3) : '',
+            ]);
+            // #endregion
+
+        $tableExists_5eeaae = function (string $table): bool {
+            try {
+                $q = $this->pdo->query('SHOW TABLES LIKE ' . $this->pdo->quote($table));
+
+                return $q && $q->rowCount() > 0;
+            } catch (Throwable $e) {
+                return false;
+            }
+        };
+        $hasSesionesTrabajo_5eeaae = $tableExists_5eeaae('sesiones_trabajo');
+        $hasTiempos_5eeaae = $tableExists_5eeaae('tiempos');
+
+        if (!$hasSesionesTrabajo_5eeaae && !$hasTiempos_5eeaae) {
+            throw new Exception('No existe la tabla sesiones_trabajo ni la tabla tiempos; no se puede generar el reporte TMO.');
+        }
+
+        if (!$hasSesionesTrabajo_5eeaae && $hasTiempos_5eeaae) {
+            // #region agent log 5eeaae datasource
+            $dbg_5eeaae('H6', 'controllers/CoordinadorController.php:exportarReporteTMO:datasource', 'using tiempos table', [
+                'hasSesionesTrabajo' => 0,
+                'hasTiempos' => 1,
+            ], 'post-fix');
+            // #endregion
+
+            $filename = "Reporte_TMO_{$fecha_inicio}_a_{$fecha_fin}.csv";
+            while (ob_get_level()) {
+                ob_end_clean();
+            }
+            header('Content-Type: text/csv; charset=utf-8');
+            header('Content-Disposition: attachment; filename="' . $filename . '"');
+            header('Cache-Control: max-age=0');
+            header('Pragma: no-cache');
+            header('Expires: 0');
+
+            $output = fopen('php://output', 'w');
+            fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
+
+            $headers = [
+                'Fecha y Hora Inicio Sesión',
+                'Asesor',
+                'Hora Fin Sesión',
+                'Tiempo en Sesión (HH:MM:SS)',
+                'Motivo',
+                'Duración Pausa (HH:MM:SS)',
+            ];
+            fputcsv($output, $headers);
+
+            $tiposBreakTmo = [
+                'baño' => 'Baño',
+                'almuerzo' => 'Almuerzo',
+                'break' => 'Break',
+                'mantenimiento' => 'Mantenimiento',
+                'actividad_extra' => 'Actividad Extra',
+                'pausa_activa' => 'Pausa Activa',
+            ];
+            $dbTipoToUiKeyTmo = [
+                'capacitacion' => 'mantenimiento',
+                'retroalimentacion' => 'actividad_extra',
+                'sesion' => 'pausa_activa',
+            ];
+            $fmtDurTmo = static function (int $sec): string {
+                $sec = max(0, $sec);
+
+                return sprintf('%02d:%02d:%02d', intdiv($sec, 3600), intdiv($sec % 3600, 60), $sec % 60);
+            };
+
+            $sqlTiempos = "SELECT t.id_tiempo, t.asesor_cedula, u.nombre AS asesor_nombre, t.tipo_registro, t.hora_inicio, t.hora_fin, t.estado
+                FROM tiempos t
+                INNER JOIN usuarios u ON u.cedula = t.asesor_cedula AND u.rol = 'asesor'
+                INNER JOIN asignaciones_cordinador ac ON u.cedula = ac.asesor_cedula
+                    AND ac.cordinador_cedula = ? AND ac.estado = 'activo'
+                WHERE DATE(t.hora_inicio) BETWEEN ? AND ?";
+            $paramsTiempos = [(string)$coordinador_id, $fecha_inicio, $fecha_fin];
+            if ($asesor_id !== '') {
+                $sqlTiempos .= ' AND t.asesor_cedula = ?';
+                $paramsTiempos[] = (string)$asesor_id;
+            }
+            $sqlTiempos .= ' ORDER BY t.hora_inicio DESC';
+
+            $stmtTiempos = $this->pdo->prepare($sqlTiempos);
+            $stmtTiempos->execute($paramsTiempos);
+            $filasTiempos = $stmtTiempos->fetchAll(PDO::FETCH_ASSOC);
+
+            // #region agent log 5eeaae tiempos rows
+            $dbg_5eeaae('H7', 'controllers/CoordinadorController.php:exportarReporteTMO:tiempos_rows', 'tiempos fetched', [
+                'tiempos_count' => is_array($filasTiempos) ? count($filasTiempos) : -1,
+            ], 'post-fix');
+            // #endregion
+
+            foreach ($filasTiempos as $r) {
+                $tipoDb = (string)($r['tipo_registro'] ?? '');
+                $uiKey = $dbTipoToUiKeyTmo[$tipoDb] ?? $tipoDb;
+                $motivo = $tiposBreakTmo[$uiKey] ?? $tipoDb;
+
+                $hi = $r['hora_inicio'] ?? '';
+                $hf = $r['hora_fin'] ?? '';
+                $tHi = $hi ? strtotime((string)$hi) : false;
+                $tHf = $hf ? strtotime((string)$hf) : false;
+                $secPause = ($tHi !== false && $tHf !== false) ? max(0, (int)$tHf - (int)$tHi) : 0;
+
+                fputcsv($output, [
+                    $hi ? date('Y-m-d H:i:s', strtotime((string)$hi)) : '',
+                    (string)($r['asesor_nombre'] ?? ''),
+                    $hf ? date('H:i:s', strtotime((string)$hf)) : '',
+                    '00:00:00',
+                    $motivo,
+                    $fmtDurTmo($secPause),
+                ]);
+            }
+
+            fclose($output);
+            exit;
+        }
+
+        // #region agent log 5eeaae datasource legacy
+        $dbg_5eeaae('H6', 'controllers/CoordinadorController.php:exportarReporteTMO:datasource', 'using sesiones_trabajo path', [
+            'hasSesionesTrabajo' => 1,
+            'hasTiempos' => $hasTiempos_5eeaae ? 1 : 0,
+        ], 'post-fix');
+        // #endregion
         
         // Detectar qué columna usa la tabla (usuario_id o asesor_id)
         $sqlCheckColumn = "SHOW COLUMNS FROM sesiones_trabajo LIKE 'asesor_id'";
@@ -2926,12 +3076,22 @@ class CoordinadorController extends BaseController {
         $tieneTiempoMinutos = in_array('tiempo_total_minutos', $columnasTiempo);
         $tieneDuracionMinutos = in_array('duracion_minutos', $columnasTiempo);
         $tieneEstado = in_array('estado', $columnasTiempo);
+
+        // #region agent log 5eeaae schema detections
+        $dbg_5eeaae('H2', 'controllers/CoordinadorController.php:exportarReporteTMO:schema', 'schema detected', [
+            'columnaAsesor' => $columnaAsesor,
+            'tieneTiempoSegundos' => $tieneTiempoSegundos ? 1 : 0,
+            'tieneTiempoMinutos' => $tieneTiempoMinutos ? 1 : 0,
+            'tieneDuracionMinutos' => $tieneDuracionMinutos ? 1 : 0,
+            'tieneEstado' => $tieneEstado ? 1 : 0,
+        ]);
+        // #endregion
         
         // Construir consulta adaptada a la estructura real de la base de datos
         $sql = "SELECT 
                     s.id as sesion_id,
                     s.$columnaAsesor as asesor_id,
-                    u.nombre_completo as asesor_nombre,
+                    u.nombre as asesor_nombre,
                     u.cedula as asesor_cedula,
                     s.fecha_inicio,
                     s.fecha_fin,";
@@ -2959,10 +3119,13 @@ class CoordinadorController extends BaseController {
         
         $sql .= " FROM sesiones_trabajo s
                 INNER JOIN usuarios u ON s.$columnaAsesor = u.id
+                INNER JOIN asignaciones_cordinador ac ON u.cedula = ac.asesor_cedula
                 WHERE u.rol = 'asesor'
+                AND ac.cordinador_cedula = ?
+                AND ac.estado = 'activo'
                 AND DATE(s.fecha_inicio) BETWEEN ? AND ?";
         
-        $params = [$fecha_inicio, $fecha_fin];
+        $params = [(string)$coordinador_id, $fecha_inicio, $fecha_fin];
         
         // Filtrar por asesor específico si se seleccionó
         if (!empty($asesor_id)) {
@@ -2970,11 +3133,21 @@ class CoordinadorController extends BaseController {
             $params[] = $asesor_id;
         }
         
-        $sql .= " ORDER BY s.fecha_inicio DESC, u.nombre_completo";
+        $sql .= " ORDER BY s.fecha_inicio DESC, u.nombre";
         
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
         $sesiones = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // #region agent log 5eeaae sesiones result
+        $firstSesion = is_array($sesiones) && count($sesiones) > 0 ? $sesiones[0] : [];
+        $dbg_5eeaae('H3', 'controllers/CoordinadorController.php:exportarReporteTMO:sesiones', 'sesiones fetched', [
+            'sesiones_count' => is_array($sesiones) ? count($sesiones) : -1,
+            'first_has_fecha_inicio' => isset($firstSesion['fecha_inicio']) ? 1 : 0,
+            'first_has_fecha_fin' => isset($firstSesion['fecha_fin']) ? 1 : 0,
+            'first_tiempo_total_segundos' => isset($firstSesion['tiempo_total_segundos']) ? (int)($firstSesion['tiempo_total_segundos'] ?? 0) : null,
+        ]);
+        // #endregion
         
         // Generar nombre del archivo
         $filename = "Reporte_TMO_{$fecha_inicio}_a_{$fecha_fin}.csv";
@@ -3058,14 +3231,17 @@ class CoordinadorController extends BaseController {
             $sqlTodosBreaks .= " NULL as sesion_trabajo_id,";
         }
         
-        $sqlTodosBreaks .= " u.nombre_completo as asesor_nombre,
+        $sqlTodosBreaks .= " u.nombre as asesor_nombre,
                             u.cedula as asesor_cedula
                          FROM breaks_asesor b
                          INNER JOIN usuarios u ON b.asesor_id = u.id
+                         INNER JOIN asignaciones_cordinador ac ON u.cedula = ac.asesor_cedula
                          WHERE u.rol = 'asesor'
+                         AND ac.cordinador_cedula = ?
+                         AND ac.estado = 'activo'
                          AND DATE(b.fecha_inicio) BETWEEN ? AND ?";
         
-        $paramsBreaks = [$fecha_inicio, $fecha_fin];
+        $paramsBreaks = [(string)$coordinador_id, $fecha_inicio, $fecha_fin];
         
         // Filtrar por asesor específico si se seleccionó
         if (!empty($asesor_id)) {
@@ -3078,6 +3254,16 @@ class CoordinadorController extends BaseController {
         $stmtTodosBreaks = $this->pdo->prepare($sqlTodosBreaks);
         $stmtTodosBreaks->execute($paramsBreaks);
         $todosBreaks = $stmtTodosBreaks->fetchAll(PDO::FETCH_ASSOC);
+
+        // #region agent log 5eeaae breaks result
+        $firstBreak = is_array($todosBreaks) && count($todosBreaks) > 0 ? $todosBreaks[0] : [];
+        $dbg_5eeaae('H4', 'controllers/CoordinadorController.php:exportarReporteTMO:breaks', 'breaks fetched', [
+            'breaks_count' => is_array($todosBreaks) ? count($todosBreaks) : -1,
+            'tieneSesionTrabajoId' => $tieneSesionTrabajoId ? 1 : 0,
+            'tieneDuracionSegundos' => $tieneDuracionSegundos ? 1 : 0,
+            'first_tipo' => isset($firstBreak['tipo']) ? (string)$firstBreak['tipo'] : null,
+        ]);
+        // #endregion
         
         // Crear un mapa de sesiones por ID para acceso rápido
         $sesionesMap = [];
@@ -3228,6 +3414,13 @@ class CoordinadorController extends BaseController {
         exit;
         
         } catch (Exception $e) {
+            // #region agent log 5eeaae exception
+            if (isset($dbg_5eeaae) && is_callable($dbg_5eeaae)) {
+                $dbg_5eeaae('H5', 'controllers/CoordinadorController.php:exportarReporteTMO:catch', 'exception', [
+                    'error' => (string)$e->getMessage(),
+                ]);
+            }
+            // #endregion
             // En caso de error, limpiar output y redirigir
             while (ob_get_level()) {
                 ob_end_clean();

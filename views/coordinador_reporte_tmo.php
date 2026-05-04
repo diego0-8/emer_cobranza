@@ -1,6 +1,9 @@
 <?php
 $page_title = $page_title ?? '';
 $asesores = isset($asesores) && is_array($asesores) ? $asesores : [];
+$fecha_inicio = isset($fecha_inicio) ? (string)$fecha_inicio : (string)($_GET['fecha_inicio'] ?? date('Y-m-d', strtotime('-30 days')));
+$fecha_fin = isset($fecha_fin) ? (string)$fecha_fin : (string)($_GET['fecha_fin'] ?? date('Y-m-d'));
+$asesor_id = isset($asesor_id) ? (string)$asesor_id : (string)($_GET['asesor_id'] ?? '');
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -8,7 +11,7 @@ $asesores = isset($asesores) && is_array($asesores) ? $asesores : [];
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <?php require_once __DIR__ . '/shared_navbar.php'; renderPageHead($page_title ?? ''); ?>
-    <?php require_once 'shared_styles.php'; ?>
+    <?php require_once __DIR__ . '/shared_styles.php'; ?>
     <style>
         body {
             background-color: #f8f9fa;
@@ -250,7 +253,7 @@ $asesores = isset($asesores) && is_array($asesores) ? $asesores : [];
 </head>
 <body>
     <?php 
-    require_once 'shared_navbar.php';
+    require_once __DIR__ . '/shared_navbar.php';
     echo getNavbar('Reporte TMO', $_SESSION['user_role'] ?? ''); 
     ?>
 
@@ -270,7 +273,7 @@ $asesores = isset($asesores) && is_array($asesores) ? $asesores : [];
                     <div class="stat-label">Asesores</div>
                 </div>
                 <div class="stat-item">
-                    <div class="stat-number"><?php echo date('M Y'); ?></div>
+                    <div class="stat-number"><?php echo htmlspecialchars($fecha_inicio . ' a ' . $fecha_fin, ENT_QUOTES, 'UTF-8'); ?></div>
                     <div class="stat-label">Período</div>
                 </div>
                 <div class="stat-item">
@@ -315,7 +318,7 @@ $asesores = isset($asesores) && is_array($asesores) ? $asesores : [];
                                            class="form-control" 
                                            id="fecha_inicio" 
                                            name="fecha_inicio" 
-                                           value="<?php echo htmlspecialchars($fecha_inicio ?? date('Y-m-d', strtotime('-30 days'))); ?>"
+                                           value="<?php echo htmlspecialchars($fecha_inicio, ENT_QUOTES, 'UTF-8'); ?>"
                                            required>
                                 </div>
                             </div>
@@ -328,7 +331,7 @@ $asesores = isset($asesores) && is_array($asesores) ? $asesores : [];
                                            class="form-control" 
                                            id="fecha_fin" 
                                            name="fecha_fin" 
-                                           value="<?php echo htmlspecialchars($fecha_fin ?? date('Y-m-d')); ?>"
+                                           value="<?php echo htmlspecialchars($fecha_fin, ENT_QUOTES, 'UTF-8'); ?>"
                                            required>
                                 </div>
                             </div>
@@ -341,9 +344,9 @@ $asesores = isset($asesores) && is_array($asesores) ? $asesores : [];
                             <select class="form-control" id="asesor_id" name="asesor_id">
                                 <option value="">Todos los asesores</option>
                                 <?php foreach ($asesores as $asesor): ?>
-                                    <option value="<?php echo htmlspecialchars($asesor['id']); ?>" 
-                                            <?php echo (isset($asesor_id) && $asesor_id == $asesor['id']) ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($asesor['nombre_completo']); ?>
+                                    <option value="<?php echo htmlspecialchars((string)($asesor['id'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>" 
+                                            <?php echo ($asesor_id !== '' && $asesor_id == ($asesor['id'] ?? null)) ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars((string)($asesor['nombre_completo'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
