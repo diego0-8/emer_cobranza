@@ -2,6 +2,8 @@
 // Archivo: views/gestionar_cliente.php
 // Sistema de tipificaciones inteligente para asesores
 
+require_once __DIR__ . '/../helpers/tipificacion_historial.php';
+
 // Defaults para evitar notices/lints cuando el analizador no ve el controlador.
 $page_title = $page_title ?? 'Gestionar Cliente';
 $cliente = $cliente ?? [];
@@ -15,22 +17,6 @@ $webrtcConfig = $webrtcConfig ?? [
     'debug_mode' => false,
 ];
 $basePath = $basePath ?? '';
-// #region agent log 058b8a gestionar_cliente render
-try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
-    'sessionId'=>'058b8a',
-    'runId'=>'pre',
-    'hypothesisId'=>'H5',
-    'location'=>'views/gestionar_cliente.php:render',
-    'message'=>'render',
-    'data'=>[
-        'clienteId'=>(int)($cliente['id'] ?? 0),
-        'tieneTelefono'=>!empty($tieneTelefono) ? 1 : 0,
-        'hasWss'=>!empty($webrtcConfig['wss_server']) ? 1 : 0,
-        'hasSipDomain'=>!empty($webrtcConfig['sip_domain']) ? 1 : 0,
-    ],
-    'timestamp'=>(int) round(microtime(true)*1000),
-], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
-// #endregion
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -47,9 +33,6 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
             cliente_id: <?php echo (int)($cliente['id'] ?? 0); ?>,
             telefono_contacto: ''
         };
-        // #region agent log 058b8a gestionar_cliente browser load
-        fetch('http://127.0.0.1:7552/ingest/dcda37ca-c096-40cf-8b4d-0812abcc5f84',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'058b8a'},body:JSON.stringify({sessionId:'058b8a',runId:'pre',hypothesisId:'H5',location:'views/gestionar_cliente.php:head',message:'browser_context',data:{clienteId:Number(window.__callLogContext.cliente_id||0)},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
     </script>
     <style>
         .gestion-container {
@@ -2470,32 +2453,15 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                         <div class="form-group">
                             <label for="tipo_contacto" class="form-label">Tipo de Contacto:</label>
                             <script>
-// #region debug d200d9 tipificaciones bootstrap (pre-onchange)
-(function(){
-  try{
-    // Captura de errores JS que impiden definir funciones más abajo.
-    window.addEventListener('error', function (ev) {
-      fetch('http://127.0.0.1:7559/ingest/0bcc0192-fe61-4fb0-b109-b4792228bcf7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b7eaa7'},body:JSON.stringify({sessionId:'b7eaa7',runId:'pre',hypothesisId:'TIPBOOT1',location:'views/gestionar_cliente.php:pre-onchange:window.error',message:'error',data:{msg:String(ev.message||''),file:String(ev.filename||''),line:Number(ev.lineno||0),col:Number(ev.colno||0)},timestamp:Date.now()})}).catch(()=>{});
-    }, { once: true });
-    window.addEventListener('unhandledrejection', function (ev) {
-      fetch('http://127.0.0.1:7559/ingest/0bcc0192-fe61-4fb0-b109-b4792228bcf7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b7eaa7'},body:JSON.stringify({sessionId:'b7eaa7',runId:'pre',hypothesisId:'TIPBOOT1',location:'views/gestionar_cliente.php:pre-onchange:unhandledrejection',message:'rejection',data:{reason:String((ev&&ev.reason&&ev.reason.message)?ev.reason.message:(ev&&ev.reason)||'')},timestamp:Date.now()})}).catch(()=>{});
-    }, { once: true });
-
-    // Stub global para evitar ReferenceError desde el onchange inline.
+(function () {
     if (typeof window.mostrarTipificacionesEspecificas !== 'function') {
-      window.mostrarTipificacionesEspecificas = function(tipo){
-        fetch('http://127.0.0.1:7559/ingest/0bcc0192-fe61-4fb0-b109-b4792228bcf7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b7eaa7'},body:JSON.stringify({sessionId:'b7eaa7',runId:'pre',hypothesisId:'TIPBOOT2',location:'views/gestionar_cliente.php:pre-onchange:stub',message:'called',data:{tipo:String(tipo||'')},timestamp:Date.now()})}).catch(()=>{});
-        // Si el script real cargó después, delegar.
-        if (typeof window.__realMostrarTipificacionesEspecificas === 'function') {
-          try { return window.__realMostrarTipificacionesEspecificas(tipo); } catch(e){}
-        }
-      };
+        window.mostrarTipificacionesEspecificas = function (tipo) {
+            if (typeof window.__realMostrarTipificacionesEspecificas === 'function') {
+                try { return window.__realMostrarTipificacionesEspecificas(tipo); } catch (e) {}
+            }
+        };
     }
-
-    fetch('http://127.0.0.1:7559/ingest/0bcc0192-fe61-4fb0-b109-b4792228bcf7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b7eaa7'},body:JSON.stringify({sessionId:'b7eaa7',runId:'pre',hypothesisId:'TIPBOOT0',location:'views/gestionar_cliente.php:pre-onchange',message:'boot',data:{hasFn:typeof window.mostrarTipificacionesEspecificas==='function'},timestamp:Date.now()})}).catch(()=>{});
-  }catch(e){}
 })();
-// #endregion
                             </script>
                             <select name="tipo_contacto" id="tipo_contacto" class="form-select" onchange="mostrarTipificacionesEspecificas(this.value)" required>
                                 <option value="">Selecciona una opción</option>
@@ -2524,33 +2490,39 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                                 <label for="sub_opcion_acuerdo_pago" class="form-label">Razón específica:</label>
                                 <select name="sub_opcion_acuerdo_pago" id="sub_opcion_acuerdo_pago" class="form-select" onchange="seleccionarSubOpcion(this.value)">
                                     <option value="">Selecciona la razón</option>
-                                    <option value="no_informa">NO INFORMA</option>
-                                    <option value="desempleo">DESEMPLEO</option>
-                                    <option value="incremento_tarifa">INCREMENTO DE TARIFA</option>
-                                    <option value="otras_prioridades_economicas">TIENE OTRAS PRIORIDADES ECONOMICAS</option>
-                                    <option value="disminucion_ingresos">DISMINUCION DE INGRESOS</option>
                                     <option value="adquirio_otro_servicio_salud">ADQUIRIO OTRO SERVICIO DE SALUD</option>
-                                    <option value="no_utiliza_beneficios">NO UTILIZA/NO BENEFICIOS DEL SERVICIO</option>
-                                    <option value="sale_del_pais">SALE DEL PAIS</option>
-                                    <option value="fallecido">FALLECIDO</option>
-                                    <option value="humanizacion_servicio">HUMANIZACION DEL SERVICIO GENERAL</option>
-                                    <option value="oportunidad_nunca_llegaron">OPORTUNIDAD/NUNCA LLEGARON</option>
-                                    <option value="metodo_pago_errado">METODO DE PAGO ERRADO/DEBITO AUTOMATICO</option>
-                                    <option value="no_realizan_debito_automatico">NO REALIZAN DEBITO AUTOMATICO</option>
-                                    <option value="falsa_promesa_comercial">FALSA PROMESA COMERCIAL</option>
-                                    <option value="fraude">FRAUDE</option>
-                                    <option value="factura_no_corresponde">FACTURA NO CORRESPONDE</option>
-                                    <option value="no_entrega_aviso_pago">NO ENTREGA DE AVISO DE PAGO/FACTURA</option>
-                                    <option value="facturacion_errada">FACTURACION ERRADA</option>
                                     <option value="cambio_traslado_sin_cobertura">CAMBIO/TRASLADO SIN COBERTURA</option>
                                     <option value="cancelacion_no_aplicada">CANCELACION NO APLICADA</option>
+                                    <option value="desempleo">DESEMPLEO</option>
+                                    <option value="disminucion_ingresos">DISMINUCION DE INGRESOS</option>
+                                    <option value="facturacion_errada">FACTURACION ERRADA</option>
+                                    <option value="factura_no_corresponde">FACTURA NO CORRESPONDE</option>
+                                    <option value="fallecido">FALLECIDO</option>
+                                    <option value="falsa_promesa_comercial">FALSA PROMESA COMERCIAL</option>
+                                    <option value="fraude">FRAUDE</option>
+                                    <option value="humanizacion_servicio">HUMANIZACION DEL SERVICIO GENERAL</option>
                                     <option value="incumplimiento_ofercimientos">INCUMPLIMIENTO OFRECIMIENTOS REALIZADOS (LEALTAD)</option>
                                     <option value="inconformidad_pqr">INCONFORMIDAD PQR</option>
                                     <option value="informacion_errada">INFORMACION ERRADA</option>
+                                    <option value="incremento_tarifa">INCREMENTO DE TARIFA</option>
+                                    <option value="medio_pago_no_sirve">MEDIO DE PAGO NO SIRVE</option>
+                                    <option value="metodo_pago_errado">METODO DE PAGO ERRADO/DEBITO AUTOMATICO</option>
+                                    <option value="no_conoce_politicas_cancelacion">NO CONOCE POLITICAS DE CANCELACION</option>
                                     <option value="no_contestaron_sac">NO CONTESTARON EN LA LINEA DE SAC</option>
-                                    <option value="reclamo_pendiente_respuesta">RECLAMO PENDIENTE DE RESPUESTA</option>
+                                    <option value="no_entrega_aviso_pago">NO ENTREGA DE AVISO DE PAGO/FACTURA</option>
+                                    <option value="no_informa">NO INFORMA</option>
+                                    <option value="no_realizan_debito_automatico">NO REALIZAN DEBITO AUTOMATICO</option>
+                                    <option value="no_utiliza_beneficios">NO UTILIZA/NO BENEFICIOS DEL SERVICIO</option>
+                                    <option value="oportunidad_nunca_llegaron">OPORTUNIDAD/NUNCA LLEGARON</option>
+                                    <option value="olvido_pago">OLVIDO DE PAGO</option>
                                     <option value="pago_afiliacion_no_aplicado">PAGO DE AFILIACION NO APLICADO</option>
                                     <option value="pago_sin_aplicar">PAGO SIN APLICAR</option>
+                                    <option value="proceso_cancelacion">PROCESO DE CANCELACIÓN</option>
+                                    <option value="rechazo_teleconsulta">RECHAZO TELECONSULTA</option>
+                                    <option value="reclamo_pendiente_respuesta">RECLAMO PENDIENTE DE RESPUESTA</option>
+                                    <option value="sale_del_pais">SALE DEL PAIS</option>
+                                    <option value="otras_prioridades_economicas">TIENE OTRAS PRIORIDADES ECONOMICAS</option>
+                                    <option value="viaje">VIAJE</option>
                                 </select>
                             </div>
                             
@@ -2579,7 +2551,9 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                                     <option value="fallecido">FALLECIDO</option>
                                     <option value="humanizacion_servicio">HUMANIZACION DEL SERVICIO GENERAL</option>
                                     <option value="oportunidad_nunca_llegaron">OPORTUNIDAD/NUNCA LLEGARON</option>
+                                    <option value="olvido_pago">OLVIDO DE PAGO</option>
                                     <option value="metodo_pago_errado">METODO DE PAGO ERRADO/DEBITO AUTOMATICO</option>
+                                    <option value="medio_pago_no_sirve">MEDIO DE PAGO NO SIRVE</option>
                                     <option value="no_realizan_debito_automatico">NO REALIZAN DEBITO AUTOMATICO</option>
                                     <option value="falsa_promesa_comercial">FALSA PROMESA COMERCIAL</option>
                                     <option value="fraude">FRAUDE</option>
@@ -2592,9 +2566,13 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                                     <option value="inconformidad_pqr">INCONFORMIDAD PQR</option>
                                     <option value="informacion_errada">INFORMACION ERRADA</option>
                                     <option value="no_contestaron_sac">NO CONTESTARON EN LA LINEA DE SAC</option>
+                                    <option value="no_conoce_politicas_cancelacion">NO CONOCE POLITICAS DE CANCELACION</option>
                                     <option value="reclamo_pendiente_respuesta">RECLAMO PENDIENTE DE RESPUESTA</option>
                                     <option value="pago_afiliacion_no_aplicado">PAGO DE AFILIACION NO APLICADO</option>
                                     <option value="pago_sin_aplicar">PAGO SIN APLICAR</option>
+                                    <option value="proceso_cancelacion">PROCESO DE CANCELACIÓN</option>
+                                    <option value="rechazo_teleconsulta">RECHAZO TELECONSULTA</option>
+                                    <option value="viaje">VIAJE</option>
                                 </select>
                             </div>
                             
@@ -2613,7 +2591,9 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                                     <option value="fallecido">FALLECIDO</option>
                                     <option value="humanizacion_servicio">HUMANIZACION DEL SERVICIO GENERAL</option>
                                     <option value="oportunidad_nunca_llegaron">OPORTUNIDAD/NUNCA LLEGARON</option>
+                                    <option value="olvido_pago">OLVIDO DE PAGO</option>
                                     <option value="metodo_pago_errado">METODO DE PAGO ERRADO/DEBITO AUTOMATICO</option>
+                                    <option value="medio_pago_no_sirve">MEDIO DE PAGO NO SIRVE</option>
                                     <option value="no_realizan_debito_automatico">NO REALIZAN DEBITO AUTOMATICO</option>
                                     <option value="falsa_promesa_comercial">FALSA PROMESA COMERCIAL</option>
                                     <option value="fraude">FRAUDE</option>
@@ -2626,9 +2606,13 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                                     <option value="inconformidad_pqr">INCONFORMIDAD PQR</option>
                                     <option value="informacion_errada">INFORMACION ERRADA</option>
                                     <option value="no_contestaron_sac">NO CONTESTARON EN LA LINEA DE SAC</option>
+                                    <option value="no_conoce_politicas_cancelacion">NO CONOCE POLITICAS DE CANCELACION</option>
                                     <option value="reclamo_pendiente_respuesta">RECLAMO PENDIENTE DE RESPUESTA</option>
                                     <option value="pago_afiliacion_no_aplicado">PAGO DE AFILIACION NO APLICADO</option>
                                     <option value="pago_sin_aplicar">PAGO SIN APLICAR</option>
+                                    <option value="proceso_cancelacion">PROCESO DE CANCELACIÓN</option>
+                                    <option value="rechazo_teleconsulta">RECHAZO TELECONSULTA</option>
+                                    <option value="viaje">VIAJE</option>
                                 </select>
                             </div>
                             
@@ -2637,7 +2621,13 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                                 <label for="sub_opcion_volver_llamar" class="form-label">Razón específica:</label>
                                 <select name="sub_opcion_volver_llamar" id="sub_opcion_volver_llamar" class="form-select" onchange="seleccionarSubOpcion(this.value)">
                                     <option value="">Selecciona la razón</option>
-                                    <option value="volver_llamar">VOLVER A LLAMAR</option>
+                                    <option value="medio_pago_no_sirve">MEDIO DE PAGO NO SIRVE</option>
+                                    <option value="no_conoce_politicas_cancelacion">NO CONOCE POLITICAS DE CANCELACION</option>
+                                    <option value="no_informa">NO INFORMA</option>
+                                    <option value="olvido_pago">OLVIDO DE PAGO</option>
+                                    <option value="proceso_cancelacion">PROCESO DE CANCELACIÓN</option>
+                                    <option value="rechazo_teleconsulta">RECHAZO TELECONSULTA</option>
+                                    <option value="viaje">VIAJE</option>
                                 </select>
                             </div>
                             
@@ -2646,7 +2636,13 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                                 <label for="sub_opcion_recordar_pago" class="form-label">Razón específica:</label>
                                 <select name="sub_opcion_recordar_pago" id="sub_opcion_recordar_pago" class="form-select" onchange="seleccionarSubOpcion(this.value)">
                                     <option value="">Selecciona la razón</option>
+                                    <option value="medio_pago_no_sirve">MEDIO DE PAGO NO SIRVE</option>
+                                    <option value="no_conoce_politicas_cancelacion">NO CONOCE POLITICAS DE CANCELACION</option>
+                                    <option value="olvido_pago">OLVIDO DE PAGO</option>
+                                    <option value="proceso_cancelacion">PROCESO DE CANCELACIÓN</option>
                                     <option value="recordar_pago">RECORDAR PAGO</option>
+                                    <option value="rechazo_teleconsulta">RECHAZO TELECONSULTA</option>
+                                    <option value="viaje">VIAJE</option>
                                 </select>
                             </div>
                             
@@ -2655,7 +2651,13 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                                 <label for="sub_opcion_venta_novedad" class="form-label">Razón específica:</label>
                                 <select name="sub_opcion_venta_novedad" id="sub_opcion_venta_novedad" class="form-select" onchange="seleccionarSubOpcion(this.value)">
                                     <option value="">Selecciona la razón</option>
+                                    <option value="medio_pago_no_sirve">MEDIO DE PAGO NO SIRVE</option>
+                                    <option value="no_conoce_politicas_cancelacion">NO CONOCE POLITICAS DE CANCELACION</option>
+                                    <option value="olvido_pago">OLVIDO DE PAGO</option>
+                                    <option value="proceso_cancelacion">PROCESO DE CANCELACIÓN</option>
+                                    <option value="rechazo_teleconsulta">RECHAZO TELECONSULTA</option>
                                     <option value="venta_novedad">VENTA CON NOVEDAD</option>
+                                    <option value="viaje">VIAJE</option>
                                 </select>
                             </div>
                         </div>
@@ -2717,8 +2719,7 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                                 <label for="sub_opcion_no_contesta" class="form-label">Razón específica:</label>
                                 <select name="sub_opcion_no_contesta" id="sub_opcion_no_contesta" class="form-select" onchange="seleccionarSubOpcion(this.value)">
                                     <option value="">Selecciona la razón</option>
-                                    <option value="no_informa">NO INFORMA</option>
-                                    <option value="contesta_cuelga">CONTESTA-CUELGA</option>
+                                    <option value="indefinido">INDEFINIDA</option>
                                 </select>
                             </div>
                             
@@ -2727,7 +2728,7 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                                 <label for="sub_opcion_buzon_mensajes" class="form-label">Razón específica:</label>
                                 <select name="sub_opcion_buzon_mensajes" id="sub_opcion_buzon_mensajes" class="form-select" onchange="seleccionarSubOpcion(this.value)">
                                     <option value="">Selecciona la razón</option>
-                                    <option value="no_informa">NO INFORMA</option>
+                                    <option value="indefinido">INDEFINIDA</option>
                                 </select>
                             </div>
                             
@@ -2736,7 +2737,7 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                                 <label for="sub_opcion_telefono_danado" class="form-label">Razón específica:</label>
                                 <select name="sub_opcion_telefono_danado" id="sub_opcion_telefono_danado" class="form-select" onchange="seleccionarSubOpcion(this.value)">
                                     <option value="">Selecciona la razón</option>
-                                    <option value="no_informa">NO INFORMA</option>
+                                    <option value="indefinido">INDEFINIDA</option>
                                 </select>
                             </div>
                             
@@ -2745,7 +2746,7 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                                 <label for="sub_opcion_fallecido_otro_sin_contacto" class="form-label">Razón específica:</label>
                                 <select name="sub_opcion_fallecido_otro_sin_contacto" id="sub_opcion_fallecido_otro_sin_contacto" class="form-select" onchange="seleccionarSubOpcion(this.value)">
                                     <option value="">Selecciona la razón</option>
-                                    <option value="no_informa">NO INFORMA</option>
+                                    <option value="indefinido">INDEFINIDA</option>
                                 </select>
                             </div>
                             
@@ -2754,7 +2755,7 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                                 <label for="sub_opcion_localizacion" class="form-label">Razón específica:</label>
                                 <select name="sub_opcion_localizacion" id="sub_opcion_localizacion" class="form-select" onchange="seleccionarSubOpcion(this.value)">
                                     <option value="">Selecciona la razón</option>
-                                    <option value="no_informa">NO INFORMA</option>
+                                    <option value="indefinido">INDEFINIDA</option>
                                 </select>
                             </div>
                             
@@ -2763,7 +2764,7 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                                 <label for="sub_opcion_envio_estado_cuenta" class="form-label">Razón específica:</label>
                                 <select name="sub_opcion_envio_estado_cuenta" id="sub_opcion_envio_estado_cuenta" class="form-select" onchange="seleccionarSubOpcion(this.value)">
                                     <option value="">Selecciona la razón</option>
-                                    <option value="no_informa">NO INFORMA</option>
+                                    <option value="indefinido">INDEFINIDA</option>
                                 </select>
                             </div>
                             
@@ -2772,7 +2773,7 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                                 <label for="sub_opcion_venta_novedad_analisis" class="form-label">Razón específica:</label>
                                 <select name="sub_opcion_venta_novedad_analisis" id="sub_opcion_venta_novedad_analisis" class="form-select" onchange="seleccionarSubOpcion(this.value)">
                                     <option value="">Selecciona la razón</option>
-                                    <option value="no_informa">NO INFORMA</option>
+                                    <option value="indefinido">INDEFINIDA</option>
                                 </select>
                             </div>
                         </div>
@@ -2955,14 +2956,11 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                              </div>
                              <div class="historial-field-value tipificacion">
                                 <?php
-                                $codTipoContacto = $gestion['tipo_contacto_arbol_codigo'] ?? ($gestion['tipo_contacto'] ?? ($gestion['tipo_gestion'] ?? null));
-                                $tipoContactoMap = [
-                                    'contacto_exitoso' => '✅ CONTACTO EXITOSO',
-                                    'contacto_tercero' => '👥 CONTACTO CON TERCERO',
-                                    'sin_contacto' => '❌ SIN CONTACTO',
-                                ];
-                                if ($codTipoContacto !== null && $codTipoContacto !== '') {
-                                    echo htmlspecialchars($tipoContactoMap[$codTipoContacto] ?? ucfirst(str_replace('_', ' ', $codTipoContacto)));
+                                $codTipoContacto = emer_codigo_tipificacion_limpio(
+                                    $gestion['tipo_contacto_arbol_codigo'] ?? ($gestion['tipo_contacto'] ?? ($gestion['tipo_gestion'] ?? ''))
+                                );
+                                if ($codTipoContacto !== '') {
+                                    echo htmlspecialchars(emer_etiqueta_tipificacion(emer_mapa_tipo_contacto_historial(), $codTipoContacto));
                                 } else {
                                     echo '<span style="color:#6c757d;font-style:italic;">No especificado (gestión anterior)</span>';
                                 }
@@ -2976,53 +2974,18 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                                  <i class="fas fa-tags"></i> Resultado del Contacto
                              </div>
                             <div class="historial-field-value tipificacion">
-                                <?php 
-                                $tipificacionGeneral = $gestion['resultado_contacto_codigo'] ?? ($gestion['resultado_contacto'] ?? '');
+                                <?php
+                                $tipificacionGeneral = emer_codigo_tipificacion_limpio(
+                                    $gestion['resultado_contacto_codigo'] ?? ($gestion['resultado_contacto'] ?? ($gestion['resultado'] ?? ''))
+                                );
                                 if ($tipificacionGeneral === '' && !empty($gestion['tipo_gestion']) && strpos((string) $gestion['tipo_gestion'], '|') === false) {
-                                    $tipificacionGeneral = (string) $gestion['tipo_gestion'];
+                                    $tipificacionGeneral = emer_codigo_tipificacion_limpio((string) $gestion['tipo_gestion']);
                                 }
                                 if ($tipificacionGeneral === '') {
-                                    $tipificacionGeneral = 'No especificada';
+                                    echo '<span style="color:#6c757d;font-style:italic;">No especificada</span>';
+                                } else {
+                                    echo htmlspecialchars(emer_etiqueta_tipificacion(emer_mapa_resultado_contacto_historial(), $tipificacionGeneral));
                                 }
-                                
-                                // Mapear los valores para mostrar texto más legible
-                                $tipificacionGeneralMap = [
-                                    'contacto_exitoso' => '✅ CONTACTO EXITOSO',
-                                    'contacto_tercero' => '👥 CONTACTO CON TERCERO',
-                                    'sin_contacto' => '❌ SIN CONTACTO',
-                                    'Llamada de Venta' => '📞 LLAMADA DE VENTA',
-                                    'Llamada de Gestión' => '📞 LLAMADA DE GESTIÓN',
-                                    'Cliente Interesado' => '💡 CLIENTE INTERESADO',
-                                    'Venta Ingresada' => '💰 VENTA INGRESADA',
-                                    // Valores del sistema de tipificación de 3 niveles (con guiones bajos)
-                                    'acuerdo_pago' => '💰 ACUERDO DE PAGO',
-                                    'ya_pago' => '✅ YA PAGO',
-                                    'localizado_sin_acuerdo' => '📍 LOCALIZADO SIN ACUERDO',
-                                    'reclamo' => '📋 RECLAMO',
-                                    'volver_llamar' => '📞 VOLVER A LLAMAR',
-                                    'recordar_pago' => '⏰ RECORDAR PAGO',
-                                    'venta_novedad' => '🆕 VENTA CON NOVEDAD',
-                                    'aqui_no_vive' => '🏠 AQUÍ NO VIVE NO TRABAJA',
-                                    'mensaje_tercero' => '📝 MENSAJE CON TERCERO',
-                                    'fallecido_otro' => '💀 FALLECIDO/OTRO',
-                                    'no_contesta' => '📞 NO CONTESTA',
-                                    'buzon_mensajes' => '📪 BUZÓN DE MENSAJES',
-                                    'telefono_danado' => '📵 TELÉFONO DAÑADO',
-                                    'localizacion' => '📍 LOCALIZACIÓN',
-                                    'envio_estado_cuenta' => '📧 ENVÍO ESTADO DE CUENTA',
-                                    'venta_novedad_analisis' => '🆕 VENTA CON NOVEDAD ANÁLISIS DATA',
-                                    // Valores del sistema de tipificación de 3 niveles (sin guiones bajos)
-                                    'ACUERDO DE PAGO' => '💰 ACUERDO DE PAGO',
-                                    'YA PAGO' => '✅ YA PAGO',
-                                    'LOCALIZADO SIN ACUERDO' => '📍 LOCALIZADO SIN ACUERDO',
-                                    'RECLAMO' => '📋 RECLAMO',
-                                    'VOLVER A LLAMAR' => '📞 VOLVER A LLAMAR',
-                                    'RECORDAR PAGO' => '⏰ RECORDAR PAGO',
-                                    'VENTA CON NOVEDAD' => '🆕 VENTA CON NOVEDAD'
-                                ];
-                                
-                                $tipificacionGeneralTexto = $tipificacionGeneralMap[$tipificacionGeneral] ?? ucfirst(str_replace('_', ' ', $tipificacionGeneral));
-                                echo htmlspecialchars($tipificacionGeneralTexto);
                                 ?>
                             </div>
                          </div>
@@ -3033,75 +2996,15 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                                  <i class="fas fa-list-alt"></i> Razón Específica
                              </div>
                             <div class="historial-field-value razon-especifica">
-                                <?php 
-                                $razonEspecifica = $gestion['razon_especifica'] ?? ($gestion['razon_especifica_codigo'] ?? ($gestion['resultado'] ?? ''));
+                                <?php
+                                $razonEspecifica = emer_codigo_tipificacion_limpio(
+                                    $gestion['razon_especifica_codigo'] ?? ($gestion['razon_especifica'] ?? '')
+                                );
                                 if ($razonEspecifica === '') {
-                                    $razonEspecifica = 'No especificada';
+                                    echo '<span style="color:#6c757d;font-style:italic;">No especificada</span>';
+                                } else {
+                                    echo htmlspecialchars(emer_etiqueta_tipificacion(emer_mapa_razon_especifica_historial(), $razonEspecifica));
                                 }
-                                
-                                // Mapear los valores para mostrar texto más legible
-                                $razonEspecificaMap = [
-                                    // Opciones de ACUERDO DE PAGO
-                                    'acuerdo_pago' => '💰 ACUERDO DE PAGO',
-                                    'ya_pago' => '✅ YA PAGO',
-                                    'localizado_sin_acuerdo' => '📍 LOCALIZADO SIN ACUERDO',
-                                    'reclamo' => '📋 RECLAMO',
-                                    'volver_llamar' => '📞 VOLVER A LLAMAR',
-                                    'recordar_pago' => '⏰ RECORDAR PAGO',
-                                    'venta_novedad' => '🆕 VENTA CON NOVEDAD',
-                                    
-                                    // Opciones de RECLAMO (según la imagen)
-                                    'desempleo' => '💼 DESEMPLEO',
-                                    'incremento_tarifa' => '📈 INCREMENTO DE TARIFA',
-                                    'otras_prioridades_economicas' => '💰 TIENE OTRAS PRIORIDADES ECONOMICAS',
-                                    'disminucion_ingresos' => '📉 DISMINUCION DE INGRESOS',
-                                    'adquirio_otro_servicio_salud' => '🏥 ADQUIRIO OTRO SERVICIO DE SALUD',
-                                    'no_utiliza_beneficios' => '❌ NO UTILIZA/NO BENEFICIOS DEL SERVICIO',
-                                    'sale_del_pais' => '✈️ SALE DEL PAIS',
-                                    'fallecido' => '💀 FALLECIDO',
-                                    'humanizacion_servicio' => '🤝 HUMANIZACION DEL SERVICIO GENERAL',
-                                    'oportunidad_nunca_llegaron' => '⏰ OPORTUNIDAD/NUNCA LLEGARON',
-                                    'metodo_pago_errado' => '💳 METODO DE PAGO ERRADO/DEBITO AUTOMATICO',
-                                    'no_realizan_debito_automatico' => '🚫 NO REALIZAN DEBITO AUTOMATICO',
-                                    'falsa_promesa_comercial' => '❌ FALSA PROMESA COMERCIAL',
-                                    'fraude' => '🚨 FRAUDE',
-                                    'factura_no_corresponde' => '📄 FACTURA NO CORRESPONDE',
-                                    'no_entrega_aviso_pago' => '📬 NO ENTREGA DE AVISO DE PAGO/FACTURA',
-                                    'facturacion_errada' => '📊 FACTURACION ERRADA',
-                                    'cambio_traslado_sin_cobertura' => '🔄 CAMBIO/TRASLADO SIN COBERTURA',
-                                    'cancelacion_no_aplicada' => '❌ CANCELACION NO APLICADA',
-                                    
-                                    // Otras opciones del sistema
-                                    'incumplimiento_ofercimientos' => '🤝 INCUMPLIMIENTO OFRECIMIENTOS REALIZADOS (LEALTAD)',
-                                    'inconformidad_pqr' => '📋 INCONFORMIDAD PQR',
-                                    'informacion_errada' => 'ℹ️ INFORMACION ERRADA',
-                                    'no_contestaron_sac' => '📞 NO CONTESTARON EN LA LINEA DE SAC',
-                                    'reclamo_pendiente_respuesta' => '⏳ RECLAMO PENDIENTE DE RESPUESTA',
-                                    'pago_afiliacion_no_aplicado' => '💳 PAGO DE AFILIACION NO APLICADO',
-                                    'pago_sin_aplicar' => '💰 PAGO SIN APLICAR',
-                                    'no_contesta' => '📞 NO CONTESTA',
-                                    'mensaje_tercero' => '📝 MENSAJE CON TERCERO',
-                                    'no_informa' => '❌ NO INFORMA',
-                                    'contesta_cuelga' => '📞 CONTESTA-CUELGA',
-                                    'aqui_no_vive' => '🏠 AQUÍ NO VIVE',
-                                    'fallecido_otro' => '💀 FALLECIDO/OTRO',
-                                    'localizacion' => '📍 LOCALIZACIÓN',
-                                    'envio_estado_cuenta' => '📧 ENVÍO DE ESTADO DE CUENTA',
-                                    'venta_novedad_analisis' => '🆕 VENTA CON NOVEDAD ANÁLISIS DATA',
-                                    'informacion_adicional' => 'ℹ️ INFORMACIÓN ADICIONAL',
-                                    
-                                    // Valores legacy del sistema anterior
-                                    'INTERESADO' => '💡 INTERESADO',
-                                    'VENTA INGRESADA' => '💰 VENTA INGRESADA',
-                                    'VOLVER A LLAMAR' => '📞 VOLVER A LLAMAR',
-                                    'Número Equivocado' => '❌ NÚMERO EQUIVOCADO',
-                                    'Venta Exitosa' => '✅ VENTA EXITOSA',
-                                    'BUZÓN DE VOZ' => '📞 BUZÓN DE VOZ',
-                                    'FALLECIDO' => '💀 FALLECIDO'
-                                ];
-                                
-                                $razonEspecificaTexto = $razonEspecificaMap[$razonEspecifica] ?? ucfirst(str_replace('_', ' ', $razonEspecifica));
-                                echo htmlspecialchars($razonEspecificaTexto);
                                 ?>
                             </div>
                          </div>
@@ -3195,6 +3098,31 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                              </div>
                          </div>
                          <?php endif; ?>
+
+                         <?php
+                         $resultadoHistCodigo = emer_codigo_tipificacion_limpio(
+                             $gestion['resultado_contacto_codigo'] ?? ($gestion['resultado_contacto'] ?? '')
+                         );
+                         $fechaVolverLlamarHist = emer_obtener_proxima_llamada_historial($gestion);
+                         $mostrarFechaVolverLlamar = emer_es_resultado_volver_llamar($resultadoHistCodigo)
+                             || ($fechaVolverLlamarHist !== null && $fechaVolverLlamarHist !== '');
+                         ?>
+                         <?php if ($mostrarFechaVolverLlamar): ?>
+                         <div class="historial-field">
+                             <div class="historial-field-label">
+                                 <i class="fas fa-calendar-alt"></i> Fecha y Hora para Volver a Llamar
+                             </div>
+                             <div class="historial-field-value" style="font-weight: bold; color: #2563eb;">
+                                 <?php
+                                 if ($fechaVolverLlamarHist !== null && $fechaVolverLlamarHist !== '') {
+                                     echo htmlspecialchars(emer_formatear_proxima_llamada_historial($fechaVolverLlamarHist));
+                                 } else {
+                                     echo '<span style="color:#6c757d;font-style:italic;">No registrada</span>';
+                                 }
+                                 ?>
+                             </div>
+                         </div>
+                         <?php endif; ?>
                          
                          <!-- Observaciones -->
                          <div class="historial-field historial-observaciones">
@@ -3208,22 +3136,6 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                      </div>
                  </div>
                  
-                 
-                 <?php if (!empty($gestion['proxima_accion']) || !empty($gestion['proxima_fecha'])): ?>
-                 <div class="historial-proxima">
-                     <h5>📅 Próxima Acción:</h5>
-                     <?php if (!empty($gestion['proxima_accion'])): ?>
-                     <div class="proxima-accion">
-                         <strong>Acción:</strong> <?php echo htmlspecialchars($gestion['proxima_accion'] ?? ''); ?>
-                     </div>
-                     <?php endif; ?>
-                     <?php if (!empty($gestion['proxima_fecha'])): ?>
-                     <div class="proxima-fecha">
-                         <strong>Fecha:</strong> <?php echo date('d/m/Y H:i', strtotime($gestion['proxima_fecha'])); ?>
-                     </div>
-                     <?php endif; ?>
-                 </div>
-                 <?php endif; ?>
                  
              </div>
              <?php endforeach; ?>
@@ -3245,6 +3157,78 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
     <script>
         let tipificacionSeleccionada = null;
         let subTipificacionSeleccionada = null;
+
+        (function initBloqueoRecargaDuranteLlamada() {
+            const MSG_CUELGA_ANTES_RECARGAR = 'Cuelga la llamada antes de recargar la página.';
+
+            function emerHayLlamadaActiva() {
+                const sp = window.webrtcSoftphone;
+                if (!sp) {
+                    return false;
+                }
+                if (typeof sp.isCallActive === 'function') {
+                    return sp.isCallActive();
+                }
+                return !!(sp.currentCall || sp.incomingCall);
+            }
+
+            window.emerHayLlamadaActiva = emerHayLlamadaActiva;
+            window.emerBloquearSiLlamadaActiva = function () {
+                if (!emerHayLlamadaActiva()) {
+                    return false;
+                }
+                alert(MSG_CUELGA_ANTES_RECARGAR);
+                return true;
+            };
+
+            window.addEventListener('beforeunload', function (e) {
+                if (!emerHayLlamadaActiva()) {
+                    return;
+                }
+                e.preventDefault();
+                e.returnValue = MSG_CUELGA_ANTES_RECARGAR;
+                return MSG_CUELGA_ANTES_RECARGAR;
+            });
+
+            document.addEventListener('click', function (e) {
+                if (!emerHayLlamadaActiva()) {
+                    return;
+                }
+                const enlace = e.target.closest('a[href]');
+                if (!enlace || enlace.target === '_blank') {
+                    return;
+                }
+                const href = (enlace.getAttribute('href') || '').trim();
+                if (!href || href === '#' || href.startsWith('#') || href.toLowerCase().startsWith('javascript:')) {
+                    return;
+                }
+                try {
+                    const destino = new URL(href, window.location.href);
+                    const actual = new URL(window.location.href);
+                    if (destino.href === actual.href) {
+                        return;
+                    }
+                } catch (err) {
+                    return;
+                }
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                alert(MSG_CUELGA_ANTES_RECARGAR);
+            }, true);
+
+            document.addEventListener('keydown', function (e) {
+                if (!emerHayLlamadaActiva()) {
+                    return;
+                }
+                const key = String(e.key || '').toLowerCase();
+                const recarga = key === 'f5' || ((e.ctrlKey || e.metaKey) && key === 'r');
+                if (!recarga) {
+                    return;
+                }
+                e.preventDefault();
+                alert(MSG_CUELGA_ANTES_RECARGAR);
+            }, true);
+        })();
 
         // #region debug d200d9 tipificaciones (vista)
         function dbglog_tip(location, message, data, hypothesisId, runId) {
@@ -3551,6 +3535,10 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
         // Función para ir al siguiente cliente
         // Ahora siempre recarga la página
         async function irAlSiguienteCliente() {
+            if (typeof window.emerBloquearSiLlamadaActiva === 'function' && window.emerBloquearSiLlamadaActiva()) {
+                return;
+            }
+
             console.log('➡️ [Navegación] Obteniendo siguiente cliente...');
 
             // Mostrar loading en el botón
@@ -3581,6 +3569,14 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                     const clienteId = data.siguiente_cliente.id;
                     console.log('✅ [Navegación] Siguiente cliente encontrado:', clienteId);
                     console.log('🔄 [Navegación] Recargando página con nuevo cliente');
+
+                    if (typeof window.emerBloquearSiLlamadaActiva === 'function' && window.emerBloquearSiLlamadaActiva()) {
+                        if (btnSiguiente) {
+                            btnSiguiente.innerHTML = textoOriginal;
+                            btnSiguiente.disabled = false;
+                        }
+                        return;
+                    }
 
                     // Recargar la página con el nuevo cliente
                     window.location.href = `index.php?action=gestionar_cliente&id=${encodeURIComponent(clienteId)}`;
@@ -3749,15 +3745,10 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
              
              // Agregar campos opcionales de programar llamada si existen
              const fechaNuevaLlamada = document.getElementById('fecha_nueva_llamada');
-             const motivoNuevaLlamada = document.getElementById('motivo_nueva_llamada');
              
              if (fechaNuevaLlamada && fechaNuevaLlamada.value) {
                  formData.set('fecha_nueva_llamada', fechaNuevaLlamada.value);
              }
-             
-            if (motivoNuevaLlamada && motivoNuevaLlamada.value) {
-                formData.set('motivo_nueva_llamada', motivoNuevaLlamada.value);
-            }
             
             // Teléfono con el que se contactó (desplegable de número para llamar)
             const telefonoDropdown = document.getElementById('telefonoDropdown');
@@ -3770,9 +3761,6 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                 const cid = (window.webrtcSoftphone && typeof window.webrtcSoftphone.getActiveCallId === 'function')
                     ? window.webrtcSoftphone.getActiveCallId()
                     : '';
-                // #region agent log 058b8a gestionar_cliente save call_id
-                fetch('http://127.0.0.1:7552/ingest/dcda37ca-c096-40cf-8b4d-0812abcc5f84',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'058b8a'},body:JSON.stringify({sessionId:'058b8a',runId:'pre',hypothesisId:'H7',location:'views/gestionar_cliente.php:guardarTipificacion',message:'call_id_before_save',data:{hasSoftphone:!!window.webrtcSoftphone,hasGetActive:!!(window.webrtcSoftphone&&typeof window.webrtcSoftphone.getActiveCallId==='function'),callIdLen:cid?String(cid).length:0},timestamp:Date.now()})}).catch(()=>{});
-                // #endregion
                 if (cid) formData.set('call_id', cid);
             } catch (e) {}
             
@@ -3865,28 +3853,6 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
         let uiBloqueoNavegacion = false;
 
         let tieneTareasPendientes = <?php echo json_encode($tieneTareasPendientes ?? false); ?>;
-
-        // #region agent log b7eaa7 gestionar_cliente.js bootstrap
-        try {
-            fetch('http://127.0.0.1:7559/ingest/0bcc0192-fe61-4fb0-b109-b4792228bcf7', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'b7eaa7' },
-                body: JSON.stringify({
-                    sessionId: 'b7eaa7',
-                    runId: 'pre',
-                    hypothesisId: 'NX7',
-                    location: 'views/gestionar_cliente.php:bootstrap',
-                    message: 'page_vars',
-                    data: {
-                        tieneTareasPendientes: !!tieneTareasPendientes,
-                        hasBtnNav: !!document.getElementById('btnNavegacion'),
-                        hasBtnNext: !!document.getElementById('btnSiguienteCliente'),
-                    },
-                    timestamp: Date.now()
-                })
-            }).catch(() => {});
-        } catch (e) {}
-        // #endregion
 
         // Inicializar gestión de facturas
         function inicializarGestionFacturas() {
@@ -4210,14 +4176,16 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
             } else if (valor === 'volver_llamar') {
                 camposAdicionales.innerHTML =
                     '<div class="form-group">' +
-                        '<label for="fecha_nueva_llamada" class="form-label">Fecha para Nueva Llamada:</label>' +
-                        '<input type="date" name="fecha_nueva_llamada" id="fecha_nueva_llamada" class="form-control" required>' +
-                    '</div>' +
-                    '<div class="form-group">' +
-                        '<label for="motivo_nueva_llamada" class="form-label">Motivo:</label>' +
-                        '<input type="text" name="motivo_nueva_llamada" id="motivo_nueva_llamada" class="form-control" required>' +
+                        '<label for="fecha_nueva_llamada" class="form-label">Fecha y Hora para Nueva Llamada:</label>' +
+                        '<input type="datetime-local" name="fecha_nueva_llamada" id="fecha_nueva_llamada" class="form-control" required>' +
                     '</div>';
                 camposAdicionales.style.display = 'block';
+                const subSelectVolver = document.getElementById('sub_opcion_volver_llamar');
+                if (subSelectVolver) {
+                    subSelectVolver.value = 'no_informa';
+                }
+                document.getElementById('sub_tipificacion_hidden').value = 'no_informa';
+                return;
             }
             
             // Actualizar la sub-tipificación
@@ -4284,11 +4252,18 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                 }
             });
             
-            // Mostrar la sub-opción correspondiente
-            const subOpcionId = `sub_opciones_${valor}`;
+            // Mostrar la sub-opción correspondiente (fallecido_otro usa id distinto al de contacto tercero)
+            const subOpcionIdPorMotivo = {
+                fallecido_otro: 'sub_opciones_fallecido_otro_sin_contacto'
+            };
+            const subOpcionId = subOpcionIdPorMotivo[valor] || `sub_opciones_${valor}`;
             const subOpcionElemento = document.getElementById(subOpcionId);
             if (subOpcionElemento) {
                 subOpcionElemento.style.display = 'block';
+                const selectRazon = subOpcionElemento.querySelector('select');
+                if (selectRazon) {
+                    selectRazon.value = 'indefinido';
+                }
             }
             
             // Limpiar campos adicionales
@@ -4298,8 +4273,8 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                 camposAdicionales.style.display = 'none';
             }
             
-            // Actualizar la sub-tipificación
-            document.getElementById('sub_tipificacion_hidden').value = valor;
+            // Razón específica para sin contacto: siempre INDEFINIDA
+            document.getElementById('sub_tipificacion_hidden').value = 'indefinido';
         }
         
         // Función para manejar la selección de sub-opciones (tercer nivel)
@@ -4315,35 +4290,20 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
             // Verificar si el nivel 2 es "acuerdo_pago" para preservar los campos de pago
             const opcionContactoExitoso = document.getElementById('opcion_contacto_exitoso');
             const esAcuerdoPago = opcionContactoExitoso && opcionContactoExitoso.value === 'acuerdo_pago';
+            const esVolverLlamar = opcionContactoExitoso && opcionContactoExitoso.value === 'volver_llamar';
             
             // Mostrar campos adicionales si es necesario
             const camposAdicionales = document.getElementById('campos_adicionales');
             if (!camposAdicionales) return;
             
-            // Si es acuerdo de pago, no limpiar los campos existentes
-            if (esAcuerdoPago) {
-                // Solo actualizar la sub-tipificación, mantener los campos de pago
+            // Si es acuerdo de pago o volver a llamar, no limpiar los campos existentes
+            if (esAcuerdoPago || esVolverLlamar) {
                 return;
             }
             
-            // Limpiar campos adicionales solo si no es acuerdo de pago
+            // Limpiar campos adicionales
             camposAdicionales.innerHTML = '';
             camposAdicionales.style.display = 'none';
-            
-            // Mostrar campos específicos según la sub-opción seleccionada
-            if (valor === 'volver_llamar') {
-                camposAdicionales.innerHTML = `
-                    <div class="form-group">
-                        <label for="fecha_nueva_llamada" class="form-label">Fecha para Nueva Llamada:</label>
-                        <input type="date" name="fecha_nueva_llamada" id="fecha_nueva_llamada" class="form-control" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="motivo_nueva_llamada" class="form-label">Motivo:</label>
-                        <input type="text" name="motivo_nueva_llamada" id="motivo_nueva_llamada" class="form-control" required>
-                    </div>
-                `;
-                camposAdicionales.style.display = 'block';
-            }
         }
         
         // ===== FUNCIONALIDAD DEL BUSCADOR DE CLIENTES =====
@@ -4466,6 +4426,10 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
          * @param {number|string} clienteId - ID del cliente seleccionado
          */
         async function seleccionarClienteBuscador(clienteId) {
+            if (typeof window.emerBloquearSiLlamadaActiva === 'function' && window.emerBloquearSiLlamadaActiva()) {
+                return;
+            }
+
             console.log('🔍 [Buscador] Seleccionando cliente desde búsqueda:', clienteId, '(tipo:', typeof clienteId + ')');
 
             // Validar que el ID existe y es válido
@@ -4496,6 +4460,10 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
             
             if (buscadorInput) {
                 buscadorInput.value = '';
+            }
+
+            if (typeof window.emerBloquearSiLlamadaActiva === 'function' && window.emerBloquearSiLlamadaActiva()) {
+                return;
             }
 
             // Recargar la página con el nuevo cliente
@@ -5010,9 +4978,6 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
 
         // Llamar desde WebRTC
         async function llamarDesdeWebRTC(numero) {
-            // #region agent log 058b8a gestionar_cliente call attempt
-            fetch('http://127.0.0.1:7552/ingest/dcda37ca-c096-40cf-8b4d-0812abcc5f84',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'058b8a'},body:JSON.stringify({sessionId:'058b8a',runId:'pre',hypothesisId:'H6',location:'views/gestionar_cliente.php:llamarDesdeWebRTC',message:'attempt',data:{hasSoftphone:!!window.webrtcSoftphone,status:(window.webrtcSoftphone&&window.webrtcSoftphone.status)?String(window.webrtcSoftphone.status):'',numeroLen:numero?String(numero).replace(/\D/g,'').length:0,clienteId:<?php echo (int)($cliente['id'] ?? 0); ?>},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
             if (!window.webrtcSoftphone) {
                 console.error('❌ [Softphone] No está inicializado');
                 alert('El softphone no está disponible. Por favor, espera a que se conecte.');
@@ -5043,9 +5008,6 @@ try { @file_put_contents(__DIR__ . '/../debug-058b8a.log', json_encode([
                         telefono_contacto: numeroLimpio
                     });
                 }
-                // #region agent log 058b8a gestionar_cliente context set
-                fetch('http://127.0.0.1:7552/ingest/dcda37ca-c096-40cf-8b4d-0812abcc5f84',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'058b8a'},body:JSON.stringify({sessionId:'058b8a',runId:'pre',hypothesisId:'H6',location:'views/gestionar_cliente.php:llamarDesdeWebRTC',message:'context_set',data:{hasSetCallContext:!!(window.webrtcSoftphone&&typeof window.webrtcSoftphone.setCallContext==='function'),clienteId:<?php echo (int)($cliente['id'] ?? 0); ?>,telefonoLen:numeroLimpio.length},timestamp:Date.now()})}).catch(()=>{});
-                // #endregion
 
                 // Usar callNumber() que establece el número y luego llama automáticamente
                 if (typeof window.webrtcSoftphone.callNumber === 'function') {

@@ -110,6 +110,10 @@ class AdminController extends BaseController {
                     // Establecer tiempo de inicio de sesión (timestamp Unix)
                     $login_time = time();
                     $_SESSION['login_time'] = $login_time;
+
+                    if (($user['rol'] ?? '') === 'asesor') {
+                        $this->registrarInicioJornadaAsesor((string)$user['cedula']);
+                    }
                     
                     // Log de acceso exitoso
                     error_log("Login exitoso - Usuario: {$usuario}, Rol: {$user['rol']}, Cédula: {$user['cedula']}, Login time: {$login_time}");
@@ -169,15 +173,66 @@ class AdminController extends BaseController {
     }
 
     public function logout() {
-        // Destruir sesión PHP
+        $cedula = $_SESSION['user_id'] ?? null;
+        $rol = $_SESSION['user_role'] ?? null;
+        if ($rol === 'asesor' && $cedula) {
+            $this->registrarFinJornadaAsesor((string)$cedula);
+        }
+
         session_destroy();
         session_start();
-        
-        // Limpiar variables de sesión
-        $_SESSION = array();
-        
+        $_SESSION = [];
+
         header('Location: index.php?action=login');
         exit;
+    }
+
+    /**
+     * Cierra jornadas activas huérfanas e inserta inicio de jornada (tabla tiempos).
+     */
+    private function registrarInicioJornadaAsesor(string $asesorCedula): void {
+        try {
+            $stmtPausas = $this->pdo->prepare(
+                "UPDATE tiempos SET hora_fin = NOW(), estado = 'finalizada'
+                 WHERE asesor_cedula = ? AND estado = 'activa' AND tipo_registro != 'jornada'"
+            );
+            $stmtPausas->execute([$asesorCedula]);
+
+            $stmt = $this->pdo->prepare(
+                "UPDATE tiempos SET hora_fin = NOW(), estado = 'finalizada'
+                 WHERE asesor_cedula = ? AND tipo_registro = 'jornada' AND estado = 'activa'"
+            );
+            $stmt->execute([$asesorCedula]);
+
+            $ins = $this->pdo->prepare(
+                "INSERT INTO tiempos (asesor_cedula, tipo_registro, hora_inicio, estado)
+                 VALUES (?, 'jornada', NOW(), 'activa')"
+            );
+            $ins->execute([$asesorCedula]);
+        } catch (Exception $e) {
+            error_log('registrarInicioJornadaAsesor: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Finaliza la jornada activa del asesor al cerrar sesión.
+     */
+    private function registrarFinJornadaAsesor(string $asesorCedula): void {
+        try {
+            $stmtPausas = $this->pdo->prepare(
+                "UPDATE tiempos SET hora_fin = NOW(), estado = 'finalizada'
+                 WHERE asesor_cedula = ? AND estado = 'activa' AND tipo_registro != 'jornada'"
+            );
+            $stmtPausas->execute([$asesorCedula]);
+
+            $stmt = $this->pdo->prepare(
+                "UPDATE tiempos SET hora_fin = NOW(), estado = 'finalizada'
+                 WHERE asesor_cedula = ? AND tipo_registro = 'jornada' AND estado = 'activa'"
+            );
+            $stmt->execute([$asesorCedula]);
+        } catch (Exception $e) {
+            error_log('registrarFinJornadaAsesor: ' . $e->getMessage());
+        }
     }
 
     public function dashboard() {

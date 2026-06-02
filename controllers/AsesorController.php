@@ -221,6 +221,7 @@ class AsesorController extends BaseController {
             $dbg('controllers/AsesorController.php:dashboard:view', 'requiring_view', [
                 'viewPath' => __DIR__ . '/../views/asesor_dashboard.php',
             ], 'A3');
+            $this->sincronizarJornadaActivaSiFalta((string)($_SESSION['user_id'] ?? ''));
             require __DIR__ . '/../views/asesor_dashboard.php';
         } catch (Throwable $e) {
             // #region agent log d54ef5 dashboard view exception
@@ -1579,6 +1580,17 @@ class AsesorController extends BaseController {
             if (empty($tipificacion) || empty($comentarios)) {
                 throw new Exception("La tipificación y los comentarios son obligatorios.");
             }
+
+            if ($tipificacion === 'volver_llamar') {
+                if (empty($fechaNuevaLlamada)) {
+                    throw new Exception("La fecha y hora para la nueva llamada son obligatorias.");
+                }
+                $tsLlamada = strtotime(str_replace('T', ' ', (string)$fechaNuevaLlamada));
+                if ($tsLlamada === false) {
+                    throw new Exception("La fecha y hora para la nueva llamada no son válidas.");
+                }
+                $comentarios .= "\n[PROXIMA_LLAMADA:" . date('Y-m-d H:i:s', $tsLlamada) . "]";
+            }
             
             // Validar campos específicos para acuerdo de pago
             if ($tipificacion === 'acuerdo_pago') {
@@ -2640,6 +2652,34 @@ class AsesorController extends BaseController {
     }
 
     /**
+     * Si el asesor tiene sesión PHP pero no jornada activa en BD, la crea (recuperación).
+     */
+    private function sincronizarJornadaActivaSiFalta(string $asesorCedula): void {
+        if ($asesorCedula === '' || !isset($_SESSION['login_time'])) {
+            return;
+        }
+        try {
+            $chk = $this->pdo->prepare(
+                "SELECT id_tiempo FROM tiempos
+                 WHERE asesor_cedula = ? AND tipo_registro = 'jornada' AND estado = 'activa'
+                 LIMIT 1"
+            );
+            $chk->execute([$asesorCedula]);
+            if ($chk->fetch()) {
+                return;
+            }
+            $horaInicio = date('Y-m-d H:i:s', (int)$_SESSION['login_time']);
+            $ins = $this->pdo->prepare(
+                "INSERT INTO tiempos (asesor_cedula, tipo_registro, hora_inicio, estado)
+                 VALUES (?, 'jornada', ?, 'activa')"
+            );
+            $ins->execute([$asesorCedula, $horaInicio]);
+        } catch (Exception $e) {
+            error_log('sincronizarJornadaActivaSiFalta: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Mapea el tipo del UI al enum `tipo_registro` de la tabla `tiempos` (emermedica_cobranza.sql).
      */
     private function mapTipoBreakUiATipoRegistro(string $tipoUi): string {
@@ -2667,7 +2707,7 @@ class AsesorController extends BaseController {
     }
 
     /**
-     * Verifica si hay un break activo para el asesor (tabla `tiempos`).
+     * Verifica si hay un break/pausa activo (excluye jornada de login — no bloquea trabajo).
      */
     private function verificarBreakActivo($asesorId) {
         try {
@@ -2675,6 +2715,7 @@ class AsesorController extends BaseController {
                     FROM tiempos
                     WHERE asesor_cedula = ?
                       AND estado = 'activa'
+                      AND tipo_registro != 'jornada'
                     ORDER BY id_tiempo DESC
                     LIMIT 1";
 
@@ -2734,7 +2775,8 @@ class AsesorController extends BaseController {
                     SET hora_fin = NOW(), estado = 'finalizada'
                     WHERE id_tiempo = ?
                       AND asesor_cedula = ?
-                      AND estado = 'activa'";
+                      AND estado = 'activa'
+                      AND tipo_registro != 'jornada'";
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute([(int)$breakId, (string)$asesorId]);
 
@@ -2778,6 +2820,10 @@ class AsesorController extends BaseController {
             }
 
             $breakActivo = $this->verificarBreakActivo($asesorId);
+
+            if ($breakActivo && ($breakActivo['tipo'] ?? '') === 'jornada') {
+                $breakActivo = false;
+            }
             
             if ($breakActivo) {
                 // Mapear tipos de break a nombres legibles

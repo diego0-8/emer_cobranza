@@ -1944,38 +1944,11 @@ class CoordinadorController extends BaseController {
             fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
             
             // Encabezados del CSV (mismo formato que el reporte normal)
-            $headers = [
-                'Fecha de Gestión',
-                'Asesor',
-                'Cédula del Cliente',
-                'Nombre del Cliente',
-                'Nombre de la Base',
-                'Teléfono de Contacto',
-                'Número de Factura',
-                'Franja del Cliente',
-                'Forma de Contacto',
-                'Tipo de Contacto',
-                'Resultado de Contacto',
-                'Razón Específica',
-                'Fecha de Pago',
-                'Monto de Acuerdo',
-                'Observaciones',
-                'Canales Autorizados',
-                'Celular',
-                'Celular 2',
-                'Celular 3',
-                'Celular 4',
-                'Celular 5',
-                'Celular 6',
-                'Celular 7',
-                'Celular 8',
-                'Celular 9',
-                'Celular 10'
-            ];
+            $headers = $this->obtenerEncabezadosGestionCSV();
             fputcsv($output, $headers, ';');
             
             // Agregar mensaje de que no hay datos
-            $row = array_fill(0, 26, '');
+            $row = array_fill(0, count($headers), '');
             $row[0] = 'NO HAY DATOS PARA EXPORTAR EN EL PERÍODO SELECCIONADO';
             $row[1] = 'ASESOR: ' . ($asesor['nombre_completo'] ?? '');
             $row[2] = 'PERÍODO: ' . $fechaInicio . ' A ' . $fechaFin;
@@ -2006,34 +1979,7 @@ class CoordinadorController extends BaseController {
         fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
         
         // Encabezados del CSV con todos los campos requeridos
-        $headers = [
-            'Fecha de Gestión',
-            'Asesor',
-            'Cédula del Cliente',
-            'Nombre del Cliente',
-            'Nombre de la Base',
-            'Teléfono de Contacto',
-            'Número de Factura',
-            'Franja del Cliente',
-            'Forma de Contacto',
-            'Tipo de Contacto',
-            'Resultado de Contacto',
-            'Razón Específica',
-            'Fecha de Pago',
-            'Monto de Acuerdo',
-            'Observaciones',
-            'Canales Autorizados',
-            'Celular',
-            'Celular 2',
-            'Celular 3',
-            'Celular 4',
-            'Celular 5',
-            'Celular 6',
-            'Celular 7',
-            'Celular 8',
-            'Celular 9',
-            'Celular 10'
-        ];
+        $headers = $this->obtenerEncabezadosGestionCSV();
         fputcsv($output, $headers, ';');
         
         // Datos de las gestiones con todos los campos requeridos
@@ -2117,37 +2063,10 @@ class CoordinadorController extends BaseController {
             fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
 
             // Encabezados del CSV (mismo formato que el reporte normal)
-            $headers = [
-                'Fecha de Gestión',
-                'Asesor',
-                'Cédula del Cliente',
-                'Nombre del Cliente',
-                'Nombre de la Base',
-                'Teléfono de Contacto',
-                'Número de Factura',
-                'Franja del Cliente',
-                'Forma de Contacto',
-                'Tipo de Contacto',
-                'Resultado de Contacto',
-                'Razón Específica',
-                'Fecha de Pago',
-                'Monto de Acuerdo',
-                'Observaciones',
-                'Canales Autorizados',
-                'Celular',
-                'Celular 2',
-                'Celular 3',
-                'Celular 4',
-                'Celular 5',
-                'Celular 6',
-                'Celular 7',
-                'Celular 8',
-                'Celular 9',
-                'Celular 10'
-            ];
+            $headers = $this->obtenerEncabezadosGestionCSV();
             fputcsv($output, $headers, ';');
 
-            $row = array_fill(0, 26, '');
+            $row = array_fill(0, count($headers), '');
             $row[0] = 'NO HAY ASESORES ACTIVOS ASIGNADOS A SU COORDINACIÓN';
             $row[1] = 'PERÍODO: ' . $fechaInicio . ' A ' . $fechaFin;
             fputcsv($output, $row, ';');
@@ -2176,34 +2095,7 @@ class CoordinadorController extends BaseController {
         fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
         
         // Encabezados del CSV con orden correcto
-        $headers = [
-            'Fecha de Gestión',
-            'Asesor',
-            'Cédula del Cliente',
-            'Nombre del Cliente',
-            'Nombre de la Base',
-            'Teléfono de Contacto',
-            'Número de Factura',
-            'Franja del Cliente',
-            'Forma de Contacto',
-            'Tipo de Contacto',
-            'Resultado de Contacto',
-            'Razón Específica',
-            'Fecha de Pago',
-            'Monto de Acuerdo',
-            'Observaciones',
-            'Canales Autorizados',
-            'Celular',
-            'Celular 2',
-            'Celular 3',
-            'Celular 4',
-            'Celular 5',
-            'Celular 6',
-            'Celular 7',
-            'Celular 8',
-            'Celular 9',
-            'Celular 10'
-        ];
+        $headers = $this->obtenerEncabezadosGestionCSV();
         fputcsv($output, $headers, ';');
         
         // Recolectar todas las gestiones de todos los asesores
@@ -2322,34 +2214,7 @@ class CoordinadorController extends BaseController {
         fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
         
         // Encabezados del CSV con orden correcto (mismo formato que el reporte normal)
-        $headers = [
-            'Fecha de Gestión',
-            'Asesor',
-            'Cédula del Cliente',
-            'Nombre del Cliente',
-            'Nombre de la Base',
-            'Teléfono de Contacto',
-            'Número de Factura',
-            'Franja del Cliente',
-            'Forma de Contacto',
-            'Tipo de Contacto',
-            'Resultado de Contacto',
-            'Razón Específica',
-            'Fecha de Pago',
-            'Monto de Acuerdo',
-            'Observaciones',
-            'Canales Autorizados',
-            'Celular',
-            'Celular 2',
-            'Celular 3',
-            'Celular 4',
-            'Celular 5',
-            'Celular 6',
-            'Celular 7',
-            'Celular 8',
-            'Celular 9',
-            'Celular 10'
-        ];
+        $headers = $this->obtenerEncabezadosGestionCSV();
         fputcsv($output, $headers, ';');
         
         // Datos filtrados con orden correcto
@@ -2872,19 +2737,416 @@ class CoordinadorController extends BaseController {
     public function reporteTMO() {
         $page_title = "Reporte TMO - Tiempo de Sesión y Pausas";
         
-        // Obtener TODOS los asesores activos (no solo los asignados al coordinador)
         $asesores = $this->usuarioModel->getAsesores();
         
-        // Obtener filtros de fechas
         $fecha_inicio = $_GET['fecha_inicio'] ?? date('Y-m-d', strtotime('-30 days'));
         $fecha_fin = $_GET['fecha_fin'] ?? date('Y-m-d');
         $asesor_id = $_GET['asesor_id'] ?? '';
+
+        $estado_asesores = $this->construirEstadoTiempoAsesores();
+        $contadores_estado = $this->contarEstadosTiempo($estado_asesores);
+
+        $total_registros_tmo = 0;
+        try {
+            $sqlCount = "SELECT COUNT(*)
+                         FROM tiempos t
+                         INNER JOIN usuarios u ON t.asesor_cedula = u.cedula
+                         WHERE u.rol = 'asesor'
+                           AND t.tipo_registro != 'jornada'
+                           AND DATE(t.hora_inicio) BETWEEN ? AND ?";
+            $paramsCount = [$fecha_inicio, $fecha_fin];
+            if ($asesor_id !== '') {
+                $sqlCount .= " AND t.asesor_cedula = ?";
+                $paramsCount[] = $asesor_id;
+            }
+            $stmtCount = $this->pdo->prepare($sqlCount);
+            $stmtCount->execute($paramsCount);
+            $total_registros_tmo = (int)$stmtCount->fetchColumn();
+        } catch (Exception $e) {
+            error_log('reporteTMO count tiempos: ' . $e->getMessage());
+        }
         
         require __DIR__ . '/../views/coordinador_reporte_tmo.php';
     }
 
     /**
-     * Exporta el reporte TMO en formato CSV
+     * API JSON: estado en tiempo real de asesores (jornada + pausas en tiempos).
+     */
+    public function obtenerEstadoTiempoAsesores() {
+        $this->limpiarOutputBuffers();
+        $this->configurarHeadersJSON();
+
+        try {
+            if (!isset($_SESSION['user_role']) || $_SESSION['user_role'] !== 'coordinador') {
+                $this->enviarJSONError('Acceso denegado', 'FORBIDDEN', 403);
+                return;
+            }
+
+            $asesores = $this->construirEstadoTiempoAsesores();
+            $this->enviarJSONExito([
+                'asesores' => $asesores,
+                'contadores' => $this->contarEstadosTiempo($asesores),
+                'actualizado_en' => date('Y-m-d H:i:s'),
+            ]);
+        } catch (Exception $e) {
+            error_log('obtenerEstadoTiempoAsesores: ' . $e->getMessage());
+            $this->enviarJSONError('Error al obtener estado: ' . $e->getMessage(), 'SERVER_ERROR', 500);
+        }
+    }
+
+    /**
+     * API JSON: jornada del día y pausas de un asesor (modal detalle TMO).
+     */
+    public function obtenerDetallePausasAsesorTmo() {
+        $this->limpiarOutputBuffers();
+        $this->configurarHeadersJSON();
+
+        try {
+            if (!isset($_SESSION['user_role']) || $_SESSION['user_role'] !== 'coordinador') {
+                $this->enviarJSONError('Acceso denegado', 'FORBIDDEN', 403);
+                return;
+            }
+
+            $cedula = trim((string)($_GET['cedula'] ?? ''));
+            if ($cedula === '') {
+                $this->enviarJSONError('Cédula de asesor requerida', 'VALIDATION', 400);
+                return;
+            }
+
+            $nombreAsesor = '';
+            foreach ($this->usuarioModel->getAsesores() as $asesor) {
+                $c = (string)($asesor['cedula'] ?? $asesor['id'] ?? '');
+                if ($c === $cedula) {
+                    $nombreAsesor = (string)($asesor['nombre_completo'] ?? $asesor['nombre'] ?? '');
+                    break;
+                }
+            }
+
+            $stmtJornada = $this->pdo->prepare(
+                "SELECT hora_inicio, hora_fin, estado
+                 FROM tiempos
+                 WHERE asesor_cedula = ?
+                   AND tipo_registro = 'jornada'
+                   AND DATE(hora_inicio) = CURDATE()
+                 ORDER BY id_tiempo DESC
+                 LIMIT 1"
+            );
+            $stmtJornada->execute([$cedula]);
+            $jornadaRow = $stmtJornada->fetch(PDO::FETCH_ASSOC) ?: null;
+
+            $jornada = null;
+            if ($jornadaRow) {
+                $jornada = [
+                    'hora_inicio' => $jornadaRow['hora_inicio'],
+                    'hora_fin' => $jornadaRow['hora_fin'],
+                    'estado' => $jornadaRow['estado'] ?? '',
+                ];
+            }
+
+            $stmtPausas = $this->pdo->prepare(
+                "SELECT
+                    tipo_registro,
+                    hora_inicio,
+                    hora_fin,
+                    estado,
+                    TIMESTAMPDIFF(SECOND, hora_inicio, COALESCE(hora_fin, NOW())) AS duracion_segundos
+                 FROM tiempos
+                 WHERE asesor_cedula = ?
+                   AND tipo_registro != 'jornada'
+                   AND DATE(hora_inicio) = CURDATE()
+                 ORDER BY hora_inicio ASC"
+            );
+            $stmtPausas->execute([$cedula]);
+            $pausas = [];
+            foreach ($stmtPausas->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $tipo = (string)($row['tipo_registro'] ?? '');
+                $durSeg = max(0, (int)($row['duracion_segundos'] ?? 0));
+                $pausas[] = [
+                    'tipo_registro' => $tipo,
+                    'tipo_label' => $this->etiquetaTipoRegistroTmo($tipo),
+                    'hora_inicio' => $row['hora_inicio'],
+                    'hora_fin' => $row['hora_fin'],
+                    'estado' => $row['estado'] ?? '',
+                    'duracion_segundos' => $durSeg,
+                    'duracion_fmt' => $this->formatearDuracionTmo($durSeg),
+                ];
+            }
+
+            $this->enviarJSONExito([
+                'asesor' => [
+                    'cedula' => $cedula,
+                    'nombre' => $nombreAsesor,
+                ],
+                'jornada' => $jornada,
+                'pausas' => $pausas,
+                'fecha' => date('Y-m-d'),
+            ]);
+        } catch (Exception $e) {
+            error_log('obtenerDetallePausasAsesorTmo: ' . $e->getMessage());
+            $this->enviarJSONError('Error al obtener detalle: ' . $e->getMessage(), 'SERVER_ERROR', 500);
+        }
+    }
+
+    /**
+     * Cierra jornadas activas huérfanas (día anterior o 5+ h sin actividad de pausa).
+     */
+    private function cerrarJornadasInactivasTmo(): void {
+        $maxHoras = defined('TMO_JORNADA_MAX_INACTIVIDAD_HORAS')
+            ? (int) TMO_JORNADA_MAX_INACTIVIDAD_HORAS
+            : 5;
+        if ($maxHoras < 1) {
+            $maxHoras = 5;
+        }
+        $segundosMax = $maxHoras * 3600;
+
+        try {
+            $stmt = $this->pdo->query(
+                "SELECT id_tiempo, asesor_cedula, hora_inicio
+                 FROM tiempos
+                 WHERE tipo_registro = 'jornada' AND estado = 'activa'"
+            );
+            $jornadas = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+            $stmtUltimaPausa = $this->pdo->prepare(
+                "SELECT MAX(GREATEST(
+                    UNIX_TIMESTAMP(hora_inicio),
+                    UNIX_TIMESTAMP(COALESCE(hora_fin, hora_inicio))
+                )) AS ult_ts
+                 FROM tiempos
+                 WHERE asesor_cedula = ?
+                   AND tipo_registro != 'jornada'
+                   AND hora_inicio >= ?"
+            );
+
+            $stmtCierraPausas = $this->pdo->prepare(
+                "UPDATE tiempos SET hora_fin = ?, estado = 'finalizada'
+                 WHERE asesor_cedula = ? AND estado = 'activa' AND tipo_registro != 'jornada'"
+            );
+
+            $stmtCierraJornada = $this->pdo->prepare(
+                "UPDATE tiempos SET hora_fin = ?, estado = 'finalizada'
+                 WHERE id_tiempo = ? AND estado = 'activa'"
+            );
+
+            $hoy = date('Y-m-d');
+            $ahora = time();
+
+            foreach ($jornadas as $jornada) {
+                $idTiempo = (int) ($jornada['id_tiempo'] ?? 0);
+                $cedula = (string) ($jornada['asesor_cedula'] ?? '');
+                $horaInicio = $jornada['hora_inicio'] ?? null;
+                if ($idTiempo <= 0 || $cedula === '' || !$horaInicio) {
+                    continue;
+                }
+
+                $tsInicio = strtotime((string) $horaInicio);
+                if ($tsInicio === false) {
+                    continue;
+                }
+
+                $stmtUltimaPausa->execute([$cedula, $horaInicio]);
+                $ultPausaTs = (int) ($stmtUltimaPausa->fetchColumn() ?: 0);
+                $referenciaTs = $ultPausaTs > 0 ? $ultPausaTs : $tsInicio;
+
+                $diaJornada = date('Y-m-d', $tsInicio);
+                $cerrar = false;
+                $horaFinTs = null;
+
+                if ($diaJornada < $hoy) {
+                    $cerrar = true;
+                    $finDiaTs = strtotime($diaJornada . ' 23:59:59');
+                    $corteInactividadTs = $referenciaTs + $segundosMax;
+                    $horaFinTs = min($finDiaTs, $corteInactividadTs);
+                    if ($horaFinTs < $tsInicio) {
+                        $horaFinTs = min($finDiaTs, $tsInicio + $segundosMax);
+                    }
+                } elseif ($ahora - $referenciaTs >= $segundosMax) {
+                    $cerrar = true;
+                    $horaFinTs = $referenciaTs + $segundosMax;
+                }
+
+                if (!$cerrar || $horaFinTs === null) {
+                    continue;
+                }
+
+                $horaFin = date('Y-m-d H:i:s', $horaFinTs);
+                $stmtCierraPausas->execute([$horaFin, $cedula]);
+                $stmtCierraJornada->execute([$horaFin, $idTiempo]);
+            }
+        } catch (Exception $e) {
+            error_log('cerrarJornadasInactivasTmo: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Construye el estado de cada asesor activo desde tabla tiempos.
+     */
+    private function construirEstadoTiempoAsesores(): array {
+        $this->cerrarJornadasInactivasTmo();
+
+        $listaAsesores = $this->usuarioModel->getAsesores();
+        $resultado = [];
+
+        $jornadasActivas = [];
+        $stmtJa = $this->pdo->query(
+            "SELECT asesor_cedula, hora_inicio, hora_fin, estado
+             FROM tiempos
+             WHERE tipo_registro = 'jornada' AND estado = 'activa'"
+        );
+        foreach ($stmtJa->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $jornadasActivas[$row['asesor_cedula']] = $row;
+        }
+
+        $pausasActivas = [];
+        $stmtPa = $this->pdo->query(
+            "SELECT asesor_cedula, tipo_registro, hora_inicio
+             FROM tiempos
+             WHERE estado = 'activa' AND tipo_registro != 'jornada'"
+        );
+        foreach ($stmtPa->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $pausasActivas[$row['asesor_cedula']] = $row;
+        }
+
+        $stmtUltimaJornada = $this->pdo->query(
+            "SELECT t.asesor_cedula, t.hora_inicio, t.hora_fin, t.estado
+             FROM tiempos t
+             INNER JOIN (
+                 SELECT asesor_cedula, MAX(id_tiempo) AS max_id
+                 FROM tiempos
+                 WHERE tipo_registro = 'jornada' AND DATE(hora_inicio) = CURDATE()
+                 GROUP BY asesor_cedula
+             ) uj ON t.id_tiempo = uj.max_id"
+        );
+        $jornadasHoy = [];
+        foreach ($stmtUltimaJornada->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $jornadasHoy[$row['asesor_cedula']] = $row;
+        }
+
+        foreach ($listaAsesores as $asesor) {
+            $cedula = (string)($asesor['cedula'] ?? $asesor['id'] ?? '');
+            $nombre = (string)($asesor['nombre_completo'] ?? $asesor['nombre'] ?? '');
+
+            $jornadaActiva = $jornadasActivas[$cedula] ?? null;
+            $pausaActiva = $pausasActivas[$cedula] ?? null;
+            $jornadaHoy = $jornadasHoy[$cedula] ?? null;
+
+            $inicioSesion = null;
+            $finSesion = null;
+            $estado = 'offline';
+            $estadoLabel = 'Offline';
+            $pausaTipo = null;
+            $pausaDesde = null;
+            $pausaDuracionSegundos = null;
+
+            if ($jornadaActiva) {
+                $inicioSesion = $jornadaActiva['hora_inicio'];
+                $finSesion = $jornadaActiva['hora_fin'];
+                if ($pausaActiva) {
+                    $estado = 'en_pausa';
+                    $tipoUi = $this->mapTipoRegistroATipoUiTmo((string)$pausaActiva['tipo_registro']);
+                    $pausaTipo = $tipoUi;
+                    $pausaDesde = $pausaActiva['hora_inicio'];
+                    $tsPausa = $pausaDesde ? strtotime($pausaDesde) : false;
+                    $pausaDuracionSegundos = $tsPausa ? max(0, time() - $tsPausa) : 0;
+                    $estadoLabel = 'En pausa: ' . $this->etiquetaTipoUiTmo($tipoUi);
+                } else {
+                    $estado = 'en_linea';
+                    $estadoLabel = 'En línea';
+                }
+            } elseif ($jornadaHoy) {
+                $inicioSesion = $jornadaHoy['hora_inicio'];
+                $finSesion = $jornadaHoy['hora_fin'];
+                $estado = 'offline';
+                $estadoLabel = 'Offline';
+            }
+
+            $resultado[] = [
+                'cedula' => $cedula,
+                'nombre' => $nombre,
+                'inicio_sesion' => $inicioSesion,
+                'fin_sesion' => $finSesion,
+                'estado' => $estado,
+                'estado_label' => $estadoLabel,
+                'pausa_tipo' => $pausaTipo,
+                'pausa_desde' => $pausaDesde,
+                'pausa_duracion_segundos' => $pausaDuracionSegundos,
+            ];
+        }
+
+        usort($resultado, static function ($a, $b) {
+            $orden = ['en_pausa' => 0, 'en_linea' => 1, 'offline' => 2];
+            $oa = $orden[$a['estado']] ?? 3;
+            $ob = $orden[$b['estado']] ?? 3;
+            if ($oa !== $ob) {
+                return $oa <=> $ob;
+            }
+            return strcasecmp($a['nombre'], $b['nombre']);
+        });
+
+        return $resultado;
+    }
+
+    private function contarEstadosTiempo(array $estadoAsesores): array {
+        $c = ['en_linea' => 0, 'en_pausa' => 0, 'offline' => 0];
+        foreach ($estadoAsesores as $row) {
+            $k = $row['estado'] ?? 'offline';
+            if (isset($c[$k])) {
+                $c[$k]++;
+            }
+        }
+        return $c;
+    }
+
+    private function mapTipoRegistroATipoUiTmo(string $tipoReg): string {
+        $map = [
+            'capacitacion' => 'mantenimiento',
+            'retroalimentacion' => 'actividad_extra',
+            'sesion' => 'pausa_activa',
+        ];
+        return $map[$tipoReg] ?? $tipoReg;
+    }
+
+    private function etiquetaTipoUiTmo(string $tipoUi): string {
+        $map = [
+            'baño' => 'Baño',
+            'almuerzo' => 'Almuerzo',
+            'break' => 'Break',
+            'mantenimiento' => 'Capacitación / Mantenimiento',
+            'actividad_extra' => 'Actividad Extra',
+            'pausa_activa' => 'Pausa Activa',
+        ];
+        return $map[$tipoUi] ?? $tipoUi;
+    }
+
+    /**
+     * Etiqueta legible para `tiempos.tipo_registro`.
+     */
+    private function etiquetaTipoRegistroTmo(string $tipoRegistro): string {
+        $map = [
+            'sesion' => 'Pausa Activa',
+            'break' => 'Break',
+            'almuerzo' => 'Almuerzo',
+            'baño' => 'Baño',
+            'capacitacion' => 'Capacitación / Mantenimiento',
+            'retroalimentacion' => 'Actividad Extra',
+            'gestion' => 'Gestión',
+        ];
+        return $map[$tipoRegistro] ?? $tipoRegistro;
+    }
+
+    /**
+     * Formatea segundos a HH:MM:SS.
+     */
+    private function formatearDuracionTmo(int $segundos): string {
+        $segundos = max(0, $segundos);
+        $horas = intdiv($segundos, 3600);
+        $minutos = intdiv($segundos % 3600, 60);
+        $resto = $segundos % 60;
+        return sprintf('%02d:%02d:%02d', $horas, $minutos, $resto);
+    }
+
+    /**
+     * Exporta el reporte TMO en formato CSV (tabla `tiempos`)
      */
     public function exportarReporteTMO() {
         // IMPORTANTE: Limpiar TODOS los niveles de output buffering
@@ -2910,323 +3172,87 @@ class CoordinadorController extends BaseController {
             // Obtener filtros
             $fecha_inicio = $_GET['fecha_inicio'] ?? date('Y-m-d', strtotime('-30 days'));
             $fecha_fin = $_GET['fecha_fin'] ?? date('Y-m-d');
-            $asesor_id = $_GET['asesor_id'] ?? '';
-        
-        // Detectar qué columna usa la tabla (usuario_id o asesor_id)
-        $sqlCheckColumn = "SHOW COLUMNS FROM sesiones_trabajo LIKE 'asesor_id'";
-        $stmtCheck = $this->pdo->query($sqlCheckColumn);
-        $usaAsesorId = $stmtCheck->rowCount() > 0;
-        $columnaAsesor = $usaAsesorId ? 'asesor_id' : 'usuario_id';
-        
-        // Verificar qué columnas de tiempo existen
-        $sqlCheckTiempo = "SHOW COLUMNS FROM sesiones_trabajo";
-        $stmtCheckTiempo = $this->pdo->query($sqlCheckTiempo);
-        $columnasTiempo = $stmtCheckTiempo->fetchAll(PDO::FETCH_COLUMN);
-        $tieneTiempoSegundos = in_array('tiempo_total_segundos', $columnasTiempo);
-        $tieneTiempoMinutos = in_array('tiempo_total_minutos', $columnasTiempo);
-        $tieneDuracionMinutos = in_array('duracion_minutos', $columnasTiempo);
-        $tieneEstado = in_array('estado', $columnasTiempo);
-        
-        // Construir consulta adaptada a la estructura real de la base de datos
-        $sql = "SELECT 
-                    s.id as sesion_id,
-                    s.$columnaAsesor as asesor_id,
-                    u.nombre_completo as asesor_nombre,
-                    u.cedula as asesor_cedula,
-                    s.fecha_inicio,
-                    s.fecha_fin,";
-        
-        // Agregar columnas de tiempo según lo que exista
-        if ($tieneTiempoSegundos) {
-            $sql .= " s.tiempo_total_segundos,";
-        } else {
-            $sql .= " NULL as tiempo_total_segundos,";
-        }
-        
-        if ($tieneTiempoMinutos) {
-            $sql .= " s.tiempo_total_minutos,";
-        } elseif ($tieneDuracionMinutos) {
-            $sql .= " s.duracion_minutos as tiempo_total_minutos,";
-        } else {
-            $sql .= " NULL as tiempo_total_minutos,";
-        }
-        
-        if ($tieneEstado) {
-            $sql .= " s.estado";
-        } else {
-            $sql .= " CASE WHEN s.fecha_fin IS NULL THEN 'activa' ELSE 'finalizada' END as estado";
-        }
-        
-        $sql .= " FROM sesiones_trabajo s
-                INNER JOIN usuarios u ON s.$columnaAsesor = u.id
-                WHERE u.rol = 'asesor'
-                AND DATE(s.fecha_inicio) BETWEEN ? AND ?";
-        
-        $params = [$fecha_inicio, $fecha_fin];
-        
-        // Filtrar por asesor específico si se seleccionó
-        if (!empty($asesor_id)) {
-            $sql .= " AND s.$columnaAsesor = ?";
-            $params[] = $asesor_id;
-        }
-        
-        $sql .= " ORDER BY s.fecha_inicio DESC, u.nombre_completo";
-        
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-        $sesiones = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        // Generar nombre del archivo
-        $filename = "Reporte_TMO_{$fecha_inicio}_a_{$fecha_fin}.csv";
-        
-        // IMPORTANTE: Asegurarse de que no haya output antes de los headers
-        // Limpiar cualquier salida previa nuevamente
-        while (ob_get_level()) {
-            ob_end_clean();
-        }
-        
-        // Configurar headers para descarga CSV (ANTES de cualquier output)
-        // Estos headers DEBEN enviarse antes de cualquier contenido
-        header('Content-Type: text/csv; charset=utf-8');
-        header('Content-Disposition: attachment; filename="' . $filename . '"');
-        header('Cache-Control: max-age=0');
-        header('Pragma: no-cache');
-        header('Expires: 0');
-        
-        // Crear archivo CSV
-        $output = fopen('php://output', 'w');
-        
-        // BOM para UTF-8 (igual que otros exportes)
-        fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
-        
-        // Encabezados del CSV (estructura simplificada)
-        $headers = [
-            'Fecha y Hora Inicio Sesión',
-            'Asesor',
-            'Hora Fin Sesión',
-            'Tiempo en Sesión (HH:MM:SS)',
-            'Motivo',
-            'Duración Pausa (HH:MM:SS)'
-        ];
-        fputcsv($output, $headers);
-        
-        // Mapear tipos de break (definir antes de usarlo)
-        $tiposBreak = [
-            'baño' => 'Baño',
-            'almuerzo' => 'Almuerzo',
-            'break' => 'Break',
-            'mantenimiento' => 'Mantenimiento',
-            'actividad_extra' => 'Actividad Extra',
-            'pausa_activa' => 'Pausa Activa'
-        ];
-        
-        // Verificar qué columnas tiene la tabla breaks_asesor
-        $sqlCheckBreaks = "SHOW COLUMNS FROM breaks_asesor";
-        $stmtCheckBreaks = $this->pdo->query($sqlCheckBreaks);
-        $columnasBreaks = $stmtCheckBreaks->fetchAll(PDO::FETCH_COLUMN);
-        $tieneSesionTrabajoId = in_array('sesion_trabajo_id', $columnasBreaks);
-        $tieneDuracionSegundos = in_array('duracion_segundos', $columnasBreaks);
-        $tieneEstadoBreak = in_array('estado', $columnasBreaks);
-        
-        // Obtener TODOS los breaks en el rango de fechas (independientemente de si tienen sesión o no)
-        $sqlTodosBreaks = "SELECT 
-                            b.id,
-                            b.tipo,
-                            b.fecha_inicio,
-                            b.fecha_fin,";
-        
-        // Agregar columnas según lo que exista
-        if ($tieneDuracionSegundos) {
-            $sqlTodosBreaks .= " b.duracion_segundos,";
-        } else {
-            $sqlTodosBreaks .= " NULL as duracion_segundos,";
-        }
-        
-        $sqlTodosBreaks .= " b.duracion_minutos,";
-        
-        if ($tieneEstadoBreak) {
-            $sqlTodosBreaks .= " b.estado,";
-        } else {
-            $sqlTodosBreaks .= " CASE WHEN b.fecha_fin IS NULL THEN 'activo' ELSE 'finalizado' END as estado,";
-        }
-        
-        $sqlTodosBreaks .= " b.asesor_id,";
-        
-        if ($tieneSesionTrabajoId) {
-            $sqlTodosBreaks .= " b.sesion_trabajo_id,";
-        } else {
-            $sqlTodosBreaks .= " NULL as sesion_trabajo_id,";
-        }
-        
-        $sqlTodosBreaks .= " u.nombre_completo as asesor_nombre,
-                            u.cedula as asesor_cedula
-                         FROM breaks_asesor b
-                         INNER JOIN usuarios u ON b.asesor_id = u.id
-                         WHERE u.rol = 'asesor'
-                         AND DATE(b.fecha_inicio) BETWEEN ? AND ?";
-        
-        $paramsBreaks = [$fecha_inicio, $fecha_fin];
-        
-        // Filtrar por asesor específico si se seleccionó
-        if (!empty($asesor_id)) {
-            $sqlTodosBreaks .= " AND b.asesor_id = ?";
-            $paramsBreaks[] = $asesor_id;
-        }
-        
-        $sqlTodosBreaks .= " ORDER BY b.fecha_inicio, b.asesor_id";
-        
-        $stmtTodosBreaks = $this->pdo->prepare($sqlTodosBreaks);
-        $stmtTodosBreaks->execute($paramsBreaks);
-        $todosBreaks = $stmtTodosBreaks->fetchAll(PDO::FETCH_ASSOC);
-        
-        // Crear un mapa de sesiones por ID para acceso rápido
-        $sesionesMap = [];
-        foreach ($sesiones as $sesion) {
-            $sesionesMap[$sesion['sesion_id']] = $sesion;
-        }
-        
-        // Crear un mapa de breaks por sesion_trabajo_id
-        $breaksPorSesion = [];
-        $breaksSinSesion = [];
-        
-        foreach ($todosBreaks as $break) {
-            if (!empty($break['sesion_trabajo_id']) && isset($sesionesMap[$break['sesion_trabajo_id']])) {
-                // Break tiene sesión relacionada
-                if (!isset($breaksPorSesion[$break['sesion_trabajo_id']])) {
-                    $breaksPorSesion[$break['sesion_trabajo_id']] = [];
-                }
-                $breaksPorSesion[$break['sesion_trabajo_id']][] = $break;
-            } else {
-                // Break sin sesión relacionada - intentar relacionarlo por fecha
-                $breakRelacionado = false;
-                foreach ($sesiones as $sesion) {
-                    if ($break['asesor_id'] == $sesion['asesor_id']) {
-                        $fechaInicioSesion = new DateTime($sesion['fecha_inicio']);
-                        $fechaFinSesion = $sesion['fecha_fin'] ? new DateTime($sesion['fecha_fin']) : new DateTime();
-                        $fechaInicioBreak = new DateTime($break['fecha_inicio']);
-                        
-                        if ($fechaInicioBreak >= $fechaInicioSesion && $fechaInicioBreak <= $fechaFinSesion) {
-                            // El break ocurrió durante esta sesión
-                            if (!isset($breaksPorSesion[$sesion['sesion_id']])) {
-                                $breaksPorSesion[$sesion['sesion_id']] = [];
-                            }
-                            $breaksPorSesion[$sesion['sesion_id']][] = $break;
-                            $breakRelacionado = true;
-                            break;
-                        }
-                    }
-                }
-                
-                if (!$breakRelacionado) {
-                    // Break sin sesión relacionada - se mostrará independientemente
-                    $breaksSinSesion[] = $break;
-                }
+            $asesor_id = trim((string)($_GET['asesor_id'] ?? ''));
+
+            $sql = "SELECT
+                        t.id_tiempo,
+                        t.asesor_cedula,
+                        u.nombre AS asesor_nombre,
+                        t.tipo_registro,
+                        t.hora_inicio,
+                        t.hora_fin,
+                        t.estado,
+                        TIMESTAMPDIFF(SECOND, t.hora_inicio, COALESCE(t.hora_fin, NOW())) AS duracion_segundos
+                    FROM tiempos t
+                    INNER JOIN usuarios u ON t.asesor_cedula = u.cedula
+                    WHERE u.rol = 'asesor'
+                      AND t.tipo_registro != 'jornada'
+                      AND DATE(t.hora_inicio) BETWEEN ? AND ?";
+
+            $params = [$fecha_inicio, $fecha_fin];
+            if ($asesor_id !== '') {
+                $sql .= " AND t.asesor_cedula = ?";
+                $params[] = $asesor_id;
             }
-        }
-        
-        // Procesar cada sesión con sus breaks
-        foreach ($sesiones as $sesion) {
-            // Obtener breaks de esta sesión
-            $breaks = $breaksPorSesion[$sesion['sesion_id']] ?? [];
-            
-            // Calcular duración total de sesión en HH:MM:SS
-            $duracionSesionSegundos = (int)($sesion['tiempo_total_segundos'] ?? 0);
-            if ($duracionSesionSegundos == 0 && $sesion['fecha_fin']) {
-                $fechaInicio = new DateTime($sesion['fecha_inicio']);
-                $fechaFin = new DateTime($sesion['fecha_fin']);
-                $duracionSesionSegundos = $fechaFin->getTimestamp() - $fechaInicio->getTimestamp();
+            $sql .= " ORDER BY t.hora_inicio DESC, t.id_tiempo DESC, u.nombre ASC";
+
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+            $registros = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $delimitadorCsv = ';';
+            $filename = "Reporte_TMO_{$fecha_inicio}_a_{$fecha_fin}.csv";
+
+            while (ob_get_level()) {
+                ob_end_clean();
             }
-            $horasSesion = floor($duracionSesionSegundos / 3600);
-            $minutosSesion = floor(($duracionSesionSegundos % 3600) / 60);
-            $segundosSesion = $duracionSesionSegundos % 60;
-            $duracionSesionFormateada = sprintf("%02d:%02d:%02d", $horasSesion, $minutosSesion, $segundosSesion);
-            
-            // Formatear fecha y hora de inicio (combinadas)
-            $fechaHoraInicioSesion = $sesion['fecha_inicio'] ? date('Y-m-d H:i:s', strtotime($sesion['fecha_inicio'])) : '';
-            
-            // Formatear hora de fin (solo hora)
-            $horaFinSesion = $sesion['fecha_fin'] ? date('H:i:s', strtotime($sesion['fecha_fin'])) : '';
-            
-            if (count($breaks) > 0) {
-                // Si hay breaks, crear una fila por cada break
-                foreach ($breaks as $break) {
-                    // Calcular duración del break en HH:MM:SS
-                    $duracionBreakSegundos = (int)($break['duracion_segundos'] ?? 0);
-                    if ($duracionBreakSegundos == 0 && $break['fecha_fin']) {
-                        $fechaInicioBreak = new DateTime($break['fecha_inicio']);
-                        $fechaFinBreak = new DateTime($break['fecha_fin']);
-                        $duracionBreakSegundos = $fechaFinBreak->getTimestamp() - $fechaInicioBreak->getTimestamp();
-                    }
-                    $horasBreak = floor($duracionBreakSegundos / 3600);
-                    $minutosBreak = floor(($duracionBreakSegundos % 3600) / 60);
-                    $segundosBreak = $duracionBreakSegundos % 60;
-                    $duracionBreakFormateada = sprintf("%02d:%02d:%02d", $horasBreak, $minutosBreak, $segundosBreak);
-                    
-                    $row = [
-                        $fechaHoraInicioSesion,
-                        $sesion['asesor_nombre'],
-                        $horaFinSesion,
-                        $duracionSesionFormateada,
-                        $tiposBreak[$break['tipo']] ?? $break['tipo'],
-                        $duracionBreakFormateada
-                    ];
-                    fputcsv($output, $row);
-                }
-            } else {
-                // Si no hay breaks, crear una fila solo con la sesión
-                $row = [
-                    $fechaHoraInicioSesion,
-                    $sesion['asesor_nombre'],
-                    $horaFinSesion,
-                    $duracionSesionFormateada,
-                    'Sin pausas',
-                    '00:00:00'
-                ];
-                fputcsv($output, $row);
+
+            header('Content-Type: text/csv; charset=utf-8');
+            header('Content-Disposition: attachment; filename="' . $filename . '"');
+            header('Cache-Control: max-age=0');
+            header('Pragma: no-cache');
+            header('Expires: 0');
+
+            $output = fopen('php://output', 'w');
+            fprintf($output, chr(0xEF) . chr(0xBB) . chr(0xBF));
+
+            fputcsv($output, [
+                'Fecha y Hora Inicio',
+                'Asesor',
+                'Cédula',
+                'Hora Fin',
+                'Duración Total (HH:MM:SS)',
+                'Motivo / Tipo',
+                'Estado',
+                'Duración Pausa (HH:MM:SS)',
+            ], $delimitadorCsv);
+
+            $tiposPausa = ['break', 'almuerzo', 'baño', 'capacitacion', 'retroalimentacion', 'sesion'];
+
+            foreach ($registros as $reg) {
+                $tipo = (string)($reg['tipo_registro'] ?? '');
+                $duracionSeg = max(0, (int)($reg['duracion_segundos'] ?? 0));
+                $duracionFmt = $this->formatearDuracionTmo($duracionSeg);
+                $esPausa = in_array($tipo, $tiposPausa, true);
+
+                $horaInicio = $reg['hora_inicio'] ? date('Y-m-d H:i:s', strtotime($reg['hora_inicio'])) : '';
+                $horaFin = $reg['hora_fin'] ? date('H:i:s', strtotime($reg['hora_fin'])) : '';
+
+                fputcsv($output, [
+                    $horaInicio,
+                    $reg['asesor_nombre'] ?? '',
+                    $reg['asesor_cedula'] ?? '',
+                    $horaFin,
+                    $duracionFmt,
+                    $this->etiquetaTipoRegistroTmo($tipo),
+                    $reg['estado'] ?? '',
+                    $esPausa ? $duracionFmt : '00:00:00',
+                ], $delimitadorCsv);
             }
-        }
-        
-        // Procesar breaks sin sesión relacionada (mostrarlos independientemente)
-        foreach ($breaksSinSesion as $break) {
-            // Calcular duración del break en HH:MM:SS
-            $duracionBreakSegundos = (int)($break['duracion_segundos'] ?? 0);
-            if ($duracionBreakSegundos == 0 && $break['fecha_fin']) {
-                $fechaInicioBreak = new DateTime($break['fecha_inicio']);
-                $fechaFinBreak = new DateTime($break['fecha_fin']);
-                $duracionBreakSegundos = $fechaFinBreak->getTimestamp() - $fechaInicioBreak->getTimestamp();
-            }
-            $horasBreak = floor($duracionBreakSegundos / 3600);
-            $minutosBreak = floor(($duracionBreakSegundos % 3600) / 60);
-            $segundosBreak = $duracionBreakSegundos % 60;
-            $duracionBreakFormateada = sprintf("%02d:%02d:%02d", $horasBreak, $minutosBreak, $segundosBreak);
-            
-            // Para breaks sin sesión, usar la fecha de inicio del break como referencia
-            $fechaHoraInicioBreak = $break['fecha_inicio'] ? date('Y-m-d H:i:s', strtotime($break['fecha_inicio'])) : '';
-            $horaFinBreak = $break['fecha_fin'] ? date('H:i:s', strtotime($break['fecha_fin'])) : '';
-            
-            // Calcular tiempo de "sesión" desde el inicio del break hasta el fin (o ahora si está activo)
-            $fechaInicioBreak = new DateTime($break['fecha_inicio']);
-            $fechaFinBreak = $break['fecha_fin'] ? new DateTime($break['fecha_fin']) : new DateTime();
-            $duracionSesionBreakSegundos = $fechaFinBreak->getTimestamp() - $fechaInicioBreak->getTimestamp();
-            $horasSesionBreak = floor($duracionSesionBreakSegundos / 3600);
-            $minutosSesionBreak = floor(($duracionSesionBreakSegundos % 3600) / 60);
-            $segundosSesionBreak = $duracionSesionBreakSegundos % 60;
-            $duracionSesionBreakFormateada = sprintf("%02d:%02d:%02d", $horasSesionBreak, $minutosSesionBreak, $segundosSesionBreak);
-            
-            $row = [
-                $fechaHoraInicioBreak,
-                $break['asesor_nombre'],
-                $horaFinBreak,
-                $duracionSesionBreakFormateada,
-                $tiposBreak[$break['tipo']] ?? $break['tipo'],
-                $duracionBreakFormateada
-            ];
-            fputcsv($output, $row);
-        }
-        
-        fclose($output);
-        exit;
-        
+
+            fclose($output);
+            exit;
+
         } catch (Exception $e) {
             // En caso de error, limpiar output y redirigir
             while (ob_get_level()) {
@@ -3634,13 +3660,49 @@ class CoordinadorController extends BaseController {
     }
     
     /**
+     * Encabezados estándar para exportación CSV de gestiones.
+     */
+    private function obtenerEncabezadosGestionCSV(): array {
+        return [
+            'Fecha de Gestión',
+            'Asesor',
+            'Cédula del Cliente',
+            'Nombre del Cliente',
+            'Nombre de la Base',
+            'Teléfono de Contacto',
+            'Número de Factura',
+            'Franja del Cliente',
+            'Forma de Contacto',
+            'Tipo de Contacto',
+            'Resultado de Contacto',
+            'Razón Específica',
+            'Fecha de Pago',
+            'Monto de Acuerdo',
+            'Fecha Volver a Llamar',
+            'Hora Volver a Llamar',
+            'Observaciones',
+            'Canales Autorizados',
+            'Celular',
+            'Celular 2',
+            'Celular 3',
+            'Celular 4',
+            'Celular 5',
+            'Celular 6',
+            'Celular 7',
+            'Celular 8',
+            'Celular 9',
+            'Celular 10',
+        ];
+    }
+
+    /**
      * Formatea una fila de gestión para exportación CSV
      */
     private function formatearFilaGestionCSV($gestion) {
-        // Orden debe coincidir exactamente con los encabezados del CSV:
-        // Fecha, Asesor, Cédula, Nombre Cliente, Nombre Base, Teléfono de Contacto, Número Factura, Franja, Forma Contacto,
-        // Tipo Contacto, Resultado Contacto, Razón Específica, Fecha Pago, Monto Acuerdo, Observaciones, Canales Autorizados,
-        // Celular, Celular2..Celular10
+        [$fechaVolverLlamar, $horaVolverLlamar] = $this->extraerFechaHoraVolverLlamarCSV($gestion);
+        $observaciones = $this->limpiarObservacionesGestionCSV($gestion['comentarios'] ?? '');
+
+        // Orden debe coincidir exactamente con obtenerEncabezadosGestionCSV()
         return [
             $this->limpiarDatoCSV($gestion['fecha_gestion']),
             $this->limpiarDatoCSV($gestion['asesor_nombre'] ?? 'No asignado'),
@@ -3656,7 +3718,9 @@ class CoordinadorController extends BaseController {
             $this->formatearRazonEspecificaCSV($gestion['tipificacion_3_nivel'] ?? ''),
             $this->limpiarDatoCSV($gestion['fecha_acuerdo'] ?? ''),
             $this->limpiarDatoCSV($gestion['monto_acuerdo'] ?? ''),
-            $this->limpiarDatoCSV($gestion['comentarios'] ?? ''),
+            $fechaVolverLlamar,
+            $horaVolverLlamar,
+            $this->limpiarDatoCSV($observaciones),
             $this->normalizarMayusSinUnderscoreCSV($gestion['canales_autorizados_texto'] ?? ''),
             $this->limpiarDatoCSV($gestion['telefono'] ?? ''),
             $this->limpiarDatoCSV($gestion['celular2'] ?? ''),
@@ -3667,8 +3731,56 @@ class CoordinadorController extends BaseController {
             $this->limpiarDatoCSV($gestion['cel7'] ?? ''),
             $this->limpiarDatoCSV($gestion['cel8'] ?? ''),
             $this->limpiarDatoCSV($gestion['cel9'] ?? ''),
-            $this->limpiarDatoCSV($gestion['cel10'] ?? '')
+            $this->limpiarDatoCSV($gestion['cel10'] ?? ''),
         ];
+    }
+
+    /**
+     * Extrae fecha y hora de volver a llamar desde observaciones/comentarios.
+     *
+     * @return array{0: string, 1: string}
+     */
+    private function extraerFechaHoraVolverLlamarCSV(array $gestion): array {
+        if (!function_exists('emer_obtener_proxima_llamada_historial')) {
+            $helper = __DIR__ . '/../helpers/tipificacion_historial.php';
+            if (is_file($helper)) {
+                require_once $helper;
+            }
+        }
+
+        $raw = null;
+        if (function_exists('emer_obtener_proxima_llamada_historial')) {
+            $raw = emer_obtener_proxima_llamada_historial($gestion);
+        }
+
+        if ($raw === null || $raw === '') {
+            return ['', ''];
+        }
+
+        $ts = strtotime(str_replace('T', ' ', (string) $raw));
+        if ($ts === false) {
+            return ['', ''];
+        }
+
+        return [date('Y-m-d', $ts), date('H:i:s', $ts)];
+    }
+
+    /**
+     * Limpia metadatos de próxima llamada de observaciones para CSV.
+     */
+    private function limpiarObservacionesGestionCSV(?string $texto): string {
+        if (!function_exists('emer_limpiar_texto_observaciones_historial')) {
+            $helper = __DIR__ . '/../helpers/tipificacion_historial.php';
+            if (is_file($helper)) {
+                require_once $helper;
+            }
+        }
+
+        if (function_exists('emer_limpiar_texto_observaciones_historial')) {
+            return emer_limpiar_texto_observaciones_historial($texto);
+        }
+
+        return trim((string) $texto);
     }
 
     /**

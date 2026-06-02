@@ -405,6 +405,23 @@ class WebRTCSoftphone {
         return this.activeCallId || this.lastCallLogCallId || '';
     }
 
+    /** Llamada en curso: saliente, entrante (timbrando/contestando) o establecida. */
+    isCallActive() {
+        if (this.currentCall || this.incomingCall || this.incomingCallInvitation) {
+            return true;
+        }
+        if (this.acceptInProgress) {
+            return true;
+        }
+        if (this.status === 'in-call') {
+            return true;
+        }
+        if (this.timer && this.callStart) {
+            return true;
+        }
+        return false;
+    }
+
     _genCallId() {
         if (typeof crypto !== 'undefined' && crypto.randomUUID) {
             return crypto.randomUUID();
@@ -2207,9 +2224,6 @@ class WebRTCSoftphone {
 
     endCall(playSound = true) {
         // Registrar FIN una sola vez (si hay contexto)
-        // #region agent log 058b8a softphone endCall state
-        fetch('http://127.0.0.1:7552/ingest/dcda37ca-c096-40cf-8b4d-0812abcc5f84',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'058b8a'},body:JSON.stringify({sessionId:'058b8a',runId:'pre',hypothesisId:'H3',location:'assets/js/softphone-web.js:endCall',message:'pre-send',data:{callDurationSeconds:Number(this.callDurationSeconds||0),callLogFinSent:!!this._callLogFinSent,hasActiveCallId:!!this.activeCallId,callIdLen:(this.activeCallId?String(this.activeCallId).length:0),hasCallContext:!!this.callContext,clienteId:(this.callContext&&this.callContext.cliente_id)?Number(this.callContext.cliente_id):0},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         if (!this._callLogFinSent && this.activeCallId && this.callContext && this.callContext.cliente_id > 0) {
             this._callLogFinSent = true;
             const finalDurationSeconds = Math.max(
@@ -2221,9 +2235,6 @@ class WebRTCSoftphone {
                 hangup_by: this._hangupMeta?.hangup_by || 'sistema',
                 duracion_segundos: finalDurationSeconds,
             });
-            // #region agent log 058b8a softphone endCall sent
-            fetch('http://127.0.0.1:7552/ingest/dcda37ca-c096-40cf-8b4d-0812abcc5f84',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'058b8a'},body:JSON.stringify({sessionId:'058b8a',runId:'pre',hypothesisId:'H2',location:'assets/js/softphone-web.js:endCall',message:'sent-fin',data:{duracion_segundos:Number(this.callDurationSeconds||0),hangup_by:(this._hangupMeta&&this._hangupMeta.hangup_by)?String(this._hangupMeta.hangup_by):'sistema'},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
         }
 
         // Reproducir sonido de colgar si hay una llamada activa y se solicita
@@ -3124,15 +3135,9 @@ class WebRTCSoftphone {
     _startCallTimer() {
         this._stopCallTimer();
         this.callStart = Date.now();
-        // #region agent log 058b8a softphone timer start
-        fetch('http://127.0.0.1:7552/ingest/dcda37ca-c096-40cf-8b4d-0812abcc5f84',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'058b8a'},body:JSON.stringify({sessionId:'058b8a',runId:'pre',hypothesisId:'H2',location:'assets/js/softphone-web.js:_startCallTimer',message:'start',data:{hasActiveCallId:!!this.activeCallId,callIdLen:(this.activeCallId?String(this.activeCallId).length:0),hasCallContext:!!this.callContext,clienteId:(this.callContext&&this.callContext.cliente_id)?Number(this.callContext.cliente_id):0},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         this.timer = setInterval(() => {
             const s = Math.floor((Date.now() - this.callStart) / 1000);
             this.callDurationSeconds = s;
-            // #region agent log 058b8a softphone timer tick (1s only)
-            if (s === 1) { fetch('http://127.0.0.1:7552/ingest/dcda37ca-c096-40cf-8b4d-0812abcc5f84',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'058b8a'},body:JSON.stringify({sessionId:'058b8a',runId:'pre',hypothesisId:'H1',location:'assets/js/softphone-web.js:_startCallTimer',message:'tick1',data:{callDurationSeconds:Number(this.callDurationSeconds||0)},timestamp:Date.now()})}).catch(()=>{}); }
-            // #endregion
             const mm = String(Math.floor(s / 60)).padStart(2, '0');
             const ss = String(s % 60).padStart(2, '0');
             const el = document.getElementById('call-info-duration');

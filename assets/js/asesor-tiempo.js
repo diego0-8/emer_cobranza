@@ -725,6 +725,14 @@ function verificarBreakActivoAlCargar() {
             console.log('📦 Respuesta del servidor:', data);
             
             if (data.success && data.break_activo) {
+                // La jornada de login no es una pausa: no bloquear la pantalla
+                if (data.tipo === 'jornada') {
+                    console.log('ℹ️ Registro de jornada activa ignorado (no es pausa)');
+                    breakActive = false;
+                    breakStartTime = null;
+                    return;
+                }
+
                 console.log('✅ Break activo detectado al cargar:', data);
 
                 // Restaurar estado del break

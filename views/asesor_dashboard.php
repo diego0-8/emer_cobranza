@@ -326,39 +326,7 @@ $page_title = $page_title ?? '';
     if (isset($_SESSION['login_time'])) {
         $login_time = $_SESSION['login_time'];
     } else {
-        // Si no está en la sesión, intentar recuperarlo desde la BD
-        try {
-            $asesor_id = $_SESSION['user_id'] ?? null;
-            if ($asesor_id) {
-                require_once __DIR__ . '/../config.php';
-                $pdo = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4", DB_USER, DB_PASS);
-                $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-                
-                // Verificar si existe la tabla
-                $sqlCheck = "SHOW TABLES LIKE 'sesiones_trabajo'";
-                $stmtCheck = $pdo->query($sqlCheck);
-                
-                if ($stmtCheck->rowCount() > 0) {
-                    // Buscar sesión activa
-                    $sql = "SELECT fecha_inicio FROM sesiones_trabajo 
-                            WHERE usuario_id = ? AND (fecha_fin IS NULL OR estado = 'activa')
-                            ORDER BY fecha_inicio DESC LIMIT 1";
-                    $stmt = $pdo->prepare($sql);
-                    $stmt->execute([$asesor_id]);
-                    $sesion = $stmt->fetch(PDO::FETCH_ASSOC);
-                    
-                    if ($sesion) {
-                        $fechaInicio = new DateTime($sesion['fecha_inicio']);
-                        $login_time = $fechaInicio->getTimestamp();
-                        $_SESSION['login_time'] = $login_time; // Guardar en sesión para próximas cargas
-                    }
-                }
-            }
-        } catch (Exception $e) {
-            error_log("Error al recuperar tiempo de sesión desde BD: " . $e->getMessage());
-        }
-        
-        // Si aún no se tiene, usar tiempo actual (primera vez que inicia sesión)
+        // Si aún no se tiene login_time en sesión PHP, usar el momento actual
         if (!$login_time) {
             $login_time = time();
             $_SESSION['login_time'] = $login_time;

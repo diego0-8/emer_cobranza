@@ -16,41 +16,6 @@
 
   const logPrefix = '[asesor-gestionar]';
 
-  // #region debug d200d9 tipificaciones
-  function dbglog(location, message, data, hypothesisId, runId) {
-    try {
-      fetch('http://127.0.0.1:7559/ingest/0bcc0192-fe61-4fb0-b109-b4792228bcf7', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'b7eaa7' },
-        body: JSON.stringify({
-          sessionId: 'b7eaa7',
-          runId: runId || 'pre',
-          hypothesisId: hypothesisId || 'TIP0',
-          location,
-          message,
-          data: data || {},
-          timestamp: Date.now(),
-        }),
-      }).catch(function () { });
-    } catch (e) { }
-  }
-
-  // Capturar errores globales que rompen el árbol
-  window.addEventListener('error', function (ev) {
-    dbglog('assets/js/asesor-gestionar.js:window.error', 'error', {
-      msg: String(ev.message || ''),
-      file: String(ev.filename || ''),
-      line: Number(ev.lineno || 0),
-      col: Number(ev.colno || 0),
-    }, 'TIP1');
-  });
-  window.addEventListener('unhandledrejection', function (ev) {
-    dbglog('assets/js/asesor-gestionar.js:window.unhandledrejection', 'promise_rejection', {
-      reason: String((ev && ev.reason && ev.reason.message) ? ev.reason.message : (ev && ev.reason) || ''),
-    }, 'TIP1');
-  });
-  // #endregion
-
   function getUrlParams() {
     return new URLSearchParams(window.location.search);
   }
@@ -684,26 +649,26 @@
     history.pushState({ clienteId }, '', url.toString());
   }
 
-  /**
-   * Verificar si hay una llamada activa en el softphone
-   * Verifica tanto la existencia de currentCall como su estado
-   */
   function hayLlamadaActiva() {
-    if (typeof window.webrtcSoftphone === 'undefined' || !window.webrtcSoftphone) {
+    const sp = window.webrtcSoftphone;
+    if (!sp) {
       return false;
     }
+    if (typeof sp.isCallActive === 'function') {
+      return sp.isCallActive();
+    }
+    return !!(sp.currentCall || sp.incomingCall);
+  }
 
-    const call = window.webrtcSoftphone.currentCall;
-    if (!call) {
+  function bloquearSiLlamadaActiva() {
+    if (typeof window.emerBloquearSiLlamadaActiva === 'function') {
+      return window.emerBloquearSiLlamadaActiva();
+    }
+    if (!hayLlamadaActiva()) {
       return false;
     }
-
-    // Verificar el estado de la llamada (Established = 4 = llamada activa)
-    const state = call.state;
-    const stateStr = String(state);
-
-    // La llamada está activa si el estado es 'Established' o '4'
-    return stateStr === 'Established' || stateStr === '4' || state === 'Established';
+    alert('Cuelga la llamada antes de recargar la página.');
+    return true;
   }
 
   // Función eliminada: cambiarClienteSinRecargar
@@ -726,6 +691,10 @@
     const current = getCurrentClienteId();
     if (String(current) === String(idNumerico)) {
       console.log(logPrefix, 'Ya se está mostrando este cliente');
+      return;
+    }
+
+    if (bloquearSiLlamadaActiva()) {
       return;
     }
 
@@ -798,22 +767,12 @@
 
     // Diagnóstico árbol tipificaciones: IDs y funciones globales
     const tipoContacto = document.getElementById('tipo_contacto');
-    const subHidden = document.getElementById('sub_tipificacion_hidden');
-    const tipifHidden = document.getElementById('tipificacion_principal');
-    dbglog('assets/js/asesor-gestionar.js:DOMContentLoaded', 'tipificaciones_boot', {
-      hasTipoContacto: !!tipoContacto,
-      hasSubHidden: !!subHidden,
-      hasTipifHidden: !!tipifHidden,
-      hasFnMostrar: typeof window.mostrarTipificacionesEspecificas === 'function',
-      hasFnSub: typeof window.seleccionarSubOpcion === 'function',
-    }, 'TIP2');
 
     // Si el onchange inline no corre, forzamos un listener (sin romper el existente)
     if (tipoContacto && typeof window.mostrarTipificacionesEspecificas === 'function') {
-      tipoContacto.addEventListener('change', function (e) {
-        dbglog('assets/js/asesor-gestionar.js:tipo_contacto.change', 'change', { value: String(tipoContacto.value || '') }, 'TIP3');
+      tipoContacto.addEventListener('change', function () {
         try { window.mostrarTipificacionesEspecificas(tipoContacto.value); } catch (err) {
-          dbglog('assets/js/asesor-gestionar.js:tipo_contacto.change', 'handler_exception', { msg: String(err && err.message || err) }, 'TIP4');
+          console.error(logPrefix, 'tipo_contacto.change', err);
         }
       });
     }

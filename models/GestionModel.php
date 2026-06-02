@@ -104,6 +104,42 @@ class GestionModel {
         return implode("\n", $filtradas);
     }
 
+    /**
+     * Normaliza una fila de historial_gestiones para la vista del asesor.
+     */
+    private function normalizarFilaHistorialGestion(array &$r): void
+    {
+        $r['id'] = $r['id_gestion'];
+        $r['fecha_gestion'] = $r['fecha_creacion'];
+        $r['tipo_gestion'] = $r['tipo_contacto'];
+        $r['resultado'] = $r['resultado_contacto'];
+        $observacionesRaw = $this->limpiarObservacionesLegacy($r['observaciones'] ?? '');
+        $r['observaciones'] = $observacionesRaw;
+        $r['comentarios'] = $observacionesRaw;
+
+        $canales = [];
+        if (($r['llamada_telefonica'] ?? 'no') === 'si') $canales[] = 'llamada';
+        if (($r['email'] ?? 'no') === 'si') $canales[] = 'correo_electronico';
+        if (($r['sms'] ?? 'no') === 'si') $canales[] = 'sms';
+        if (($r['correo_fisico'] ?? 'no') === 'si') $canales[] = 'correo_fisico';
+        if (($r['whatsap'] ?? 'no') === 'si') $canales[] = 'whatsapp';
+        $r['canales_autorizados'] = $canales;
+
+        if (!function_exists('emer_enriquecer_gestion_historial')) {
+            $helper = __DIR__ . '/../helpers/tipificacion_historial.php';
+            if (is_file($helper)) {
+                require_once $helper;
+            }
+        }
+        if (function_exists('emer_enriquecer_gestion_historial')) {
+            emer_enriquecer_gestion_historial($r);
+        } else {
+            $r['tipo_contacto_arbol_codigo'] = $r['tipo_contacto'] ?? null;
+            $r['resultado_contacto_codigo'] = $r['resultado_contacto'] ?? null;
+            $r['razon_especifica_codigo'] = $r['razon_especifica'] ?? null;
+        }
+    }
+
     public function crearGestion($data) {
         $asesorCedula = (string)($data['asesor_cedula'] ?? ($data['asesor_id'] ?? ''));
         $clienteId = (int)($data['cliente_id'] ?? 0);
@@ -372,25 +408,7 @@ class GestionModel {
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         foreach ($rows as &$r) {
-            $r['id'] = $r['id_gestion'];
-            $r['fecha_gestion'] = $r['fecha_creacion'];
-            $r['tipo_gestion'] = $r['tipo_contacto'];
-            $r['resultado'] = $r['resultado_contacto'];
-            $r['observaciones'] = $this->limpiarObservacionesLegacy($r['observaciones'] ?? '');
-            $r['comentarios'] = $r['observaciones'];
-
-            // Campos que la vista usa para el árbol (compatibilidad):
-            $r['tipo_contacto_arbol_codigo'] = $r['tipo_contacto'] ?? null;
-            $r['resultado_contacto_codigo'] = $r['resultado_contacto'] ?? null;
-            $r['razon_especifica_codigo'] = $r['razon_especifica'] ?? null;
-
-            $canales = [];
-            if (($r['llamada_telefonica'] ?? 'no') === 'si') $canales[] = 'llamada';
-            if (($r['email'] ?? 'no') === 'si') $canales[] = 'correo_electronico';
-            if (($r['sms'] ?? 'no') === 'si') $canales[] = 'sms';
-            if (($r['correo_fisico'] ?? 'no') === 'si') $canales[] = 'correo_fisico';
-            if (($r['whatsap'] ?? 'no') === 'si') $canales[] = 'whatsapp';
-            $r['canales_autorizados'] = $canales;
+            $this->normalizarFilaHistorialGestion($r);
         }
 
         return $rows;
@@ -426,20 +444,7 @@ class GestionModel {
         $r = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$r) return null;
 
-        $r['id'] = $r['id_gestion'];
-        $r['fecha_gestion'] = $r['fecha_creacion'];
-        $r['tipo_gestion'] = $r['tipo_contacto'];
-        $r['resultado'] = $r['resultado_contacto'];
-        $r['observaciones'] = $this->limpiarObservacionesLegacy($r['observaciones'] ?? '');
-        $r['comentarios'] = $r['observaciones'];
-
-        $canales = [];
-        if (($r['llamada_telefonica'] ?? 'no') === 'si') $canales[] = 'llamada';
-        if (($r['email'] ?? 'no') === 'si') $canales[] = 'correo_electronico';
-        if (($r['sms'] ?? 'no') === 'si') $canales[] = 'sms';
-        if (($r['correo_fisico'] ?? 'no') === 'si') $canales[] = 'correo_fisico';
-        if (($r['whatsap'] ?? 'no') === 'si') $canales[] = 'whatsapp';
-        $r['canales_autorizados'] = $canales;
+        $this->normalizarFilaHistorialGestion($r);
 
         return $r;
     }
@@ -476,25 +481,7 @@ class GestionModel {
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
         foreach ($rows as &$r) {
-            $r['id'] = $r['id_gestion'];
-            $r['fecha_gestion'] = $r['fecha_creacion'];
-            $r['tipo_gestion'] = $r['tipo_contacto'];
-            $r['resultado'] = $r['resultado_contacto'];
-            $r['observaciones'] = $this->limpiarObservacionesLegacy($r['observaciones'] ?? '');
-            $r['comentarios'] = $r['observaciones'];
-
-            // Campos que la vista usa para el árbol (compatibilidad):
-            $r['tipo_contacto_arbol_codigo'] = $r['tipo_contacto'] ?? null;
-            $r['resultado_contacto_codigo'] = $r['resultado_contacto'] ?? null;
-            $r['razon_especifica_codigo'] = $r['razon_especifica'] ?? null;
-
-            $canales = [];
-            if (($r['llamada_telefonica'] ?? 'no') === 'si') $canales[] = 'llamada';
-            if (($r['email'] ?? 'no') === 'si') $canales[] = 'correo_electronico';
-            if (($r['sms'] ?? 'no') === 'si') $canales[] = 'sms';
-            if (($r['correo_fisico'] ?? 'no') === 'si') $canales[] = 'correo_fisico';
-            if (($r['whatsap'] ?? 'no') === 'si') $canales[] = 'whatsapp';
-            $r['canales_autorizados'] = $canales;
+            $this->normalizarFilaHistorialGestion($r);
         }
 
         return $rows;
@@ -1019,40 +1006,144 @@ class GestionModel {
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
+    /**
+     * Condición SQL para resultado "volver a llamar".
+     */
+    private function sqlCondicionVolverLlamar(string $alias = 'hg'): string
+    {
+        if ($this->hasNormColumns()) {
+            return "{$alias}.resultado_contacto_norm IN ('volver_a_llamar','volver_llamar','agenda_llamada_de_seguimiento')";
+        }
+        return "(
+            {$alias}.resultado_contacto = 'volver_llamar'
+            OR {$alias}.resultado_contacto LIKE '%VOLVER A LLAMAR%'
+            OR LOWER(REPLACE(TRIM({$alias}.resultado_contacto), '_', ' ')) IN ('volver a llamar', 'volver llamar')
+        )";
+    }
+
+    /**
+     * Clientes con última gestión del asesor = volver a llamar, en bases asignadas,
+     * siendo además la última gestión global del cliente, y con fecha programada para hoy.
+     */
     public function getLlamadasPendientesHoy($asesorId) {
-        $stmt = $this->pdo->prepare("
+        $asesorId = trim((string)$asesorId);
+        if ($asesorId === '') {
+            return [];
+        }
+
+        if (!function_exists('emer_extraer_proxima_llamada_desde_observaciones')) {
+            $helper = __DIR__ . '/../helpers/tipificacion_historial.php';
+            if (is_file($helper)) {
+                require_once $helper;
+            }
+        }
+
+        require_once __DIR__ . '/TareaModel.php';
+        $tareaModel = new TareaModel($this->pdo);
+        $bases = $tareaModel->getBasesAsignadasByAsesor($asesorId);
+        $baseIds = array_values(array_unique(array_filter(array_map(static function ($b) {
+            return (int)($b['base_id'] ?? $b['carga_id'] ?? 0);
+        }, (array)$bases))));
+
+        if (empty($baseIds)) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($baseIds), '?'));
+        $condVolver = $this->sqlCondicionVolverLlamar('hg');
+
+        $sql = "
             SELECT
+                hg.id_gestion,
                 c.id_cliente,
                 c.nombre AS cliente_nombre,
                 c.cedula AS cliente_cedula,
                 c.tel1 AS telefono,
+                c.tel2 AS celular2,
                 b.nombre AS nombre_base,
                 hg.fecha_creacion AS fecha_gestion,
                 hg.resultado_contacto,
-                hg.razon_especifica
+                hg.razon_especifica,
+                hg.observaciones
             FROM historial_gestiones hg
+            INNER JOIN (
+                SELECT cliente_id, MAX(id_gestion) AS max_id
+                FROM historial_gestiones
+                WHERE asesor_cedula = ?
+                GROUP BY cliente_id
+            ) ult_asesor ON hg.id_gestion = ult_asesor.max_id
+            INNER JOIN (
+                SELECT cliente_id, MAX(id_gestion) AS max_id_global
+                FROM historial_gestiones
+                GROUP BY cliente_id
+            ) ult_global ON hg.cliente_id = ult_global.cliente_id
+                AND hg.id_gestion = ult_global.max_id_global
             JOIN clientes c ON hg.cliente_id = c.id_cliente
             JOIN base_clientes b ON c.base_id = b.id_base
             WHERE hg.asesor_cedula = ?
-              AND DATE(hg.fecha_creacion) = CURDATE()
-              AND (hg.resultado_contacto = 'volver_llamar' OR hg.resultado_contacto LIKE '%VOLVER A LLAMAR%')
+              AND c.base_id IN ({$placeholders})
+              AND {$condVolver}
             ORDER BY hg.fecha_creacion DESC
-            LIMIT 50
-        ");
-        $stmt->execute([(string)$asesorId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            LIMIT 200
+        ";
+
+        $params = array_merge([(string)$asesorId, (string)$asesorId], $baseIds);
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        $hoy = date('Y-m-d');
+        $pendientes = [];
+
+        foreach ($rows as $row) {
+            $proximaRaw = function_exists('emer_extraer_proxima_llamada_desde_observaciones')
+                ? emer_extraer_proxima_llamada_desde_observaciones($row['observaciones'] ?? '')
+                : null;
+            if ($proximaRaw === null || $proximaRaw === '') {
+                continue;
+            }
+
+            $ts = strtotime(str_replace('T', ' ', $proximaRaw));
+            if ($ts === false || date('Y-m-d', $ts) !== $hoy) {
+                continue;
+            }
+
+            $idCliente = (int)($row['id_cliente'] ?? 0);
+            if ($idCliente <= 0) {
+                continue;
+            }
+
+            $obsLimpias = function_exists('emer_limpiar_texto_observaciones_historial')
+                ? emer_limpiar_texto_observaciones_historial($row['observaciones'] ?? '')
+                : (string)($row['observaciones'] ?? '');
+
+            $pendientes[] = [
+                'id_gestion' => (int)($row['id_gestion'] ?? 0),
+                'id_cliente' => $idCliente,
+                'cliente_id' => $idCliente,
+                'id' => $idCliente,
+                'cliente_nombre' => (string)($row['cliente_nombre'] ?? ''),
+                'nombre' => (string)($row['cliente_nombre'] ?? ''),
+                'cedula' => (string)($row['cliente_cedula'] ?? ''),
+                'cliente_cedula' => (string)($row['cliente_cedula'] ?? ''),
+                'telefono' => (string)($row['telefono'] ?? ''),
+                'celular2' => (string)($row['celular2'] ?? ''),
+                'nombre_base' => (string)($row['nombre_base'] ?? ''),
+                'fecha_gestion' => $row['fecha_gestion'] ?? null,
+                'resultado_contacto' => (string)($row['resultado_contacto'] ?? ''),
+                'resultado' => 'VOLVER A LLAMAR',
+                'razon_especifica' => (string)($row['razon_especifica'] ?? ''),
+                'proxima_fecha' => date('Y-m-d H:i:s', $ts),
+                'comentarios' => $obsLimpias,
+                'comentarios_seguimiento' => $obsLimpias,
+            ];
+        }
+
+        return $pendientes;
     }
 
     public function getTotalLlamadasPendientesHoy($asesorId) {
-        $stmt = $this->pdo->prepare("
-            SELECT COUNT(*) AS total
-            FROM historial_gestiones
-            WHERE asesor_cedula = ?
-              AND DATE(fecha_creacion) = CURDATE()
-              AND (resultado_contacto = 'volver_llamar' OR resultado_contacto LIKE '%VOLVER A LLAMAR%')
-        ");
-        $stmt->execute([(string)$asesorId]);
-        return (int)($stmt->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
+        return count($this->getLlamadasPendientesHoy($asesorId));
     }
 
     public function getClientesGestionados($asesorId) {
@@ -1511,8 +1602,26 @@ class GestionModel {
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
+    /**
+     * Clientes del equipo del coordinador cuya última gestión global es volver a llamar
+     * y tienen fecha programada [PROXIMA_LLAMADA] para hoy.
+     */
     public function getLlamadasPendientesCoordinador($coordinadorId) {
-        $stmt = $this->pdo->prepare($this->hasNormColumns() ? "
+        $coordinadorId = trim((string)$coordinadorId);
+        if ($coordinadorId === '') {
+            return [];
+        }
+
+        if (!function_exists('emer_extraer_proxima_llamada_desde_observaciones')) {
+            $helper = __DIR__ . '/../helpers/tipificacion_historial.php';
+            if (is_file($helper)) {
+                require_once $helper;
+            }
+        }
+
+        $condVolver = $this->sqlCondicionVolverLlamar('hg');
+
+        $sql = "
             SELECT
                 hg.id_gestion,
                 hg.fecha_creacion AS fecha_gestion,
@@ -1522,15 +1631,22 @@ class GestionModel {
                 c.nombre AS cliente_nombre,
                 c.cedula AS cliente_cedula,
                 c.tel1 AS telefono,
+                c.tel2 AS celular2,
                 b.nombre AS nombre_base,
                 hg.resultado_contacto,
-                hg.razon_especifica
+                hg.razon_especifica,
+                hg.observaciones
             FROM historial_gestiones hg
+            INNER JOIN (
+                SELECT cliente_id, MAX(id_gestion) AS max_id_global
+                FROM historial_gestiones
+                GROUP BY cliente_id
+            ) ult_global ON hg.cliente_id = ult_global.cliente_id
+                AND hg.id_gestion = ult_global.max_id_global
             JOIN usuarios u ON hg.asesor_cedula = u.cedula
             JOIN clientes c ON hg.cliente_id = c.id_cliente
             JOIN base_clientes b ON c.base_id = b.id_base
-            WHERE DATE(hg.fecha_creacion) = CURDATE()
-              AND hg.resultado_contacto_norm IN ('volver_a_llamar','volver_llamar','agenda_llamada_de_seguimiento')
+            WHERE {$condVolver}
               AND EXISTS (
                 SELECT 1
                 FROM asignaciones_cordinador ac
@@ -1540,37 +1656,65 @@ class GestionModel {
               )
             ORDER BY hg.fecha_creacion DESC
             LIMIT 200
-        " : "
-            SELECT
-                hg.id_gestion,
-                hg.fecha_creacion AS fecha_gestion,
-                hg.asesor_cedula,
-                u.nombre AS asesor_nombre,
-                c.id_cliente,
-                c.nombre AS cliente_nombre,
-                c.cedula AS cliente_cedula,
-                c.tel1 AS telefono,
-                b.nombre AS nombre_base,
-                hg.resultado_contacto,
-                hg.razon_especifica
-            FROM historial_gestiones hg
-            JOIN usuarios u ON hg.asesor_cedula = u.cedula
-            JOIN clientes c ON hg.cliente_id = c.id_cliente
-            JOIN base_clientes b ON c.base_id = b.id_base
-            WHERE DATE(hg.fecha_creacion) = CURDATE()
-              AND (hg.resultado_contacto = 'volver_llamar' OR hg.resultado_contacto LIKE '%VOLVER A LLAMAR%')
-              AND EXISTS (
-                SELECT 1
-                FROM asignaciones_cordinador ac
-                WHERE ac.asesor_cedula = hg.asesor_cedula
-                  AND ac.cordinador_cedula = ?
-                  AND ac.estado = 'activo'
-              )
-            ORDER BY hg.fecha_creacion DESC
-            LIMIT 200
-        ");
-        $stmt->execute([(string)$coordinadorId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([$coordinadorId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        $hoy = date('Y-m-d');
+        $pendientes = [];
+
+        foreach ($rows as $row) {
+            $proximaRaw = function_exists('emer_extraer_proxima_llamada_desde_observaciones')
+                ? emer_extraer_proxima_llamada_desde_observaciones($row['observaciones'] ?? '')
+                : null;
+            if ($proximaRaw === null || $proximaRaw === '') {
+                continue;
+            }
+
+            $ts = strtotime(str_replace('T', ' ', $proximaRaw));
+            if ($ts === false || date('Y-m-d', $ts) !== $hoy) {
+                continue;
+            }
+
+            $idCliente = (int)($row['id_cliente'] ?? 0);
+            if ($idCliente <= 0) {
+                continue;
+            }
+
+            $obsLimpias = function_exists('emer_limpiar_texto_observaciones_historial')
+                ? emer_limpiar_texto_observaciones_historial($row['observaciones'] ?? '')
+                : (string)($row['observaciones'] ?? '');
+
+            $asesorCedula = (string)($row['asesor_cedula'] ?? '');
+
+            $pendientes[] = [
+                'id_gestion' => (int)($row['id_gestion'] ?? 0),
+                'id_cliente' => $idCliente,
+                'cliente_id' => $idCliente,
+                'id' => $idCliente,
+                'cliente_nombre' => (string)($row['cliente_nombre'] ?? ''),
+                'nombre' => (string)($row['cliente_nombre'] ?? ''),
+                'cedula' => (string)($row['cliente_cedula'] ?? ''),
+                'cliente_cedula' => (string)($row['cliente_cedula'] ?? ''),
+                'telefono' => (string)($row['telefono'] ?? ''),
+                'celular2' => (string)($row['celular2'] ?? ''),
+                'nombre_base' => (string)($row['nombre_base'] ?? ''),
+                'fecha_gestion' => $row['fecha_gestion'] ?? null,
+                'resultado_contacto' => (string)($row['resultado_contacto'] ?? ''),
+                'resultado' => 'VOLVER A LLAMAR',
+                'razon_especifica' => (string)($row['razon_especifica'] ?? ''),
+                'proxima_fecha' => date('Y-m-d H:i:s', $ts),
+                'comentarios' => $obsLimpias,
+                'comentarios_seguimiento' => $obsLimpias,
+                'asesor_cedula' => $asesorCedula,
+                'asesor_nombre' => (string)($row['asesor_nombre'] ?? ''),
+                'asesor_id' => $asesorCedula,
+            ];
+        }
+
+        return $pendientes;
     }
 
     /**

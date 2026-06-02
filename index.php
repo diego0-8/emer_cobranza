@@ -48,6 +48,8 @@ $accionesAPI = [
     'obtener_actividades_producto',
     'obtener_estadisticas_actividades',
     'obtener_historial_completo',
+    'obtener_estado_tiempo_asesores',
+    'obtener_detalle_pausas_asesor_tmo',
 ];
 
 if (!in_array($action, $accionesExportacion) && !in_array($action, $accionesAPI)) {
@@ -299,6 +301,8 @@ switch ($action) {
     case 'reportes_exportacion':
     case 'reporte_tmo':
     case 'exportar_reporte_tmo':
+    case 'obtener_estado_tiempo_asesores':
+    case 'obtener_detalle_pausas_asesor_tmo':
     case 'coord_call':
     case 'coord_call_gestion_modal':
     case 'ver_clientes':
@@ -350,6 +354,8 @@ switch ($action) {
             case 'reportes_exportacion': $controller->reportesExportacion(); break;
             case 'reporte_tmo': $controller->reporteTMO(); break;
             case 'exportar_reporte_tmo': $controller->exportarReporteTMO(); break;
+            case 'obtener_estado_tiempo_asesores': $controller->obtenerEstadoTiempoAsesores(); break;
+            case 'obtener_detalle_pausas_asesor_tmo': $controller->obtenerDetallePausasAsesorTmo(); break;
             case 'coord_call': $controller->coordCall(); break;
             case 'coord_call_gestion_modal': $controller->coordCallGestionModal(); break;
             case 'ver_clientes': $controller->verClientes(); break;

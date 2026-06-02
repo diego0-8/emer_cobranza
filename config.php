@@ -9,7 +9,7 @@ if (session_status() === PHP_SESSION_NONE) {
     // Verificar que no se hayan enviado headers
     if (!headers_sent()) {
         // Establece un nombre de sesión único para este CRM
-        $session_name = "EMERCOBRANZA_SID";  // Nombre único para este CRM
+        $session_name = "EMERCOBRANZAV3_SID";  // Nombre único para este CRM
         session_name($session_name);
         
         ini_set('session.cookie_httponly', 1);
@@ -30,6 +30,9 @@ define('SITE_NAME', 'Sistema de Gestión de Cobranza');
 define('SITE_VERSION', '2.2');
 define('UPLOAD_MAX_SIZE', 10 * 1024 * 1024); // 10MB
 define('ALLOWED_FILE_TYPES', ['xlsx', 'xls', 'csv']);
+
+// TMO: horas sin actividad de pausa antes de cerrar jornada activa automáticamente
+define('TMO_JORNADA_MAX_INACTIVIDAD_HORAS', 5);
 
 // Configuración de base de datos
 define('DB_HOST', 'localhost');

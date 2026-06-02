@@ -2480,47 +2480,73 @@
             }
         }
 
+        function formatearProximaFechaLlamada(proximaFecha) {
+            if (!proximaFecha) {
+                return 'Sin fecha programada';
+            }
+            const normalized = String(proximaFecha).trim().replace(' ', 'T');
+            const d = new Date(normalized);
+            if (isNaN(d.getTime())) {
+                return String(proximaFecha);
+            }
+            return d.toLocaleString('es-ES', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        function escapeHtmlRecordatorio(text) {
+            const div = document.createElement('div');
+            div.textContent = text == null ? '' : String(text);
+            return div.innerHTML;
+        }
+
         function mostrarRecordatoriosEnModal(recordatorios) {
             const contenidoModal = document.getElementById('contenidoLlamadasPendientes');
 
             let html = '<div class="recordatorios-pendientes-container">';
 
-            recordatorios.forEach((recordatorio, index) => {
-                const fecha = new Date(recordatorio.proxima_fecha || recordatorio.fecha_gestion).toLocaleString('es-ES', {
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
+            recordatorios.forEach((recordatorio) => {
+                const fecha = formatearProximaFechaLlamada(recordatorio.proxima_fecha);
+                const idCliente = recordatorio.id_cliente || recordatorio.cliente_id || recordatorio.id;
+                const asesorOrigen = recordatorio.asesor_id || recordatorio.asesor_cedula || '';
+                const asesorNombre = escapeHtmlRecordatorio(recordatorio.asesor_nombre || 'N/A');
+                const clienteNombre = escapeHtmlRecordatorio(recordatorio.cliente_nombre || 'Cliente');
+                const telefono = escapeHtmlRecordatorio(recordatorio.telefono || recordatorio.celular2 || 'Sin teléfono');
+                const tipificacion = escapeHtmlRecordatorio(recordatorio.resultado || recordatorio.resultado_contacto || 'VOLVER A LLAMAR');
+                const comentarios = escapeHtmlRecordatorio(recordatorio.comentarios || recordatorio.comentarios_seguimiento || 'Sin comentarios específicos');
+                const asesorOrigenJs = String(asesorOrigen).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
                 html += `
                     <div class="recordatorio-pendiente-item">
                         <div class="recordatorio-header">
                             <div class="cliente-info">
-                                <h4>👤 ${recordatorio.cliente_nombre || 'Cliente'}</h4>
+                                <h4>👤 ${clienteNombre}</h4>
                                 <div class="cliente-meta">
-                                    📱 ${recordatorio.telefono || recordatorio.celular2 || 'Sin teléfono'}
+                                    📱 ${telefono}
                                     <br>
-                                    👨‍💼 <strong>Asesor:</strong> ${recordatorio.asesor_nombre || 'N/A'}
+                                    👨‍💼 <strong>Asesor (última gestión):</strong> ${asesorNombre}
                                 </div>
                             </div>
                             <div class="fecha-programada">
-                                ⏰ ${fecha}
+                                ⏰ ${escapeHtmlRecordatorio(fecha)}
                             </div>
                         </div>
                         <div class="tipificacion-actual">
-                            🏷️ <strong>Tipificación:</strong> ${recordatorio.resultado || 'N/A'}
+                            🏷️ <strong>Tipificación:</strong> ${tipificacion}
                         </div>
                         <div class="comentarios">
                             💬 <strong>Comentarios:</strong><br>
-                            ${recordatorio.comentarios || 'Sin comentarios específicos'}
+                            ${comentarios}
                         </div>
                         <div class="acciones">
-                            <button class="btn btn-primary btn-sm" onclick="transferirRecordatorio(${recordatorio.cliente_id}, ${recordatorio.asesor_id}, '${recordatorio.asesor_nombre}')">
+                            <button type="button" class="btn btn-primary btn-sm" onclick="transferirRecordatorio(${idCliente}, '${asesorOrigenJs}', '${asesorNombre.replace(/'/g, "\\'")}')">
                                 Transferir
                             </button>
-                            <a href="index.php?action=gestionar_cliente&id=${recordatorio.asignacion_id}" class="btn btn-secondary btn-sm">
+                            <a href="index.php?action=gestionar_cliente&id=${idCliente}" class="btn btn-secondary btn-sm">
                                 Gestionar
                             </a>
                         </div>
@@ -2563,7 +2589,7 @@
                         </div>
                         <div style="text-align: right; margin-top: 20px;">
                             <button onclick="const modal = this.closest('.modal-overlay'); if (modal) modal.remove();" style="background: #6b7280; color: white; border: none; padding: 10px 20px; border-radius: 8px; margin-right: 10px; cursor: pointer;">Cancelar</button>
-                            <button onclick="confirmarTransferencia(${clienteId}, ${asesorOrigenId})" style="background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer;">Transferir</button>
+                            <button onclick="confirmarTransferencia(${clienteId}, '${String(asesorOrigenId).replace(/'/g, "\\'")}')" style="background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer;">Transferir</button>
                         </div>
                     </div>
                 </div>

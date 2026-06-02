@@ -55,16 +55,33 @@ function mostrarLlamadasPendientesEnModal(llamadasPendientes) {
         html += '<h4>📞 Llamadas Pendientes para Hoy</h4>';
         html += '<div class="llamadas-list">';
         
-        llamadasPendientes.forEach((llamada, index) => {
+        llamadasPendientes.forEach((llamada) => {
+            const idCliente = llamada.id_cliente || llamada.cliente_id || llamada.id || 0;
+            const nombre = llamada.cliente_nombre || llamada.nombre || 'Cliente';
+            let fechaTexto = 'Sin fecha programada';
+            if (llamada.proxima_fecha) {
+                const normalized = String(llamada.proxima_fecha).trim().replace(' ', 'T');
+                const d = new Date(normalized);
+                fechaTexto = isNaN(d.getTime())
+                    ? String(llamada.proxima_fecha)
+                    : d.toLocaleString('es-ES', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+            }
             html += `
                 <div class="llamada-item">
                     <div class="llamada-info">
-                        <strong>${llamada.nombre || 'Cliente'}</strong>
-                        <span class="cedula">Cédula: ${llamada.cedula || 'N/A'}</span>
-                        <span class="telefono">Tel: ${llamada.telefono || 'N/A'}</span>
+                        <strong>${nombre}</strong>
+                        <span class="cedula">Cédula: ${llamada.cedula || llamada.cliente_cedula || 'N/A'}</span>
+                        <span class="telefono">Tel: ${llamada.telefono || llamada.celular2 || 'N/A'}</span>
+                        <span class="fecha">Programada: ${fechaTexto}</span>
                     </div>
                     <div class="llamada-acciones">
-                        <a href="index.php?action=gestionar_cliente&id=${llamada.id}" 
+                        <a href="index.php?action=gestionar_cliente&id=${idCliente}" 
                            class="btn btn-primary btn-sm">
                             📞 Gestionar Cliente
                         </a>

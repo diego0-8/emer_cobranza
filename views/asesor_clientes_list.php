@@ -1640,34 +1640,27 @@
                 
             </div>
 
-            <?php
-            $clientesSeguimientoView = array_values(array_filter($clientesAsignados, function($cliente) {
-                $ur = (string)($cliente['ultimo_resultado'] ?? '');
-                $norm = strtoupper(trim(str_replace(['_', '-'], ' ', $ur)));
-                $norm = preg_replace('/\\s+/', ' ', $norm);
-                // En BD/legacy puede venir como:
-                // - "VOLVER A LLAMAR"
-                // - "volver_llamar"
-                // - "Agenda Llamada de Seguimiento"
-                return in_array($norm, ['VOLVER A LLAMAR', 'VOLVER LLAMAR', 'AGENDA LLAMADA DE SEGUIMIENTO'], true);
-            }));
-            $clientesSeguimientoView = array_slice($clientesSeguimientoView, 0, 10);
-            ?>
+            <?php $llamadasPendientesHoy = $datos_dashboard['llamadas_pendientes'] ?? []; ?>
 
-            <?php if (!empty($clientesSeguimientoView)): ?>
+            <?php if (!empty($llamadasPendientesHoy)): ?>
                 <div class="clientes-grid">
-                    <?php foreach ($clientesSeguimientoView as $cliente): ?>
+                    <?php foreach ($llamadasPendientesHoy as $cliente): ?>
+                        <?php
+                        $idClienteSeg = (int)($cliente['id_cliente'] ?? $cliente['cliente_id'] ?? $cliente['id'] ?? 0);
+                        $nombreClienteSeg = (string)($cliente['cliente_nombre'] ?? $cliente['nombre'] ?? 'Cliente');
+                        $telefonoSeg = (string)($cliente['telefono'] ?? $cliente['celular2'] ?? '');
+                        ?>
                         <div class="cliente-card">
                             <span class="estado-badge seguimiento">Volver a llamar</span>
                             
                             <div class="cliente-header">
                                 <div class="cliente-avatar">
-                                    <?php echo strtoupper(substr($cliente['nombre'] ?? 'C', 0, 1)); ?>
+                                    <?php echo strtoupper(substr($nombreClienteSeg, 0, 1)); ?>
                                 </div>
                                 <div class="cliente-info">
-                                    <h3><?php echo htmlspecialchars($cliente['nombre'] ?? ''); ?></h3>
+                                    <h3><?php echo htmlspecialchars($nombreClienteSeg); ?></h3>
                                     <div class="cliente-meta">
-                                        Cédula: <?php echo htmlspecialchars($cliente['cedula'] ?? ''); ?>
+                                        Cédula: <?php echo htmlspecialchars($cliente['cedula'] ?? $cliente['cliente_cedula'] ?? ''); ?>
                                     </div>
                                 </div>
                             </div>
@@ -1676,9 +1669,9 @@
                                 <div class="detail-item">
                                     <span class="detail-label">Teléfono</span>
                                     <span class="detail-value">
-                                        <span class="numero-telefono" onclick="llamarDesdeVentanaAnclada('<?php echo htmlspecialchars($cliente['telefono'] ?? ''); ?>')" 
+                                        <span class="numero-telefono" onclick="llamarDesdeVentanaAnclada('<?php echo htmlspecialchars($telefonoSeg); ?>')" 
                                               style="color: #667eea; cursor: pointer; text-decoration: underline;">
-                                            📞 <?php echo htmlspecialchars($cliente['telefono'] ?? ''); ?>
+                                            📞 <?php echo htmlspecialchars($telefonoSeg !== '' ? $telefonoSeg : 'Sin teléfono'); ?>
                                         </span>
                                     </span>
                                 </div>
@@ -1686,67 +1679,39 @@
                                 <div class="detail-item">
                                     <span class="detail-label">Próxima Llamada</span>
                                     <span class="detail-value" style="color: #ef4444; font-weight: bold;">
-                                        <?php echo date('d/m/Y H:i', strtotime($cliente['proxima_fecha'])); ?>
+                                        <?php echo date('d/m/Y H:i', strtotime((string)$cliente['proxima_fecha'])); ?>
                                     </span>
                                 </div>
                                 <?php endif; ?>
-                                <?php if (!empty($cliente['comentarios_seguimiento'])): ?>
+                                <?php if (!empty($cliente['comentarios_seguimiento']) || !empty($cliente['comentarios'])): ?>
                                 <div class="detail-item">
                                     <span class="detail-label">Comentarios</span>
-                                    <span class="detail-value"><?php echo htmlspecialchars(substr($cliente['comentarios_seguimiento'], 0, 100)) . (strlen($cliente['comentarios_seguimiento']) > 100 ? '...' : ''); ?></span>
+                                    <span class="detail-value"><?php
+                                        $comSeg = (string)($cliente['comentarios_seguimiento'] ?? $cliente['comentarios'] ?? '');
+                                        echo htmlspecialchars(strlen($comSeg) > 100 ? substr($comSeg, 0, 100) . '...' : $comSeg);
+                                    ?></span>
                                 </div>
                                 <?php endif; ?>
                             </div>
                             
                             <div class="cliente-actions">
-                                <a href="index.php?action=gestionar_cliente&id=<?php echo (int)($cliente['id_cliente'] ?? $cliente['id'] ?? 0); ?>" 
+                                <a href="index.php?action=gestionar_cliente&id=<?php echo $idClienteSeg; ?>" 
                                    class="btn btn-primary">
                                     📞 Gestionar
                                 </a>
                                 <button type="button" class="btn btn-success" 
-                                        onclick="mostrarHistorialCliente(<?php echo (int)($cliente['id_cliente'] ?? $cliente['id'] ?? 0); ?>, '<?php echo htmlspecialchars($cliente['nombre'] ?? '', ENT_QUOTES); ?>')">
+                                        onclick="mostrarHistorialCliente(<?php echo $idClienteSeg; ?>, '<?php echo htmlspecialchars($nombreClienteSeg, ENT_QUOTES); ?>')">
                                     📋 Ver Historial
                                 </button>
                             </div>
                         </div>
                     <?php endforeach; ?>
                 </div>
-                
-                <!-- Paginación para la pestaña "Seguimiento" -->
-                <?php 
-                $total_seguimiento = count($clientesSeguimientoView);
-                $paginas_seguimiento = 1;
-                if ($paginas_seguimiento > 1): 
-                ?>
-                    <div class="pagination">
-                        <?php if ($pagina_actual > 1): ?>
-                            <a href="?action=mis_clientes&filter=seguimiento&pagina=<?php echo $pagina_actual - 1; ?><?php echo !empty($_GET['buscar']) ? '&buscar=' . urlencode($_GET['buscar']) : ''; ?>">
-                                ← Anterior
-                            </a>
-                        <?php endif; ?>
-                        
-                        <?php for ($i = 1; $i <= $paginas_seguimiento; $i++): ?>
-                            <?php if ($i == $pagina_actual): ?>
-                                <span class="current"><?php echo $i; ?></span>
-                            <?php else: ?>
-                                <a href="?action=mis_clientes&filter=seguimiento&pagina=<?php echo $i; ?><?php echo !empty($_GET['buscar']) ? '&buscar=' . urlencode($_GET['buscar']) : ''; ?>">
-                                    <?php echo $i; ?>
-                                </a>
-                            <?php endif; ?>
-                        <?php endfor; ?>
-                        
-                        <?php if ($pagina_actual < $paginas_seguimiento): ?>
-                            <a href="?action=mis_clientes&filter=seguimiento&pagina=<?php echo $pagina_actual + 1; ?><?php echo !empty($_GET['buscar']) ? '&buscar=' . urlencode($_GET['buscar']) : ''; ?>">
-                                Siguiente →
-                            </a>
-                        <?php endif; ?>
-                    </div>
-                <?php endif; ?>
             <?php else: ?>
                 <div class="no-clientes">
                     <i class="fas fa-calendar-check"></i>
-                    <p>📅 No hay clientes con seguimiento pendiente.</p>
-                    <p>¡Excelente! Has gestionado todos tus clientes.</p>
+                    <p>📅 No hay clientes con llamadas programadas para hoy.</p>
+                    <p>¡Excelente! No tienes recordatorios pendientes para el día de hoy.</p>
                 </div>
             <?php endif; ?>
         </div>
@@ -1879,25 +1844,44 @@
             document.body.style.overflow = 'auto';
         }
         
+        function resolverIdClienteLlamada(llamada) {
+            return llamada.id_cliente || llamada.cliente_id || llamada.id || 0;
+        }
+
+        function formatearProximaFechaLlamada(proximaFecha) {
+            if (!proximaFecha) {
+                return 'Sin fecha programada';
+            }
+            const normalized = String(proximaFecha).trim().replace(' ', 'T');
+            const d = new Date(normalized);
+            if (isNaN(d.getTime())) {
+                return String(proximaFecha);
+            }
+            return d.toLocaleString('es-ES', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
         function mostrarLlamadasPendientesEnModal(llamadasPendientes) {
             const contenidoModal = document.getElementById('contenidoLlamadasPendientes');
             
             let html = '<div class="llamadas-pendientes-container">';
             
-            llamadasPendientes.forEach((llamada, index) => {
-                const fecha = new Date(llamada.proxima_fecha || new Date()).toLocaleString('es-ES', {
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
+            llamadasPendientes.forEach((llamada) => {
+                const idCliente = resolverIdClienteLlamada(llamada);
+                const fecha = formatearProximaFechaLlamada(llamada.proxima_fecha);
+                const tipificacion = llamada.resultado || llamada.resultado_contacto || 'VOLVER A LLAMAR';
+                const comentarios = llamada.comentarios || llamada.comentarios_seguimiento || 'Sin comentarios específicos';
                 
                 html += `
                     <div class="llamada-pendiente-item">
                         <div class="llamada-header">
                             <div class="cliente-info">
-                                <h4>👤 ${llamada.cliente_nombre || 'Cliente'}</h4>
+                                <h4>👤 ${llamada.cliente_nombre || llamada.nombre || 'Cliente'}</h4>
                                 <div class="cliente-meta">
                                     📱 ${llamada.telefono || llamada.celular2 || 'Sin teléfono'}
                                 </div>
@@ -1907,14 +1891,14 @@
                             </div>
                         </div>
                         <div class="tipificacion-actual">
-                            🏷️ <strong>Tipificación:</strong> ${llamada.resultado || 'N/A'}
+                            🏷️ <strong>Tipificación:</strong> ${tipificacion}
                         </div>
                         <div class="comentarios">
                             💬 <strong>Comentarios:</strong><br>
-                            ${llamada.comentarios || 'Sin comentarios específicos'}
+                            ${comentarios}
                         </div>
                         <div class="acciones">
-                            <a href="index.php?action=gestionar_cliente&id=${llamada.cliente_id}" 
+                            <a href="index.php?action=gestionar_cliente&id=${idCliente}" 
                                class="btn btn-primary btn-sm">
                                 📞 Gestionar Cliente
                             </a>

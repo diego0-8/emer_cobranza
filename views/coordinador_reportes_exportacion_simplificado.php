@@ -296,6 +296,7 @@ $asesores = isset($asesores) && is_array($asesores) ? $asesores : [];
             <div class="info-box">
                 <i class="fas fa-info-circle"></i>
                 <p><strong>Información:</strong> Exporta toda la gestión de tu equipo en un solo archivo CSV.</p>
+                <p><strong>Columnas incluidas:</strong> tipificación en 3 niveles, acuerdos de pago, fecha/hora de volver a llamar y observaciones limpias.</p>
                 <p><strong>Nota:</strong> Asegúrate de seleccionar un período que contenga gestiones registradas.</p>
             </div>
             
