@@ -2736,8 +2736,9 @@ class CoordinadorController extends BaseController {
      */
     public function reporteTMO() {
         $page_title = "Reporte TMO - Tiempo de Sesión y Pausas";
-        
-        $asesores = $this->usuarioModel->getAsesores();
+        $coordinador_id = $_SESSION['user_id'];
+
+        $asesores = $this->usuarioModel->getAsesoresByCoordinador($coordinador_id);
         
         $fecha_inicio = $_GET['fecha_inicio'] ?? date('Y-m-d', strtotime('-30 days'));
         $fecha_fin = $_GET['fecha_fin'] ?? date('Y-m-d');
