@@ -7,8 +7,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <?php include 'views/shared_navbar.php'; renderPageHead('Gestión de Cargas'); ?>
-    <?php include 'views/shared_styles.php'; ?>
+    <?php require_once __DIR__ . '/shared_navbar.php'; renderPageHead('Gestión de Cargas'); ?>
+    <?php require_once __DIR__ . '/shared_styles.php'; ?>
     <style>
         .upload-options {
             display: grid;
@@ -350,7 +350,7 @@
 </head>
 <body>
     <?php 
-    include 'views/shared_navbar.php';
+    require_once __DIR__ . '/shared_navbar.php';
     echo getNavbar('Gestión de Cargas', $_SESSION['user_role'] ?? ''); 
     ?>
     

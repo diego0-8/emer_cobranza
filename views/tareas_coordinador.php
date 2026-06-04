@@ -11,13 +11,13 @@ $asesores = isset($asesores) && is_array($asesores) ? $asesores : [];
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <?php include 'views/shared_navbar.php'; renderPageHead($page_title ?? ''); ?>
-    <?php include 'views/shared_styles.php'; ?>
+    <?php require_once __DIR__ . '/shared_navbar.php'; renderPageHead($page_title ?? ''); ?>
+    <?php require_once __DIR__ . '/shared_styles.php'; ?>
     <link rel="stylesheet" href="css/common-styles.css">
 </head>
 <body>
     <?php 
-    include 'views/shared_navbar.php';
+    require_once __DIR__ . '/shared_navbar.php';
     echo getNavbar('Tareas', $_SESSION['user_role'] ?? ''); 
     ?>
     
@@ -176,8 +176,8 @@ $asesores = isset($asesores) && is_array($asesores) ? $asesores : [];
                             <a href="index.php?action=ver_clientes&carga_id=<?php echo $carga['id']; ?>" class="btn btn-outline-primary btn-sm">
                                 <i class="fas fa-users"></i> Ver Clientes
                             </a>
-                            <a href="index.php?action=ver_actividades&carga_id=<?php echo $carga['id']; ?>" class="btn btn-outline-info btn-sm">
-                                <i class="fas fa-chart-line"></i> Ver Actividades
+                            <a href="index.php?action=ver_clientes&carga_id=<?php echo $carga['id']; ?>" class="btn btn-outline-info btn-sm">
+                                <i class="fas fa-chart-line"></i> Ver Clientes
                             </a>
                         </div>
                     </div>

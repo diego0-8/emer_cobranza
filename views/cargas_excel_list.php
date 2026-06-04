@@ -7,12 +7,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <?php include 'views/shared_navbar.php'; renderPageHead($page_title ?? ''); ?>
-    <?php include 'views/shared_styles.php'; ?>
+    <?php require_once __DIR__ . '/shared_navbar.php'; renderPageHead($page_title ?? ''); ?>
+    <?php require_once __DIR__ . '/shared_styles.php'; ?>
 </head>
 <body>
     <?php 
-    include 'views/shared_navbar.php';
+    require_once __DIR__ . '/shared_navbar.php';
     echo getNavbar('Gestión', $_SESSION['user_role'] ?? ''); 
     ?>
     
@@ -181,9 +181,9 @@
                                        class="btn btn-primary btn-sm">
                                         <i class="fas fa-eye"></i> Ver Clientes
                                     </a>
-                                    <a href="index.php?action=ver_actividades&carga_id=<?php echo $carga['id']; ?>" 
+                                    <a href="index.php?action=ver_clientes&carga_id=<?php echo $carga['id']; ?>" 
                                        class="btn btn-info btn-sm">
-                                        <i class="fas fa-chart-line"></i> Actividades
+                                        <i class="fas fa-users"></i> Clientes
                                     </a>
                                 </div>
                                 

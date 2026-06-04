@@ -122,7 +122,7 @@ $carga = isset($carga) && is_array($carga) ? $carga : [];
                         </div>
                         <div class="card-body">
                             <p>¿Prefieres que el sistema distribuya los clientes automáticamente de manera equitativa?</p>
-                            <form method="POST" action="index.php?action=asignarAutomatico" style="display: inline;">
+                            <form method="POST" action="index.php?action=asignar_automatico" style="display: inline;">
                                 <input type="hidden" name="carga_id" value="<?php echo $carga['id']; ?>">
                                 <button type="submit" class="btn btn-primary">
                                     🔄 Asignación Automática

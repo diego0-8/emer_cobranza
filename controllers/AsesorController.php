@@ -708,6 +708,51 @@ class AsesorController extends BaseController {
         
         require __DIR__ . '/../views/asesor_tareas.php';
     }
+
+    /**
+     * Redirige al primer cliente pendiente de una tarea asignada al asesor.
+     */
+    public function gestionarTarea($tareaId) {
+        $asesorId = $_SESSION['user_id'];
+        $tareaId = $this->validarId($tareaId, 'tarea');
+
+        $tareas = $this->tareaModel->getTareasByAsesor($asesorId, 'pendiente');
+        $tareaValida = false;
+        foreach ($tareas as $tarea) {
+            if ((int)($tarea['id'] ?? 0) === (int)$tareaId) {
+                $tareaValida = true;
+                break;
+            }
+        }
+
+        if (!$tareaValida) {
+            $_SESSION['error_message'] = 'No tienes permisos para gestionar esta tarea o ya fue completada.';
+            header('Location: index.php?action=mis_tareas');
+            exit;
+        }
+
+        $clientes = $this->tareaModel->getClientesByTarea($tareaId);
+        $clienteId = null;
+        foreach ($clientes as $cliente) {
+            if (($cliente['gestionado'] ?? '') !== 'si') {
+                $clienteId = (int)($cliente['id_cliente'] ?? $cliente['id'] ?? 0);
+                break;
+            }
+        }
+
+        if (!$clienteId && !empty($clientes)) {
+            $clienteId = (int)($clientes[0]['id_cliente'] ?? $clientes[0]['id'] ?? 0);
+        }
+
+        if (!$clienteId) {
+            $_SESSION['error_message'] = 'La tarea no tiene clientes asignados.';
+            header('Location: index.php?action=mis_tareas');
+            exit;
+        }
+
+        header('Location: index.php?action=gestionar_cliente&id=' . $clienteId . '&tarea_id=' . (int)$tareaId);
+        exit;
+    }
     
     /**
      * Filtra los clientes gestionados según el resultado de la gestión

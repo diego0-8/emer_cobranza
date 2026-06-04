@@ -12,6 +12,47 @@ class ActividadController extends BaseController {
         parent::__construct($pdo);
         $this->actividadModel = new ActividadProductoModel($pdo);
     }
+
+    private function usuarioPuedeAccederCliente($clienteId) {
+        $clienteId = (int)$clienteId;
+        if ($clienteId <= 0) {
+            return false;
+        }
+
+        $userId = $_SESSION['user_id'] ?? '';
+        $rol = $_SESSION['user_role'] ?? '';
+
+        if ($rol === 'administrador') {
+            return true;
+        }
+
+        if ($rol === 'asesor') {
+            $bases = $this->tareaModel->getBasesAsignadasByAsesor($userId);
+            $baseIds = array_column($bases, 'base_id');
+            if (empty($baseIds)) {
+                return false;
+            }
+            $placeholders = implode(',', array_fill(0, count($baseIds), '?'));
+            $sql = "SELECT 1 FROM clientes WHERE id_cliente = ? AND base_id IN ($placeholders) LIMIT 1";
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute(array_merge([$clienteId], $baseIds));
+            return (bool)$stmt->fetch(PDO::FETCH_ASSOC);
+        }
+
+        if ($rol === 'coordinador') {
+            $stmt = $this->pdo->prepare("
+                SELECT 1
+                FROM clientes c
+                JOIN base_clientes b ON c.base_id = b.id_base
+                WHERE c.id_cliente = ? AND b.creado_por = ?
+                LIMIT 1
+            ");
+            $stmt->execute([$clienteId, (string)$userId]);
+            return (bool)$stmt->fetch(PDO::FETCH_ASSOC);
+        }
+
+        return false;
+    }
     
     /**
      * Obtiene actividades en tiempo real
@@ -71,6 +112,10 @@ class ActividadController extends BaseController {
             if (!$clienteId) {
                 throw new Exception("ID de cliente no proporcionado");
             }
+
+            if (!$this->usuarioPuedeAccederCliente($clienteId)) {
+                throw new Exception("No tienes permisos para ver las actividades de este cliente");
+            }
             
             $actividades = $this->actividadModel->getActividadesCliente($clienteId, $limit);
             
@@ -109,6 +154,10 @@ class ActividadController extends BaseController {
             
             if (!$productoId) {
                 throw new Exception("ID de producto no proporcionado");
+            }
+
+            if ($clienteId && !$this->usuarioPuedeAccederCliente($clienteId)) {
+                throw new Exception("No tienes permisos para ver las actividades de este cliente");
             }
             
             $actividades = $this->actividadModel->getActividadesProducto($productoId, $clienteId);
@@ -206,6 +255,9 @@ class ActividadController extends BaseController {
             $params = [$asesorId];
             
             if ($clienteId) {
+                if (!$this->usuarioPuedeAccederCliente($clienteId)) {
+                    throw new Exception("No tienes permisos para ver las actividades de este cliente");
+                }
                 $sql .= " AND ap.cliente_id = ?";
                 $params[] = $clienteId;
             }
@@ -225,8 +277,7 @@ class ActividadController extends BaseController {
                 $params[] = $fechaFin;
             }
             
-            $sql .= " ORDER BY ap.timestamp_actividad DESC LIMIT ?";
-            $params[] = $limit;
+            $sql .= " ORDER BY ap.timestamp_actividad DESC LIMIT " . (int)$limit;
             
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute($params);

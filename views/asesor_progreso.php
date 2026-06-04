@@ -9,11 +9,11 @@ if (!isset($asesor) || !is_array($asesor)) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <?php include 'views/shared_navbar.php'; renderPageHead($page_title ?? ''); ?>
-    <?php include 'views/shared_styles.php'; ?>
+    <?php require_once __DIR__ . '/shared_navbar.php'; renderPageHead($page_title ?? ''); ?>
+    <?php require_once __DIR__ . '/shared_styles.php'; ?>
 </head>
 <body>
-    <?php include 'views/shared_navbar.php'; ?>
+    <?php require_once __DIR__ . '/shared_navbar.php'; ?>
     
     <div class="container mt-4">
         <div class="row">
@@ -47,7 +47,7 @@ if (!isset($asesor) || !is_array($asesor)) {
         </div>
     </div>
     
-    <?php include 'views/shared_footer.php'; ?>
+    <?php require_once __DIR__ . '/shared_footer.php'; ?>
 </body>
 </html>
 

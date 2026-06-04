@@ -115,7 +115,7 @@ $page_title = $page_title ?? '';
 </head>
 <body>
     <?php 
-    include 'views/shared_navbar.php';
+    require_once __DIR__ . '/shared_navbar.php';
     echo getNavbar('Dashboard', $_SESSION['user_role'] ?? ''); 
     ?>
     

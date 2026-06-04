@@ -822,8 +822,8 @@ $promedio_llamadas_por_cliente = $total_clientes > 0
                             </span>
                         </td>
                         <td>
-                            <a href="index.php?action=gestionar_cliente&id=${cliente.asignacion_id || cliente.id}" class="btn btn-sm btn-primary">
-                                Gestionar
+                            <a href="index.php?action=ver_detalle_cliente&id=${cliente.cliente_id || cliente.id_cliente || cliente.id}" class="btn btn-sm btn-primary">
+                                Ver detalle
                             </a>
                         </td>
                     </tr>

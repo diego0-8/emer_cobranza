@@ -2124,7 +2124,7 @@
         
         // Función para recargar el dashboard con filtros
         function recargarDashboardConFiltros(fechaInicio = null, fechaFin = null) {
-            let url = 'index.php?action=coordinador&subaction=dashboard';
+            let url = 'index.php?action=dashboard';
             
             if (fechaInicio) {
                 url += '&fecha_inicio=' + encodeURIComponent(fechaInicio);

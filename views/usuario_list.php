@@ -8,12 +8,12 @@ $page_title = $page_title ?? '';
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <?php include 'views/shared_navbar.php'; renderPageHead($page_title ?? ''); ?>
-    <?php include 'views/shared_styles.php'; ?>
+    <?php require_once __DIR__ . '/shared_navbar.php'; renderPageHead($page_title ?? ''); ?>
+    <?php require_once __DIR__ . '/shared_styles.php'; ?>
 </head>
 <body>
     <?php 
-    include 'views/shared_navbar.php';
+    require_once __DIR__ . '/shared_navbar.php';
     echo getNavbar('Gestión', $_SESSION['user_role'] ?? ''); 
     ?>
     

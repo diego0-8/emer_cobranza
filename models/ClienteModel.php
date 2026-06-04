@@ -467,12 +467,12 @@ class ClienteModel {
      * Obtiene un cliente específico verificando que pertenezca a una carga del coordinador
      */
     public function getClienteByIdAndCoordinador($clienteId, $coordinadorId) {
-        $sql = "SELECT c.*, ce.usuario_coordinador_id as coordinador_id
+        $sql = "SELECT " . $this->selectClienteCompatFields() . ", b.creado_por as coordinador_id
                 FROM clientes c
-                JOIN cargas_excel ce ON c.carga_excel_id = ce.id
-                WHERE c.id = ? AND ce.usuario_coordinador_id = ?";
+                JOIN base_clientes b ON c.base_id = b.id_base
+                WHERE c.id_cliente = ? AND b.creado_por = ?";
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([$clienteId, $coordinadorId]);
+        $stmt->execute([(int)$clienteId, (string)$coordinadorId]);
         return $stmt->fetch(PDO::FETCH_ASSOC);
     }
 

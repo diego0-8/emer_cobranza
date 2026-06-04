@@ -2621,10 +2621,36 @@ $basePath = $basePath ?? '';
                                 <label for="sub_opcion_volver_llamar" class="form-label">Razón específica:</label>
                                 <select name="sub_opcion_volver_llamar" id="sub_opcion_volver_llamar" class="form-select" onchange="seleccionarSubOpcion(this.value)">
                                     <option value="">Selecciona la razón</option>
-                                    <option value="medio_pago_no_sirve">MEDIO DE PAGO NO SIRVE</option>
-                                    <option value="no_conoce_politicas_cancelacion">NO CONOCE POLITICAS DE CANCELACION</option>
                                     <option value="no_informa">NO INFORMA</option>
+                                    <option value="desempleo">DESEMPLEO</option>
+                                    <option value="incremento_tarifa">INCREMENTO DE TARIFA</option>
+                                    <option value="otras_prioridades_economicas">TIENE OTRAS PRIORIDADES ECONOMICAS</option>
+                                    <option value="disminucion_ingresos">DISMINUCION DE INGRESOS</option>
+                                    <option value="adquirio_otro_servicio_salud">ADQUIRIO OTRO SERVICIO DE SALUD</option>
+                                    <option value="no_utiliza_beneficios">NO UTILIZA/NO BENEFICIOS DEL SERVICIO</option>
+                                    <option value="sale_del_pais">SALE DEL PAIS</option>
+                                    <option value="fallecido">FALLECIDO</option>
+                                    <option value="humanizacion_servicio">HUMANIZACION DEL SERVICIO GENERAL</option>
+                                    <option value="oportunidad_nunca_llegaron">OPORTUNIDAD/NUNCA LLEGARON</option>
                                     <option value="olvido_pago">OLVIDO DE PAGO</option>
+                                    <option value="metodo_pago_errado">METODO DE PAGO ERRADO/DEBITO AUTOMATICO</option>
+                                    <option value="medio_pago_no_sirve">MEDIO DE PAGO NO SIRVE</option>
+                                    <option value="no_realizan_debito_automatico">NO REALIZAN DEBITO AUTOMATICO</option>
+                                    <option value="falsa_promesa_comercial">FALSA PROMESA COMERCIAL</option>
+                                    <option value="fraude">FRAUDE</option>
+                                    <option value="factura_no_corresponde">FACTURA NO CORRESPONDE</option>
+                                    <option value="no_entrega_aviso_pago">NO ENTREGA DE AVISO DE PAGO/FACTURA</option>
+                                    <option value="facturacion_errada">FACTURACION ERRADA</option>
+                                    <option value="cambio_traslado_sin_cobertura">CAMBIO/TRASLADO SIN COBERTURA</option>
+                                    <option value="cancelacion_no_aplicada">CANCELACION NO APLICADA</option>
+                                    <option value="incumplimiento_ofercimientos">INCUMPLIMIENTO OFRECIMIENTOS REALIZADOS (LEALTAD)</option>
+                                    <option value="inconformidad_pqr">INCONFORMIDAD PQR</option>
+                                    <option value="informacion_errada">INFORMACION ERRADA</option>
+                                    <option value="no_contestaron_sac">NO CONTESTARON EN LA LINEA DE SAC</option>
+                                    <option value="no_conoce_politicas_cancelacion">NO CONOCE POLITICAS DE CANCELACION</option>
+                                    <option value="reclamo_pendiente_respuesta">RECLAMO PENDIENTE DE RESPUESTA</option>
+                                    <option value="pago_afiliacion_no_aplicado">PAGO DE AFILIACION NO APLICADO</option>
+                                    <option value="pago_sin_aplicar">PAGO SIN APLICAR</option>
                                     <option value="proceso_cancelacion">PROCESO DE CANCELACIÓN</option>
                                     <option value="rechazo_teleconsulta">RECHAZO TELECONSULTA</option>
                                     <option value="viaje">VIAJE</option>
@@ -2651,13 +2677,7 @@ $basePath = $basePath ?? '';
                                 <label for="sub_opcion_venta_novedad" class="form-label">Razón específica:</label>
                                 <select name="sub_opcion_venta_novedad" id="sub_opcion_venta_novedad" class="form-select" onchange="seleccionarSubOpcion(this.value)">
                                     <option value="">Selecciona la razón</option>
-                                    <option value="medio_pago_no_sirve">MEDIO DE PAGO NO SIRVE</option>
-                                    <option value="no_conoce_politicas_cancelacion">NO CONOCE POLITICAS DE CANCELACION</option>
-                                    <option value="olvido_pago">OLVIDO DE PAGO</option>
-                                    <option value="proceso_cancelacion">PROCESO DE CANCELACIÓN</option>
-                                    <option value="rechazo_teleconsulta">RECHAZO TELECONSULTA</option>
                                     <option value="venta_novedad">VENTA CON NOVEDAD</option>
-                                    <option value="viaje">VIAJE</option>
                                 </select>
                             </div>
                         </div>
@@ -4135,7 +4155,10 @@ $basePath = $basePath ?? '';
                     elemento.style.display = 'none';
                     // Limpiar selección
                     const select = elemento.querySelector('select');
-                    if (select) select.value = '';
+                    if (select) {
+                        select.value = '';
+                        select.removeAttribute('required');
+                    }
                 }
             });
             
@@ -4182,9 +4205,17 @@ $basePath = $basePath ?? '';
                 camposAdicionales.style.display = 'block';
                 const subSelectVolver = document.getElementById('sub_opcion_volver_llamar');
                 if (subSelectVolver) {
-                    subSelectVolver.value = 'no_informa';
+                    subSelectVolver.value = '';
+                    subSelectVolver.setAttribute('required', 'required');
                 }
-                document.getElementById('sub_tipificacion_hidden').value = 'no_informa';
+                document.getElementById('sub_tipificacion_hidden').value = '';
+                return;
+            } else if (valor === 'venta_novedad') {
+                const subSelectVenta = document.getElementById('sub_opcion_venta_novedad');
+                if (subSelectVenta) {
+                    subSelectVenta.value = 'venta_novedad';
+                }
+                document.getElementById('sub_tipificacion_hidden').value = 'venta_novedad';
                 return;
             }
             
