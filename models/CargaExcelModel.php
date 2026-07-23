@@ -1,4 +1,6 @@
 <?php 
+require_once __DIR__ . '/CampanaModel.php';
+
 class CargaExcelModel {
     private $pdo;
 
@@ -54,10 +56,13 @@ class CargaExcelModel {
      */
     public function getCargasByCoordinador($coordinadorId, $soloHabilitadas = true) {
         $sql = "
-            SELECT b.*, u.nombre as coordinador_nombre
+            SELECT DISTINCT b.*, u.nombre as coordinador_nombre
             FROM base_clientes b
             LEFT JOIN usuarios u ON b.creado_por = u.cedula
-            WHERE b.creado_por = ?
+            LEFT JOIN campana_coordinadores cc ON cc.campana_id = b.campana_id
+                AND cc.coordinador_cedula = ?
+                AND cc.estado = 'activo'
+            WHERE (b.creado_por = ? OR cc.id_campana_coordinador IS NOT NULL)
         ";
 
         if ($soloHabilitadas) {
@@ -67,7 +72,7 @@ class CargaExcelModel {
         $sql .= " ORDER BY b.fecha_actualizacion DESC";
 
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([(string)$coordinadorId]);
+        $stmt->execute([(string)$coordinadorId, (string)$coordinadorId]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $mapped = array_values(array_filter(array_map([$this, 'mapBaseRow'], $rows)));
         foreach ($mapped as $i => $m) {
@@ -107,10 +112,14 @@ class CargaExcelModel {
             SELECT b.*, u.nombre as coordinador_nombre
             FROM base_clientes b
             LEFT JOIN usuarios u ON b.creado_por = u.cedula
-            WHERE b.id_base = ? AND b.creado_por = ?
+            LEFT JOIN campana_coordinadores cc ON cc.campana_id = b.campana_id
+                AND cc.coordinador_cedula = ?
+                AND cc.estado = 'activo'
+            WHERE b.id_base = ?
+              AND (b.creado_por = ? OR cc.id_campana_coordinador IS NOT NULL)
             LIMIT 1
         ");
-        $stmt->execute([(int)$cargaId, (string)$coordinadorId]);
+        $stmt->execute([(string)$coordinadorId, (int)$cargaId, (string)$coordinadorId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         $mapped = $this->mapBaseRow($row);
         if ($mapped) {
@@ -157,11 +166,19 @@ class CargaExcelModel {
     /**
      * Crea una nueva carga
      */
-    public function crearCarga($nombreCargue, $coordinadorId) {
-        $sql = "INSERT INTO base_clientes (nombre, total_clientes, total_obligaciones, creado_por, estado)
-                VALUES (?, 0, 0, ?, 'activo')";
-        $stmt = $this->pdo->prepare($sql);
-        if ($stmt->execute([(string)$nombreCargue, (string)$coordinadorId])) {
+    public function crearCarga($nombreCargue, $coordinadorId, $campanaId = null) {
+        if ($campanaId !== null) {
+            $sql = "INSERT INTO base_clientes (nombre, total_clientes, total_obligaciones, creado_por, campana_id, estado)
+                    VALUES (?, 0, 0, ?, ?, 'activo')";
+            $stmt = $this->pdo->prepare($sql);
+            $ok = $stmt->execute([(string)$nombreCargue, (string)$coordinadorId, (int)$campanaId]);
+        } else {
+            $sql = "INSERT INTO base_clientes (nombre, total_clientes, total_obligaciones, creado_por, estado)
+                    VALUES (?, 0, 0, ?, 'activo')";
+            $stmt = $this->pdo->prepare($sql);
+            $ok = $stmt->execute([(string)$nombreCargue, (string)$coordinadorId]);
+        }
+        if ($ok) {
             return (int)$this->pdo->lastInsertId();
         }
         return false;
@@ -170,8 +187,8 @@ class CargaExcelModel {
     /**
      * Crea una nueva base de datos independiente
      */
-    public function crearBaseDatosIndependiente($nombreBaseDatos, $coordinadorId) {
-        return $this->crearCarga($nombreBaseDatos, $coordinadorId);
+    public function crearBaseDatosIndependiente($nombreBaseDatos, $coordinadorId, $campanaId = null) {
+        return $this->crearCarga($nombreBaseDatos, $coordinadorId, $campanaId);
     }
 
     /**
@@ -214,13 +231,12 @@ class CargaExcelModel {
     /**
      * Asigna un asesor a una base de datos
      */
-    public function asignarAsesorABaseDatos($cargaId, $asesorId) {
+    public function asignarAsesorABaseDatos($cargaId, $asesorId, $asignadoPor = null) {
         $baseId = (int)$cargaId;
         $asesorCedula = (string)$asesorId;
 
         $this->pdo->beginTransaction();
         try {
-            // Si existe, reactivar; si no, insertar.
             $stmt = $this->pdo->prepare("
                 SELECT id_base_asesor
                 FROM asignacion_base_asesores
@@ -233,20 +249,32 @@ class CargaExcelModel {
             if ($existing) {
                 $stmt = $this->pdo->prepare("
                     UPDATE asignacion_base_asesores
-                    SET estado = 'activa', fecha_actualizacion = CURRENT_TIMESTAMP
+                    SET estado = 'activa', asignado_por = ?, fecha_actualizacion = CURRENT_TIMESTAMP
                     WHERE id_base_asesor = ?
                 ");
-                $stmt->execute([(int)$existing['id_base_asesor']]);
+                $stmt->execute([$asignadoPor ? (string)$asignadoPor : null, (int)$existing['id_base_asesor']]);
             } else {
                 $stmt = $this->pdo->prepare("
-                    INSERT INTO asignacion_base_asesores (base_id, asesor_cedula, estado, fecha_asignacion)
-                    VALUES (?, ?, 'activa', CURRENT_TIMESTAMP)
+                    INSERT INTO asignacion_base_asesores (base_id, asesor_cedula, asignado_por, estado, fecha_asignacion)
+                    VALUES (?, ?, ?, 'activa', CURRENT_TIMESTAMP)
                 ");
-                $stmt->execute([$baseId, $asesorCedula]);
+                $stmt->execute([$baseId, $asesorCedula, $asignadoPor ? (string)$asignadoPor : null]);
+            }
+
+            if ($asignadoPor) {
+                $campanaModel = new CampanaModel($this->pdo);
+                $campanaId = $campanaModel->getCampanaIdByBase($baseId);
+                $campanaModel->registrarAuditoria(
+                    (string)$asignadoPor,
+                    $campanaId,
+                    'asignar_asesor_base',
+                    'asignacion_base_asesores',
+                    $baseId,
+                    ['asesor_cedula' => $asesorCedula, 'base_id' => $baseId]
+                );
             }
 
             $this->pdo->commit();
-            // Compatibilidad: antes devolvía #asignaciones por cliente; ahora 1 base asignada.
             return 1;
         } catch (Exception $e) {
             $this->pdo->rollBack();
@@ -258,7 +286,7 @@ class CargaExcelModel {
     /**
      * Libera un asesor de una base de datos
      */
-    public function liberarAsesorDeBaseDatos($cargaId, $asesorId) {
+    public function liberarAsesorDeBaseDatos($cargaId, $asesorId, $liberadoPor = null) {
         $this->pdo->beginTransaction();
         try {
             $baseId = (int)$cargaId;
@@ -282,6 +310,19 @@ class CargaExcelModel {
                 $asignacionesActualizadas = $stmt->rowCount();
             }
 
+            if ($liberadoPor && $asignacionesActualizadas > 0) {
+                $campanaModel = new CampanaModel($this->pdo);
+                $campanaId = $campanaModel->getCampanaIdByBase($baseId);
+                $campanaModel->registrarAuditoria(
+                    (string)$liberadoPor,
+                    $campanaId,
+                    'liberar_asesor_base',
+                    'asignacion_base_asesores',
+                    $baseId,
+                    ['asesor_cedula' => $asesorId !== null ? (string)$asesorId : 'todos', 'base_id' => $baseId]
+                );
+            }
+
             $this->pdo->commit();
             return $asignacionesActualizadas;
         } catch (Exception $e) {
@@ -303,11 +344,13 @@ class CargaExcelModel {
             $stmt = $this->pdo->prepare("
                 SELECT u.cedula as id, u.nombre as nombre_completo, u.usuario
                 FROM usuarios u
-                INNER JOIN asignaciones_cordinador ac ON u.cedula = ac.asesor_cedula
-                WHERE ac.cordinador_cedula = ?
-                  AND ac.estado = 'activo'
+                INNER JOIN campana_asesores ca ON u.cedula = ca.asesor_cedula
+                INNER JOIN base_clientes b ON b.id_base = ?
+                WHERE ca.campana_id = b.campana_id
+                  AND ca.estado = 'activo'
                   AND u.rol = 'asesor'
                   AND u.estado = 'activo'
+                  AND b.campana_id IS NOT NULL
                   AND u.cedula NOT IN (
                     SELECT DISTINCT aba.asesor_cedula
                     FROM asignacion_base_asesores aba
@@ -315,16 +358,18 @@ class CargaExcelModel {
                   )
                 ORDER BY u.nombre
             ");
-            $stmt->execute([$coordinadorCedula, $baseId]);
+            $stmt->execute([$baseId, $baseId]);
             return $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
 
         $stmt = $this->pdo->prepare("
-            SELECT u.cedula as id, u.nombre as nombre_completo, u.usuario
+            SELECT DISTINCT u.cedula as id, u.nombre as nombre_completo, u.usuario
             FROM usuarios u
-            INNER JOIN asignaciones_cordinador ac ON u.cedula = ac.asesor_cedula
-            WHERE ac.cordinador_cedula = ?
-              AND ac.estado = 'activo'
+            INNER JOIN campana_asesores ca ON u.cedula = ca.asesor_cedula
+            INNER JOIN campana_coordinadores cc ON cc.campana_id = ca.campana_id
+            WHERE cc.coordinador_cedula = ?
+              AND cc.estado = 'activo'
+              AND ca.estado = 'activo'
               AND u.rol = 'asesor'
               AND u.estado = 'activo'
             ORDER BY u.nombre
@@ -366,10 +411,12 @@ class CargaExcelModel {
         $stmt = $this->pdo->prepare("
             SELECT DISTINCT u.cedula as id, u.nombre as nombre_completo, u.usuario
             FROM usuarios u
-            INNER JOIN asignaciones_cordinador ac ON u.cedula = ac.asesor_cedula
+            INNER JOIN campana_asesores ca ON u.cedula = ca.asesor_cedula
+            INNER JOIN campana_coordinadores cc ON cc.campana_id = ca.campana_id
             INNER JOIN asignacion_base_asesores aba ON u.cedula = aba.asesor_cedula
-            WHERE ac.cordinador_cedula = ?
-              AND ac.estado = 'activo'
+            WHERE cc.coordinador_cedula = ?
+              AND cc.estado = 'activo'
+              AND ca.estado = 'activo'
               AND aba.base_id = ?
               AND aba.estado = 'activa'
               AND u.rol = 'asesor'

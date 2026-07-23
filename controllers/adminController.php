@@ -1143,35 +1143,155 @@ class AdminController extends BaseController {
     }
     
     public function asignarPersonal() {
-        $page_title = "Asignación de Personal";
-        
-        // Prevenir cache del navegador para esta página
-        header("Cache-Control: no-cache, no-store, must-revalidate");
-        header("Pragma: no-cache");
-        header("Expires: 0");
-        
-        // Obtener coordinadores y asesores DISPONIBLES (no asignados)
-        $coordinadores = $this->usuarioModel->getUsuariosByRol('coordinador');
-        $asesores = $this->usuarioModel->getAsesoresDisponibles(); // Solo asesores NO asignados
-        
-        // Obtener asesores asignados para mostrar en la sección correspondiente
-        $asesoresAsignados = [];
-        foreach ($coordinadores as $coordinador) {
-            if ($coordinador['estado'] === 'Activo') {
-                $asesoresDelCoordinador = $this->usuarioModel->getAsesoresByCoordinador($coordinador['id']);
-                foreach ($asesoresDelCoordinador as $asesor) {
-                    $asesor['coordinador_nombre'] = $coordinador['nombre_completo'];
-                    $asesor['coordinador_id'] = $coordinador['id'];
-                    $asesoresAsignados[] = $asesor;
-                }
-            }
-        }
-        
-        // Obtener mensajes de éxito o error
+        header('Location: index.php?action=list_campanas');
+        exit;
+    }
+
+    public function listCampanas() {
+        $page_title = 'Gestionar Campañas';
+        $campanas = $this->campanaModel->getAllCampanas();
         $success = $_GET['success'] ?? '';
         $error = $_GET['error'] ?? '';
-        
-        require __DIR__ . '/../views/admin_asignar_personal.php';
+        require __DIR__ . '/../views/admin_campanas_list.php';
+    }
+
+    public function crearCampana() {
+        $page_title = 'Crear Campaña';
+        $error = '';
+        $success = '';
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $nombre = trim($_POST['nombre'] ?? '');
+            $descripcion = trim($_POST['descripcion'] ?? '');
+            if ($nombre === '') {
+                $error = 'El nombre de la campaña es obligatorio.';
+            } else {
+                $id = $this->campanaModel->createCampana($nombre, $descripcion, (string)$_SESSION['user_id']);
+                if ($id) {
+                    header('Location: index.php?action=gestionar_campana&id=' . $id . '&success=campana_creada');
+                    exit;
+                }
+                $error = 'No se pudo crear la campaña.';
+            }
+        }
+
+        require __DIR__ . '/../views/admin_campana_form.php';
+    }
+
+    public function editarCampana() {
+        $id = (int)($_GET['id'] ?? 0);
+        $campana = $this->campanaModel->getCampanaById($id);
+        if (!$campana) {
+            header('Location: index.php?action=list_campanas&error=campana_no_encontrada');
+            exit;
+        }
+
+        $page_title = 'Editar Campaña';
+        $error = '';
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $nombre = trim($_POST['nombre'] ?? '');
+            $descripcion = trim($_POST['descripcion'] ?? '');
+            $estado = $_POST['estado'] ?? 'activa';
+            if ($nombre === '') {
+                $error = 'El nombre es obligatorio.';
+            } elseif ($this->campanaModel->updateCampana($id, $nombre, $descripcion, $estado)) {
+                header('Location: index.php?action=gestionar_campana&id=' . $id . '&success=campana_actualizada');
+                exit;
+            } else {
+                $error = 'No se pudo actualizar la campaña.';
+            }
+            $campana = $this->campanaModel->getCampanaById($id);
+        }
+
+        require __DIR__ . '/../views/admin_campana_form.php';
+    }
+
+    public function gestionarCampana() {
+        $id = (int)($_GET['id'] ?? 0);
+        $campana = $this->campanaModel->getCampanaById($id);
+        if (!$campana) {
+            header('Location: index.php?action=list_campanas&error=campana_no_encontrada');
+            exit;
+        }
+
+        $page_title = 'Gestionar Campaña: ' . $campana['nombre'];
+        $coordinadores = $this->campanaModel->getCoordinadoresByCampana($id);
+        $coordinadoresDisponibles = $this->campanaModel->getCoordinadoresDisponibles($id);
+        $asesores = $this->campanaModel->getAsesoresByCampana($id);
+        $asesoresDisponibles = $this->campanaModel->getAsesoresDisponibles($id);
+        $success = $_GET['success'] ?? '';
+        $error = $_GET['error'] ?? '';
+
+        require __DIR__ . '/../views/admin_gestionar_campana.php';
+    }
+
+    public function asignarCoordinadorCampana() {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            header('Location: index.php?action=list_campanas');
+            exit;
+        }
+        $campanaId = (int)($_POST['campana_id'] ?? 0);
+        $coordId = trim($_POST['coordinador_id'] ?? '');
+        if ($campanaId <= 0 || $coordId === '') {
+            header('Location: index.php?action=gestionar_campana&id=' . $campanaId . '&error=datos_incompletos');
+            exit;
+        }
+        $ok = $this->campanaModel->asignarCoordinador($campanaId, $coordId, (string)$_SESSION['user_id']);
+        header('Location: index.php?action=gestionar_campana&id=' . $campanaId . '&' . ($ok ? 'success=coord_asignado' : 'error=error_asignacion'));
+        exit;
+    }
+
+    public function liberarCoordinadorCampana() {
+        $campanaId = (int)($_GET['campana_id'] ?? 0);
+        $coordId = trim($_GET['coordinador_id'] ?? '');
+        if ($campanaId <= 0 || $coordId === '') {
+            header('Location: index.php?action=list_campanas&error=datos_incompletos');
+            exit;
+        }
+        $ok = $this->campanaModel->liberarCoordinador($campanaId, $coordId);
+        header('Location: index.php?action=gestionar_campana&id=' . $campanaId . '&' . ($ok ? 'success=coord_liberado' : 'error=error_liberacion'));
+        exit;
+    }
+
+    public function asignarAsesorCampana() {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            header('Location: index.php?action=list_campanas');
+            exit;
+        }
+        $campanaId = (int)($_POST['campana_id'] ?? 0);
+        $asesorId = trim($_POST['asesor_id'] ?? '');
+        if ($campanaId <= 0 || $asesorId === '') {
+            header('Location: index.php?action=gestionar_campana&id=' . $campanaId . '&error=datos_incompletos');
+            exit;
+        }
+        $ok = $this->campanaModel->asignarAsesor($campanaId, $asesorId, (string)$_SESSION['user_id']);
+        header('Location: index.php?action=gestionar_campana&id=' . $campanaId . '&' . ($ok ? 'success=asesor_asignado' : 'error=error_asignacion'));
+        exit;
+    }
+
+    public function liberarAsesorCampana() {
+        $campanaId = (int)($_GET['campana_id'] ?? 0);
+        $asesorId = trim($_GET['asesor_id'] ?? '');
+        if ($campanaId <= 0 || $asesorId === '') {
+            header('Location: index.php?action=list_campanas&error=datos_incompletos');
+            exit;
+        }
+        $ok = $this->campanaModel->liberarAsesor($campanaId, $asesorId);
+        header('Location: index.php?action=gestionar_campana&id=' . $campanaId . '&' . ($ok ? 'success=asesor_liberado' : 'error=error_liberacion'));
+        exit;
+    }
+
+    public function verAuditoriaCampana() {
+        $id = (int)($_GET['id'] ?? 0);
+        $campana = $this->campanaModel->getCampanaById($id);
+        if (!$campana) {
+            header('Location: index.php?action=list_campanas&error=campana_no_encontrada');
+            exit;
+        }
+        $page_title = 'Auditoría: ' . $campana['nombre'];
+        $registros = $this->campanaModel->getAuditoriaByCampana($id);
+        require __DIR__ . '/../views/admin_auditoria_campana.php';
     }
 
     /**

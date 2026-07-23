@@ -7,6 +7,19 @@ class ClienteModel {
     }
 
     /**
+     * Condición SQL: coordinador dueño de la base o miembro activo de su campaña.
+     * Al ejecutar, pasar la cédula del coordinador dos veces en los parámetros.
+     */
+    private function sqlCoordinadorAccedeBase(string $alias = 'b'): string {
+        return "($alias.creado_por = ? OR EXISTS (
+            SELECT 1 FROM campana_coordinadores cc
+            WHERE cc.campana_id = $alias.campana_id
+              AND cc.coordinador_cedula = ?
+              AND cc.estado = 'activo'
+        ))";
+    }
+
+    /**
      * Aliases para compatibilidad con el backend/vistas existentes:
      * - id_cliente -> id
      * - base_id -> carga_excel_id
@@ -72,8 +85,8 @@ class ClienteModel {
         $sql = "SELECT " . $this->selectClienteCompatFields() . "
                 FROM clientes c
                 JOIN base_clientes b ON c.base_id = b.id_base
-                WHERE c.base_id = ? AND b.creado_por = ?";
-        $params = [(int)$cargaId, (string)$coordinadorId];
+                WHERE c.base_id = ? AND " . $this->sqlCoordinadorAccedeBase('b');
+        $params = [(int)$cargaId, (string)$coordinadorId, (string)$coordinadorId];
         
         if ($limit !== null && $offset !== null) {
             $sql .= " LIMIT " . (int)$limit . " OFFSET " . (int)$offset;
@@ -90,9 +103,9 @@ class ClienteModel {
     public function getTotalClientsByCargaIdAndCoordinador($cargaId, $coordinadorId) {
         $sql = "SELECT COUNT(*) AS total FROM clientes c
                 JOIN base_clientes b ON c.base_id = b.id_base
-                WHERE c.base_id = ? AND b.creado_por = ?";
+                WHERE c.base_id = ? AND " . $this->sqlCoordinadorAccedeBase('b');
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([(int)$cargaId, (string)$coordinadorId]);
+        $stmt->execute([(int)$cargaId, (string)$coordinadorId, (string)$coordinadorId]);
         $result = $stmt->fetch(PDO::FETCH_ASSOC);
         return $result['total'] ?? 0;
     }
@@ -120,9 +133,9 @@ class ClienteModel {
             SELECT " . $this->selectClienteCompatFields() . "
             FROM clientes c
             JOIN base_clientes b ON c.base_id = b.id_base
-            WHERE c.base_id = ? AND b.creado_por = ?
+            WHERE c.base_id = ? AND " . $this->sqlCoordinadorAccedeBase('b') . "
         ");
-        $stmt->execute([(int)$cargaId, (string)$coordinadorId]);
+        $stmt->execute([(int)$cargaId, (string)$coordinadorId, (string)$coordinadorId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
     
@@ -173,7 +186,7 @@ class ClienteModel {
                 FROM clientes c
                 JOIN base_clientes b ON c.base_id = b.id_base
                 WHERE c.base_id = ?
-                  AND b.creado_por = ?
+                  AND " . $this->sqlCoordinadorAccedeBase('b') . "
                   AND (
                     c.cedula = ?
                     OR c.tel1 = ? OR c.tel2 = ? OR c.tel3 = ? OR c.tel4 = ? OR c.tel5 = ?
@@ -185,6 +198,7 @@ class ClienteModel {
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute([
                 (int)$cargaId,
+                (string)$coordinadorId,
                 (string)$coordinadorId,
                 $searchTerm,
                 $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm,
@@ -201,7 +215,7 @@ class ClienteModel {
             FROM clientes c
             JOIN base_clientes b ON c.base_id = b.id_base
             WHERE c.base_id = ?
-              AND b.creado_por = ?
+              AND " . $this->sqlCoordinadorAccedeBase('b') . "
               AND (
                 c.nombre LIKE ?
                 OR c.cedula LIKE ?
@@ -215,6 +229,7 @@ class ClienteModel {
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([
             (int)$cargaId,
+            (string)$coordinadorId,
             (string)$coordinadorId,
             $termLike,
             $termLike,
@@ -470,9 +485,9 @@ class ClienteModel {
         $sql = "SELECT " . $this->selectClienteCompatFields() . ", b.creado_por as coordinador_id
                 FROM clientes c
                 JOIN base_clientes b ON c.base_id = b.id_base
-                WHERE c.id_cliente = ? AND b.creado_por = ?";
+                WHERE c.id_cliente = ? AND " . $this->sqlCoordinadorAccedeBase('b');
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([(int)$clienteId, (string)$coordinadorId]);
+        $stmt->execute([(int)$clienteId, (string)$coordinadorId, (string)$coordinadorId]);
         return $stmt->fetch(PDO::FETCH_ASSOC);
     }
 
@@ -955,8 +970,8 @@ class ClienteModel {
                     (SELECT COUNT(*) FROM clientes c WHERE c.base_id = b.id_base) AS total_clientes,
                     (SELECT COUNT(*) FROM obligaciones o WHERE o.base_id = b.id_base) AS total_obligaciones
                 FROM base_clientes b
-                WHERE b.creado_por = ?";
-        $params = [$coordinadorId];
+                WHERE " . $this->sqlCoordinadorAccedeBase('b');
+        $params = [(string)$coordinadorId, (string)$coordinadorId];
 
         if ($soloHabilitadas) {
             $sql .= " AND b.estado = 'activo'";
@@ -997,9 +1012,9 @@ class ClienteModel {
                     (SELECT COUNT(*) FROM clientes c WHERE c.base_id = b.id_base) AS total_clientes,
                     (SELECT COUNT(*) FROM obligaciones o WHERE o.base_id = b.id_base) AS total_obligaciones
                 FROM base_clientes b
-                WHERE b.creado_por = ?
+                WHERE " . $this->sqlCoordinadorAccedeBase('b') . "
                   AND b.nombre LIKE ?";
-        $params = [$coordinadorId, '%' . $terminoBusqueda . '%'];
+        $params = [(string)$coordinadorId, (string)$coordinadorId, '%' . $terminoBusqueda . '%'];
 
         if ($soloHabilitadas) {
             $sql .= " AND b.estado = 'activo'";

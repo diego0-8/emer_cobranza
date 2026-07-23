@@ -32,7 +32,7 @@ function getNavbar($currentPage = '', $userRole = '') {
             $menuItems = [
                 'Inicio' => 'index.php?action=dashboard',
                 'Gestión' => 'index.php?action=ver_actividades',
-                'Resultados' => 'index.php?action=asignar_personal',
+                'Campañas' => 'index.php?action=list_campanas',
                 'Tareas' => 'index.php?action=ver_actividades',
                 'Localización' => 'index.php?action=ver_actividades',
                 'Registrar usuario' => 'index.php?action=crear_usuario',

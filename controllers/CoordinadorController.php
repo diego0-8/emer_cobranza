@@ -11,27 +11,15 @@ class CoordinadorController extends BaseController {
 
     public function dashboard() {
         // #region agent log b7eaa7 coord dashboard entry
-        try { @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode(['sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'H0','location'=>'controllers/CoordinadorController.php:dashboard:entry','message'=>'enter','data'=>['hasSessionUserId'=>isset($_SESSION['user_id'])?1:0,'userIdLen'=>strlen((string)($_SESSION['user_id']??'')),'periodo'=>(string)($_GET['periodo']??'total'),'hasFechaIni'=>isset($_GET['fecha_inicio'])?1:0,'hasFechaFin'=>isset($_GET['fecha_fin'])?1:0,'buscarLen'=>strlen((string)($_GET['buscar']??''))],'timestamp'=>(int) round(microtime(true)*1000)], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
+        try { @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode(['sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'H0','location'=>'controllers/CoordinadorController.php:dashboard:entry','message'=>'enter','data'=>['hasSessionUserId'=>isset($_SESSION['user_id'])?1:0,'userIdLen'=>strlen((string)($_SESSION['user_id']??'')),'periodo'=>'total'],'timestamp'=>(int) round(microtime(true)*1000)], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
         // #endregion
 
         $page_title = "Dashboard Coordinador";
         $coordinador_id = $_SESSION['user_id'];
+        $periodo = 'total';
+        $metricas_equipo = $this->gestionModel->getMetricasEquipo($coordinador_id, $periodo);
         
-        // Obtener filtros de fechas o período
-        $fecha_inicio = $this->getGet('fecha_inicio');
-        $fecha_fin = $this->getGet('fecha_fin');
-        $periodo = $this->getGet('periodo', 'total'); // Usar 'total' por defecto para mostrar todas las gestiones
-        
-        // Si hay fechas específicas, usar esas; si no, usar el período
-        if ($fecha_inicio && $fecha_fin) {
-            // Usar fechas específicas para las métricas
-            $metricas_equipo = $this->gestionModel->getMetricasEquipoConFechas($coordinador_id, $fecha_inicio, $fecha_fin);
-        } else {
-            // Usar período predefinido
-            $metricas_equipo = $this->gestionModel->getMetricasEquipo($coordinador_id, $periodo);
-        }
-        
-        // Obtener asesores asignados al coordinador
+        // Obtener asesores asignados al coordinador (sin filtro GET de búsqueda)
         $asesores = $this->usuarioModel->getAsesoresByCoordinador($coordinador_id);
 
         // #region agent log b7eaa7 asesores source count
@@ -50,19 +38,6 @@ class CoordinadorController extends BaseController {
         } catch (Throwable $e) {}
         // #endregion
         
-        // Filtrar por término de búsqueda si se proporciona
-        $terminoBusqueda = $this->getGet('buscar');
-        if (!empty($terminoBusqueda)) {
-            $asesores = array_filter($asesores, function($asesor) use ($terminoBusqueda) {
-                return stripos($asesor['nombre_completo'], $terminoBusqueda) !== false ||
-                       stripos($asesor['usuario'], $terminoBusqueda) !== false;
-            });
-        }
-
-        // #region agent log b7eaa7 asesores after search filter
-        try { @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode(['sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'H2','location'=>'controllers/CoordinadorController.php:dashboard:asesores','message'=>'after_search_filter','data'=>['buscarProvided'=>!empty($terminoBusqueda)?1:0,'count'=>is_array($asesores)?count($asesores):-1],'timestamp'=>(int) round(microtime(true)*1000)], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
-        // #endregion
-        
         // Calcular métricas para cada asesor usando el nuevo método
         foreach ($asesores as $key => $asesor) {
             try {
@@ -73,12 +48,16 @@ class CoordinadorController extends BaseController {
                 $asesores[$key]['acuerdos_hoy'] = 0;
                 $asesores[$key]['clientes_pendientes_tareas'] = 0;
                 
-                // Si hay fechas específicas, usar métricas con fechas; si no, usar período
-                if ($fecha_inicio && $fecha_fin) {
-                    $asesores[$key]['metricas'] = $this->gestionModel->getMetricasAsesor($asesor['id'], $periodo, $fecha_inicio, $fecha_fin);
-                } else {
-                    $asesores[$key]['metricas'] = $this->gestionModel->getMetricasAsesor($asesor['id'], $periodo);
-                }
+                // Métricas de la tabla "Gestión de Asesores": siempre del mes en curso
+                $metricasMes = $this->gestionModel->getMetricasAsesor($asesor['id'], 'mes');
+                $asesores[$key]['metricas'] = $metricasMes;
+                $asesores[$key]['total_clientes'] = (int)($metricasMes['total_clientes'] ?? 0);
+                $asesores[$key]['llamadas_realizadas'] = (int)($metricasMes['total_gestiones'] ?? 0);
+                $asesores[$key]['contactos_efectivos'] = (int)($metricasMes['contactos_efectivos'] ?? 0);
+                $asesores[$key]['ventas_realizadas'] = (int)($metricasMes['ventas_exitosas'] ?? 0);
+                $asesores[$key]['porcentaje_llamadas'] = $asesores[$key]['total_clientes'] > 0
+                    ? round(($asesores[$key]['llamadas_realizadas'] / $asesores[$key]['total_clientes']) * 100, 1)
+                    : 0;
 
                 // #region agent log b7eaa7 metricas per-asesor sample (solo primeros 3)
                 if ((int)$key < 3) {
@@ -110,11 +89,11 @@ class CoordinadorController extends BaseController {
                 // Calcular clientes pendientes de tareas
                 $clientesPendientesTareas = 0;
                 foreach ($tareasPendientes as $tarea) {
-                    $clientesPendientesTareas += count($tarea['cliente_ids']);
+                    $clientesPendientesTareas += count($tarea['cliente_ids'] ?? []);
                 }
                 $asesores[$key]['clientes_pendientes_tareas'] = $clientesPendientesTareas;
 
-                // Resumen de actividad HOY (siempre, tenga o no tareas) desde historial_gestiones (reglas solicitadas)
+                // Resumen de actividad HOY (columna Tareas/Actividad)
                 $hoy = $this->gestionModel->getResumenActividadHoyAsesor($asesor['id']);
                 $asesores[$key]['gestiones_hoy'] = (int)($hoy['gestiones_hoy'] ?? 0);
                 $asesores[$key]['contactos_efectivos_hoy'] = (int)($hoy['contactos_efectivos_hoy'] ?? 0);
@@ -141,69 +120,6 @@ class CoordinadorController extends BaseController {
                     } catch (Throwable $e) {}
                 }
                 // #endregion
-                
-                // LÓGICA CORREGIDA SEGÚN REQUERIMIENTOS:
-                // 1. Total de clientes: Si tiene tareas, mostrar clientes en tareas; si no, mostrar clientes gestionados
-                if ($asesores[$key]['tareas_pendientes'] > 0) {
-                    // Si tiene tareas, usar clientes de las tareas
-                    $asesores[$key]['total_clientes'] = $clientesPendientesTareas;
-                } else {
-                    // Si no tiene tareas, usar clientes gestionados (que tienen historial de gestiones)
-                    $asesores[$key]['total_clientes'] = $asesores[$key]['metricas']['total_clientes'] ?? 0;
-                }
-                
-                // 2. Gestiones: Número de gestiones realizadas en tareas o gestiones generales
-                if ($asesores[$key]['tareas_pendientes'] > 0) {
-                    // Si tiene tareas, contar gestiones de los clientes en tareas
-                    $gestionesEnTareas = 0;
-                    foreach ($tareasPendientes as $tarea) {
-                        foreach ($tarea['cliente_ids'] as $clienteId) {
-                            // Obtener gestiones de este cliente en las tareas
-                            $gestionesCliente = $this->gestionModel->getGestionesClienteEnTarea($clienteId, $asesor['id'], $fecha_inicio, $fecha_fin);
-                            $gestionesEnTareas += count($gestionesCliente);
-                        }
-                    }
-                    $asesores[$key]['llamadas_realizadas'] = $gestionesEnTareas;
-                } else {
-                    // Si no tiene tareas, usar gestiones generales
-                    $asesores[$key]['llamadas_realizadas'] = $asesores[$key]['metricas']['total_gestiones'] ?? 0;
-                }
-                
-                // 3. Contactos efectivos: Solo contactos tipificados como exitosos
-                $asesores[$key]['contactos_efectivos'] = $asesores[$key]['metricas']['contactos_efectivos'] ?? 0;
-                
-                // Verificar que las métricas se obtuvieron correctamente
-                if ($asesores[$key]['metricas'] && is_array($asesores[$key]['metricas'])) {
-                    // Mantener compatibilidad con el código existente
-                    $asesores[$key]['ventas_realizadas'] = $asesores[$key]['metricas']['ventas_exitosas'] ?? 0;
-                    
-                    // Calcular porcentaje de llamadas
-                    if ($asesores[$key]['total_clientes'] > 0) {
-                        $asesores[$key]['porcentaje_llamadas'] = round(($asesores[$key]['llamadas_realizadas'] / $asesores[$key]['total_clientes']) * 100, 1);
-                    } else {
-                        $asesores[$key]['porcentaje_llamadas'] = 0;
-                    }
-                } else {
-                    // Si no se pudieron obtener métricas, establecer valores por defecto
-                    $asesores[$key]['metricas'] = [
-                        'total_clientes' => 0,
-                        'total_gestiones' => 0,
-                        'ventas_exitosas' => 0,
-                        'tasa_conversion' => 0,
-                        'tasa_contacto_efectivo' => 0,
-                        'tiempo_promedio_conversacion' => 0,
-                        'total_ventas_monto' => 0,
-                        'promedio_venta' => 0
-                    ];
-                    
-                    $asesores[$key]['total_clientes'] = 0;
-                    $asesores[$key]['llamadas_realizadas'] = 0;
-                    $asesores[$key]['ventas_realizadas'] = 0;
-                    $asesores[$key]['porcentaje_llamadas'] = 0;
-                    
-                    // Log del error para debugging
-                    error_log("No se pudieron obtener métricas para el asesor ID: " . $asesor['id'] . " - Nombre: " . $asesor['nombre_completo']);
-                }
             } catch (Exception $e) {
                 // En caso de error, establecer valores por defecto y log del error
                 error_log("Error al obtener métricas del asesor ID: " . $asesor['id'] . " - Error: " . $e->getMessage());
@@ -290,6 +206,32 @@ class CoordinadorController extends BaseController {
         // #endregion
         
         require __DIR__ . '/../views/coordinador_dashboard.php';
+    }
+
+    /**
+     * JSON: historial completo de gestiones por cédula de cliente (paginado).
+     * Incluye bases activas e inactivas de toda la BD.
+     */
+    public function buscarHistorialClienteCedula() {
+        $cedula = trim((string)$this->getGet('cedula', $this->getPost('cedula', '')));
+        $page = (int)$this->getGet('page', $this->getPost('page', 1));
+        if ($cedula === '') {
+            $this->enviarJSONError('Debe indicar la cédula del cliente', 'CEDULA_REQUERIDA', 400);
+        }
+        if (!preg_match('/^[0-9A-Za-z\-]+$/', $cedula)) {
+            $this->enviarJSONError('Cédula inválida', 'CEDULA_INVALIDA', 400);
+        }
+
+        try {
+            $resultado = $this->gestionModel->getHistorialByCedulaPaginado($cedula, $page, 6);
+            if (empty($resultado['cliente']) && (int)($resultado['total'] ?? 0) === 0) {
+                $this->enviarJSONError('No se encontró cliente ni gestiones para esa cédula', 'NO_ENCONTRADO', 404);
+            }
+            $this->enviarJSONExito($resultado);
+        } catch (Throwable $e) {
+            error_log('buscarHistorialClienteCedula: ' . $e->getMessage());
+            $this->enviarJSONError('Error al consultar el historial', 'ERROR_INTERNO', 500);
+        }
     }
 
     /**
@@ -1695,34 +1637,11 @@ class CoordinadorController extends BaseController {
     public function gestionarAsesores() {
         $page_title = "Gestión de Asesores";
         $coordinador_id = $_SESSION['user_id'];
-        
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            if (isset($_POST['action'])) {
-                switch ($_POST['action']) {
-                    case 'asignar':
-                        if (isset($_POST['asesor_id'])) {
-                            $asesorId = $this->validarId($_POST['asesor_id'], 'asesor');
-                            $this->usuarioModel->asignarAsesorACoordinador($asesorId, $coordinador_id);
-                            $_SESSION['success_message'] = "Asesor asignado correctamente.";
-                        }
-                        break;
-                        
-                    case 'liberar':
-                        if (isset($_POST['asesor_id'])) {
-                            $asesorId = $this->validarId($_POST['asesor_id'], 'asesor');
-                            $this->usuarioModel->liberarAsesorDeCoordinador($asesorId, $coordinador_id);
-                            $_SESSION['success_message'] = "Asesor liberado correctamente.";
-                        }
-                        break;
-                }
-                header("Location: index.php?action=gestionar_asesores");
-                exit;
-            }
-        }
-        
+
         $asesoresAsignados = $this->usuarioModel->getAsesoresByCoordinador($coordinador_id);
-        $asesoresDisponibles = $this->usuarioModel->getAsesoresDisponibles();
-        
+        $campanas = $this->campanaModel->getCampanasByCoordinador($coordinador_id);
+        $soloLectura = true;
+
         require __DIR__ . '/../views/coordinador_gestionar_asesores.php';
     }
     
@@ -3008,6 +2927,30 @@ class CoordinadorController extends BaseController {
             $pausasActivas[$row['asesor_cedula']] = $row;
         }
 
+        $llamadasActivas = [];
+        try {
+            $stmtCall = $this->pdo->query(
+                "SELECT asesor_cedula, inicio, call_id
+                 FROM call_log
+                 WHERE fin IS NULL
+                   AND inicio >= DATE_SUB(NOW(), INTERVAL 3 HOUR)"
+            );
+            foreach ($stmtCall->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $cedCall = (string)($row['asesor_cedula'] ?? '');
+                if ($cedCall === '') {
+                    continue;
+                }
+                // Una llamada activa por asesor (la más reciente gana si hay varias)
+                if (!isset($llamadasActivas[$cedCall])
+                    || strcmp((string)($row['inicio'] ?? ''), (string)($llamadasActivas[$cedCall]['inicio'] ?? '')) > 0
+                ) {
+                    $llamadasActivas[$cedCall] = $row;
+                }
+            }
+        } catch (Throwable $e) {
+            $llamadasActivas = [];
+        }
+
         $stmtUltimaJornada = $this->pdo->query(
             "SELECT t.asesor_cedula, t.hora_inicio, t.hora_fin, t.estado
              FROM tiempos t
@@ -3038,6 +2981,9 @@ class CoordinadorController extends BaseController {
             $pausaTipo = null;
             $pausaDesde = null;
             $pausaDuracionSegundos = null;
+            $llamadaDesde = null;
+
+            $llamadaActiva = $llamadasActivas[$cedula] ?? null;
 
             if ($jornadaActiva) {
                 $inicioSesion = $jornadaActiva['hora_inicio'];
@@ -3050,6 +2996,10 @@ class CoordinadorController extends BaseController {
                     $tsPausa = $pausaDesde ? strtotime($pausaDesde) : false;
                     $pausaDuracionSegundos = $tsPausa ? max(0, time() - $tsPausa) : 0;
                     $estadoLabel = 'En pausa: ' . $this->etiquetaTipoUiTmo($tipoUi);
+                } elseif ($llamadaActiva) {
+                    $estado = 'en_llamada';
+                    $estadoLabel = 'En llamada';
+                    $llamadaDesde = $llamadaActiva['inicio'] ?? null;
                 } else {
                     $estado = 'en_linea';
                     $estadoLabel = 'En línea';
@@ -3071,13 +3021,14 @@ class CoordinadorController extends BaseController {
                 'pausa_tipo' => $pausaTipo,
                 'pausa_desde' => $pausaDesde,
                 'pausa_duracion_segundos' => $pausaDuracionSegundos,
+                'llamada_desde' => $llamadaDesde,
             ];
         }
 
         usort($resultado, static function ($a, $b) {
-            $orden = ['en_pausa' => 0, 'en_linea' => 1, 'offline' => 2];
-            $oa = $orden[$a['estado']] ?? 3;
-            $ob = $orden[$b['estado']] ?? 3;
+            $orden = ['en_pausa' => 0, 'en_llamada' => 1, 'en_linea' => 2, 'offline' => 3];
+            $oa = $orden[$a['estado']] ?? 4;
+            $ob = $orden[$b['estado']] ?? 4;
             if ($oa !== $ob) {
                 return $oa <=> $ob;
             }
@@ -3088,11 +3039,13 @@ class CoordinadorController extends BaseController {
     }
 
     private function contarEstadosTiempo(array $estadoAsesores): array {
-        $c = ['en_linea' => 0, 'en_pausa' => 0, 'offline' => 0];
+        $c = ['en_linea' => 0, 'en_pausa' => 0, 'en_llamada' => 0, 'offline' => 0];
         foreach ($estadoAsesores as $row) {
             $k = $row['estado'] ?? 'offline';
             if (isset($c[$k])) {
                 $c[$k]++;
+            } else {
+                $c['offline']++;
             }
         }
         return $c;
@@ -4159,7 +4112,11 @@ class CoordinadorController extends BaseController {
                 $esNuevaBase = false;
             } else {
                 // Crear nueva base de datos independiente
-                $cargaId = $this->cargaExcelModel->crearBaseDatosIndependiente($nombreBaseDatos, $usuarioCoordinadorId);
+                $cargaId = $this->cargaExcelModel->crearBaseDatosIndependiente(
+                    $nombreBaseDatos,
+                    $usuarioCoordinadorId,
+                    $this->obtenerCampanaIdCoordinador((string)$usuarioCoordinadorId)
+                );
                 if (!$cargaId) {
                     $_SESSION['error_message'] = "❌ Error en la carga: No se pudo crear la nueva base de datos.";
                     fclose($handle);
@@ -4167,6 +4124,17 @@ class CoordinadorController extends BaseController {
                     exit;
                 }
                 $esNuevaBase = true;
+                $campanaId = $this->obtenerCampanaIdCoordinador((string)$usuarioCoordinadorId);
+                if ($campanaId) {
+                    $this->campanaModel->registrarAuditoria(
+                        (string)$usuarioCoordinadorId,
+                        $campanaId,
+                        'crear_base',
+                        'base_clientes',
+                        (int)$cargaId,
+                        ['nombre' => $nombreBaseDatos]
+                    );
+                }
             }
 
             if ((int)$cargaId <= 0) {
@@ -4286,7 +4254,11 @@ class CoordinadorController extends BaseController {
             if ($cargaExistente && (int)($cargaExistente['id'] ?? 0) > 0) {
                 $cargaId = (int)$cargaExistente['id'];
             } else {
-                $cargaId = (int)$this->cargaExcelModel->crearBaseDatosIndependiente($nombreBase, $coordinadorCedula);
+                $cargaId = (int)$this->cargaExcelModel->crearBaseDatosIndependiente(
+                    $nombreBase,
+                    $coordinadorCedula,
+                    $this->obtenerCampanaIdCoordinador($coordinadorCedula)
+                );
                 if ($cargaId <= 0) {
                     return ['ok' => false, 'error' => 'No se pudo crear la base en base_clientes.'];
                 }
@@ -4395,7 +4367,7 @@ class CoordinadorController extends BaseController {
             
             $totalAsignaciones = 0;
             foreach ($asesorIds as $asesorId) {
-                $totalAsignaciones += $this->cargaExcelModel->asignarAsesorABaseDatos($cargaId, $asesorId);
+                $totalAsignaciones += $this->cargaExcelModel->asignarAsesorABaseDatos($cargaId, $asesorId, $coordinadorId);
             }
             
             header('Content-Type: application/json');
@@ -4429,7 +4401,7 @@ class CoordinadorController extends BaseController {
                     exit;
                 }
 
-                $asignacionesActualizadas = $this->cargaExcelModel->liberarAsesorDeBaseDatos($cargaId, $asesorId);
+                $asignacionesActualizadas = $this->cargaExcelModel->liberarAsesorDeBaseDatos($cargaId, $asesorId, $coordinadorId);
     
                 header('Content-Type: application/json');
                 echo json_encode([
@@ -5339,7 +5311,7 @@ class CoordinadorController extends BaseController {
             exit;
         }
 
-        $resultado = $this->cargaExcelModel->asignarAsesorABaseDatos($carga_id, $asesor_id);
+        $resultado = $this->cargaExcelModel->asignarAsesorABaseDatos($carga_id, $asesor_id, (string)$_SESSION['user_id']);
 
         if ($resultado) {
             $_SESSION['success_message'] = 'Base asignada exitosamente. El asesor tendrá acceso completo a todos los clientes de esta base.';
@@ -5369,7 +5341,7 @@ class CoordinadorController extends BaseController {
             exit;
         }
 
-        $resultado = $this->cargaExcelModel->liberarAsesorDeBaseDatos($carga_id, $asesor_id);
+        $resultado = $this->cargaExcelModel->liberarAsesorDeBaseDatos($carga_id, $asesor_id, (string)$_SESSION['user_id']);
 
         if ($resultado) {
             $_SESSION['success_message'] = 'Base liberada exitosamente';

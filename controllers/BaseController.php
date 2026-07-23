@@ -12,6 +12,7 @@ require_once __DIR__ . '/../models/TareaModel.php';
 require_once __DIR__ . '/../models/CargaExcelModel.php';
 require_once __DIR__ . '/../models/FacturacionModel.php';
 require_once __DIR__ . '/../models/CallLogModel.php';
+require_once __DIR__ . '/../models/CampanaModel.php';
 
 class BaseController {
     protected $pdo;
@@ -29,6 +30,8 @@ class BaseController {
     protected $facturacionModel;
     /** @var CallLogModel */
     protected $callLogModel;
+    /** @var CampanaModel */
+    protected $campanaModel;
 
     public function __construct($pdo) {
         $this->pdo = $pdo;
@@ -39,6 +42,7 @@ class BaseController {
         $this->cargaExcelModel = new CargaExcelModel($pdo);
         $this->facturacionModel = new FacturacionModel($pdo);
         $this->callLogModel = new CallLogModel($pdo);
+        $this->campanaModel = new CampanaModel($pdo);
     }
 
     /**
@@ -76,6 +80,15 @@ class BaseController {
         $this->cargaExcelModel = new CargaExcelModel($pdo);
         $this->facturacionModel = new FacturacionModel($pdo);
         $this->callLogModel = new CallLogModel($pdo);
+        $this->campanaModel = new CampanaModel($pdo);
+    }
+
+    protected function obtenerCampanaIdCoordinador(string $coordinadorCedula): ?int {
+        $campanas = $this->campanaModel->getCampanasByCoordinador($coordinadorCedula);
+        if (empty($campanas)) {
+            return null;
+        }
+        return (int)($campanas[0]['id_campana'] ?? $campanas[0]['id'] ?? 0) ?: null;
     }
 
     /**

@@ -209,6 +209,15 @@ switch ($action) {
     case 'toggle_estado':
     case 'ver_actividades':
     case 'asignar_personal':
+    case 'list_campanas':
+    case 'crear_campana':
+    case 'editar_campana':
+    case 'gestionar_campana':
+    case 'asignar_coordinador_campana':
+    case 'liberar_coordinador_campana':
+    case 'asignar_asesor_campana':
+    case 'liberar_asesor_campana':
+    case 'ver_auditoria_campana':
     case 'ver_gestion_coordinador':
     case 'ver_gestion_asesor':
     case 'asignar_asesor':
@@ -224,6 +233,15 @@ switch ($action) {
             case 'toggle_estado': $controller->toggleEstadoUsuario($_GET['id']); break;
             case 'ver_actividades': $controller->verActividades(); break;
             case 'asignar_personal': $controller->asignarPersonal(); break;
+            case 'list_campanas': $controller->listCampanas(); break;
+            case 'crear_campana': $controller->crearCampana(); break;
+            case 'editar_campana': $controller->editarCampana(); break;
+            case 'gestionar_campana': $controller->gestionarCampana(); break;
+            case 'asignar_coordinador_campana': $controller->asignarCoordinadorCampana(); break;
+            case 'liberar_coordinador_campana': $controller->liberarCoordinadorCampana(); break;
+            case 'asignar_asesor_campana': $controller->asignarAsesorCampana(); break;
+            case 'liberar_asesor_campana': $controller->liberarAsesorCampana(); break;
+            case 'ver_auditoria_campana': $controller->verAuditoriaCampana(); break;
             case 'ver_gestion_coordinador': $controller->verGestionCoordinador($_GET['id']); break;
             case 'ver_gestion_asesor': $controller->verGestionAsesor($_GET['id']); break;
             case 'asignar_asesor': $controller->asignarAsesor(); break;
@@ -284,6 +302,7 @@ switch ($action) {
     case 'buscar_bases_datos':
     case 'transferir_recordatorio':
     case 'obtener_obligaciones_cliente':
+    case 'buscar_historial_cliente_cedula':
         requireRole('coordinador');
         $controller = new CoordinadorController($pdo);
         
@@ -339,6 +358,7 @@ switch ($action) {
             case 'buscar_bases_datos': $controller->buscarBasesDatos(); break;
             case 'transferir_recordatorio': $controller->transferirRecordatorio(); break;
             case 'obtener_obligaciones_cliente': $controller->obtenerObligacionesCliente(); break;
+            case 'buscar_historial_cliente_cedula': $controller->buscarHistorialClienteCedula(); break;
         }
         break;
         

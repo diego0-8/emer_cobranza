@@ -181,9 +181,9 @@
             
             <div class="stat-card">
                 <div class="stat-number">⚙️</div>
-                <div class="stat-label">Configuración del Sistema</div>
-                <p class="mt-20">Asignar personal y configurar roles</p>
-                <a href="index.php?action=asignar_personal" class="btn btn-primary mt-20">Configurar</a>
+                <div class="stat-label">Gestionar Campañas</div>
+                <p class="mt-20">Asignar coordinadores y asesores por campaña</p>
+                <a href="index.php?action=list_campanas" class="btn btn-primary mt-20">Gestionar Campañas</a>
             </div>
             
             <div class="stat-card">
@@ -225,17 +225,17 @@
             </div>
         </div>
         
-        <!-- Nueva tarjeta de gestión de personal -->
+        <!-- Gestión de campañas -->
         <div class="card">
             <div class="card-header">
-                👥 Gestión de Personal
+                📢 Gestión de Campañas
             </div>
             <div class="card-body">
-                <p>Gestiona la asignación de asesores a coordinadores y supervisa el rendimiento del equipo.</p>
+                <p>Crea campañas, asigna coordinadores y asesores. Los coordinadores operan las bases dentro de cada campaña.</p>
                 <div class="form-row">
                     <div class="form-group">
-                        <a href="index.php?action=asignar_personal" class="btn btn-primary" style="width: 100%; padding: 15px;">
-                            🔗 Asignar Personal
+                        <a href="index.php?action=list_campanas" class="btn btn-primary" style="width: 100%; padding: 15px;">
+                            📢 Gestionar Campañas
                         </a>
                     </div>
                     <div class="form-group">

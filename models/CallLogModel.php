@@ -17,11 +17,13 @@ class CallLogModel {
     public function inferirCoordinadorCedulaPorAsesor(string $asesorCedula): ?string {
         try {
             $stmt = $this->pdo->prepare("
-                SELECT ac.cordinador_cedula
-                FROM asignaciones_cordinador ac
-                WHERE ac.asesor_cedula = ?
-                  AND ac.estado = 'activo'
-                ORDER BY ac.id_asignacion DESC
+                SELECT cc.coordinador_cedula
+                FROM campana_asesores ca
+                INNER JOIN campana_coordinadores cc ON cc.campana_id = ca.campana_id
+                WHERE ca.asesor_cedula = ?
+                  AND ca.estado = 'activo'
+                  AND cc.estado = 'activo'
+                ORDER BY cc.id_campana_coordinador DESC
                 LIMIT 1
             ");
             $stmt->execute([$asesorCedula]);

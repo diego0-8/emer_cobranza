@@ -16,6 +16,7 @@ function formatoHoraTmo(?string $datetime): string {
 function badgeEstadoTmo(string $estado): string {
     $map = [
         'en_linea' => 'badge-estado badge-en-linea',
+        'en_llamada' => 'badge-estado badge-en-llamada',
         'en_pausa' => 'badge-estado badge-en-pausa',
         'offline' => 'badge-estado badge-offline',
     ];
@@ -223,6 +224,11 @@ $asesores_offline_tmo = $grupos_tmo['offline'];
         .badge-en-linea {
             background: #d1e7dd;
             color: #0f5132;
+        }
+
+        .badge-en-llamada {
+            background: #cfe2ff;
+            color: #084298;
         }
 
         .badge-en-pausa {

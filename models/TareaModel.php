@@ -416,6 +416,23 @@ class TareaModel {
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    public function getAsesoresCampanaByBase($baseId) {
+        $stmt = $this->pdo->prepare("
+            SELECT u.cedula as id, u.cedula, u.nombre as nombre_completo, u.nombre
+            FROM usuarios u
+            INNER JOIN campana_asesores ca ON u.cedula = ca.asesor_cedula
+            INNER JOIN base_clientes b ON b.id_base = ?
+            WHERE ca.campana_id = b.campana_id
+              AND ca.estado = 'activo'
+              AND u.rol = 'asesor'
+              AND u.estado = 'activo'
+              AND b.campana_id IS NOT NULL
+            ORDER BY u.nombre ASC
+        ");
+        $stmt->execute([(int)$baseId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     public function getAsesoresByBase($baseId) {
         $sql = "
             SELECT

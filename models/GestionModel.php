@@ -461,7 +461,12 @@ class GestionModel {
             SELECT hg.*,
                    u.nombre as asesor_nombre,
                    c.base_id as carga_excel_id,
+                   c.nombre as cliente_nombre,
+                   c.cedula as cliente_cedula,
+                   c.tel1 as telefono,
+                   c.tel2 as celular2,
                    b.nombre as nombre_base,
+                   b.estado as estado_base,
                    o.numero_factura as numero_obligacion,
                    o.saldo as monto_obligacion,
                    o.numero_contrato as producto_gestionado,
@@ -485,6 +490,156 @@ class GestionModel {
         }
 
         return $rows;
+    }
+
+    /**
+     * Historial completo por cédula (cualquier base activa/inactiva) con paginación.
+     * @return array{cliente:?array,gestiones:array,total:int,page:int,per_page:int,total_pages:int}
+     */
+    public function getHistorialByCedulaPaginado(string $cedula, int $page = 1, int $perPage = 6): array {
+        $cedula = trim($cedula);
+        $page = max(1, $page);
+        $perPage = max(1, min(50, $perPage));
+        $empty = [
+            'cliente' => null,
+            'gestiones' => [],
+            'total' => 0,
+            'page' => $page,
+            'per_page' => $perPage,
+            'total_pages' => 0,
+        ];
+        if ($cedula === '') {
+            return $empty;
+        }
+
+        $stmtCliente = $this->pdo->prepare("
+            SELECT
+                c.cedula,
+                MAX(c.nombre) AS nombre,
+                MAX(c.tel1) AS telefono,
+                MAX(c.tel2) AS celular2,
+                MAX(c.ciudad) AS ciudad,
+                COUNT(DISTINCT c.id_cliente) AS registros_cliente,
+                COUNT(DISTINCT c.base_id) AS bases_distintas
+            FROM clientes c
+            WHERE c.cedula = ?
+            GROUP BY c.cedula
+            LIMIT 1
+        ");
+        $stmtCliente->execute([$cedula]);
+        $cliente = $stmtCliente->fetch(PDO::FETCH_ASSOC) ?: null;
+
+        $stmtCount = $this->pdo->prepare("
+            SELECT COUNT(*) AS total
+            FROM historial_gestiones hg
+            JOIN clientes c ON hg.cliente_id = c.id_cliente
+            WHERE c.cedula = ?
+        ");
+        $stmtCount->execute([$cedula]);
+        $total = (int)($stmtCount->fetchColumn() ?: 0);
+        $totalPages = $total > 0 ? (int)ceil($total / $perPage) : 0;
+        if ($totalPages > 0 && $page > $totalPages) {
+            $page = $totalPages;
+        }
+        $offset = ($page - 1) * $perPage;
+
+        $stmt = $this->pdo->prepare("
+            SELECT hg.*,
+                   u.nombre AS asesor_nombre,
+                   u.cedula AS asesor_cedula,
+                   c.id_cliente,
+                   c.base_id AS carga_excel_id,
+                   c.nombre AS cliente_nombre,
+                   c.cedula AS cliente_cedula,
+                   b.id_base,
+                   b.nombre AS nombre_base,
+                   b.estado AS estado_base,
+                   o.numero_factura AS numero_obligacion,
+                   o.saldo AS monto_obligacion,
+                   o.numero_contrato AS producto_gestionado
+            FROM historial_gestiones hg
+            JOIN usuarios u ON hg.asesor_cedula = u.cedula
+            JOIN clientes c ON hg.cliente_id = c.id_cliente
+            JOIN base_clientes b ON c.base_id = b.id_base
+            LEFT JOIN obligaciones o ON hg.obligacion_id = o.id_obligacion
+            WHERE c.cedula = ?
+            ORDER BY hg.fecha_creacion DESC, hg.id_gestion DESC
+            LIMIT " . (int)$perPage . " OFFSET " . (int)$offset . "
+        ");
+        $stmt->execute([$cedula]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        if (!function_exists('emer_etiqueta_tipificacion')) {
+            $helper = __DIR__ . '/../helpers/tipificacion_historial.php';
+            if (is_file($helper)) {
+                require_once $helper;
+            }
+        }
+
+        $mapaTipo = function_exists('emer_mapa_tipo_contacto_historial') ? emer_mapa_tipo_contacto_historial() : [];
+        $mapaRes = function_exists('emer_mapa_resultado_contacto_historial') ? emer_mapa_resultado_contacto_historial() : [];
+        $mapaRaz = function_exists('emer_mapa_razon_especifica_historial') ? emer_mapa_razon_especifica_historial() : [];
+
+        $gestiones = [];
+        foreach ($rows as $r) {
+            $this->normalizarFilaHistorialGestion($r);
+            $forma = trim((string)($r['forma_contacto'] ?? ''));
+            $tipoEtiqueta = function_exists('emer_etiqueta_tipificacion')
+                ? emer_etiqueta_tipificacion($mapaTipo, $r['tipo_contacto'] ?? '')
+                : (string)($r['tipo_contacto'] ?? '');
+            $resEtiqueta = function_exists('emer_etiqueta_tipificacion')
+                ? emer_etiqueta_tipificacion($mapaRes, $r['resultado_contacto'] ?? '')
+                : (string)($r['resultado_contacto'] ?? '');
+            $razEtiqueta = function_exists('emer_etiqueta_tipificacion')
+                ? emer_etiqueta_tipificacion($mapaRaz, $r['razon_especifica'] ?? '')
+                : (string)($r['razon_especifica'] ?? '');
+
+            $arbolParts = array_values(array_filter([
+                $forma !== '' ? ucwords(str_replace('_', ' ', $forma)) : '',
+                $tipoEtiqueta,
+                $resEtiqueta,
+                $razEtiqueta,
+            ], fn($x) => trim((string)$x) !== ''));
+
+            $estadoBase = strtolower((string)($r['estado_base'] ?? ''));
+            $estadoBaseUi = $estadoBase === 'activo' ? 'activa' : ($estadoBase === 'inactivo' ? 'inactiva' : $estadoBase);
+
+            $gestiones[] = [
+                'id_gestion' => (int)($r['id_gestion'] ?? 0),
+                'fecha_gestion' => $r['fecha_creacion'] ?? ($r['fecha_gestion'] ?? ''),
+                'fecha_gestion_fmt' => !empty($r['fecha_creacion'])
+                    ? date('d/m/Y H:i', strtotime((string)$r['fecha_creacion']))
+                    : '',
+                'tipificacion_arbol' => implode(' → ', $arbolParts),
+                'forma_contacto' => $forma,
+                'tipo_contacto' => $tipoEtiqueta,
+                'resultado_contacto' => $resEtiqueta,
+                'razon_especifica' => $razEtiqueta,
+                'nombre_base' => $r['nombre_base'] ?? '',
+                'estado_base' => $estadoBaseUi,
+                'asesor_nombre' => $r['asesor_nombre'] ?? '',
+                'asesor_cedula' => $r['asesor_cedula'] ?? '',
+                'numero_obligacion' => $r['numero_obligacion'] ?? '',
+                'observaciones' => $r['observaciones'] ?? '',
+            ];
+        }
+
+        return [
+            'cliente' => $cliente ? [
+                'cedula' => $cliente['cedula'] ?? $cedula,
+                'nombre' => $cliente['nombre'] ?? '',
+                'telefono' => $cliente['telefono'] ?? '',
+                'celular2' => $cliente['celular2'] ?? '',
+                'ciudad' => $cliente['ciudad'] ?? '',
+                'registros_cliente' => (int)($cliente['registros_cliente'] ?? 0),
+                'bases_distintas' => (int)($cliente['bases_distintas'] ?? 0),
+            ] : null,
+            'gestiones' => $gestiones,
+            'total' => $total,
+            'page' => $page,
+            'per_page' => $perPage,
+            'total_pages' => $totalPages,
+        ];
     }
 
     public function getGestionByAsesor($asesorId) {
@@ -795,10 +950,12 @@ class GestionModel {
         if ($coordinadorCedula !== null && $coordinadorCedula !== '') {
             $sql .= "
               AND EXISTS (
-                SELECT 1 FROM asignaciones_cordinador ac
-                WHERE ac.asesor_cedula = hg.asesor_cedula
-                  AND ac.cordinador_cedula = ?
-                  AND ac.estado = 'activo'
+                SELECT 1 FROM campana_asesores ca
+                INNER JOIN campana_coordinadores cc ON cc.campana_id = ca.campana_id
+                WHERE ca.asesor_cedula = hg.asesor_cedula
+                  AND cc.coordinador_cedula = ?
+                  AND ca.estado = 'activo'
+                  AND cc.estado = 'activo'
               )
             ";
             $params[] = (string)$coordinadorCedula;
@@ -861,10 +1018,12 @@ class GestionModel {
             INNER JOIN base_clientes b ON c.base_id = b.id_base
             INNER JOIN obligaciones o ON hg.obligacion_id = o.id_obligacion
             WHERE EXISTS (
-                SELECT 1 FROM asignaciones_cordinador ac
-                WHERE ac.asesor_cedula = hg.asesor_cedula
-                  AND ac.cordinador_cedula = ?
-                  AND ac.estado = 'activo'
+                SELECT 1 FROM campana_asesores ca
+                INNER JOIN campana_coordinadores cc ON cc.campana_id = ca.campana_id
+                WHERE ca.asesor_cedula = hg.asesor_cedula
+                  AND cc.coordinador_cedula = ?
+                  AND ca.estado = 'activo'
+                  AND cc.estado = 'activo'
             )
             AND DATE(hg.fecha_creacion) BETWEEN ? AND ?
         ";
@@ -1256,10 +1415,12 @@ class GestionModel {
     private function calcularMetricasEquipoRango(string $coordinadorCedula, string $inicio, string $fin): array {
         // Total asesores activos del equipo
         $stmt = $this->pdo->prepare("
-            SELECT COUNT(DISTINCT ac.asesor_cedula) AS total
-            FROM asignaciones_cordinador ac
-            WHERE ac.cordinador_cedula = ?
-              AND ac.estado = 'activo'
+            SELECT COUNT(DISTINCT ca.asesor_cedula) AS total
+            FROM campana_asesores ca
+            INNER JOIN campana_coordinadores cc ON cc.campana_id = ca.campana_id
+            WHERE cc.coordinador_cedula = ?
+              AND cc.estado = 'activo'
+              AND ca.estado = 'activo'
         ");
         $stmt->execute([$coordinadorCedula]);
         $totalAsesores = (int)($stmt->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
@@ -1268,9 +1429,12 @@ class GestionModel {
         $stmt = $this->pdo->prepare("
             SELECT COALESCE(SUM(b.total_clientes), 0) AS total
             FROM base_clientes b
-            WHERE b.creado_por = ?
+            LEFT JOIN campana_coordinadores cc ON cc.campana_id = b.campana_id
+                AND cc.coordinador_cedula = ?
+                AND cc.estado = 'activo'
+            WHERE b.creado_por = ? OR cc.id_campana_coordinador IS NOT NULL
         ");
-        $stmt->execute([$coordinadorCedula]);
+        $stmt->execute([$coordinadorCedula, $coordinadorCedula]);
         $totalClientes = (int)($stmt->fetch(PDO::FETCH_ASSOC)['total'] ?? 0);
 
         // Gestiones / contactos efectivos / duracion promedio (en rango) para asesores del equipo
@@ -1283,10 +1447,12 @@ class GestionModel {
             WHERE hg.fecha_creacion BETWEEN ? AND ?
               AND EXISTS (
                 SELECT 1
-                FROM asignaciones_cordinador ac
-                WHERE ac.asesor_cedula = hg.asesor_cedula
-                  AND ac.cordinador_cedula = ?
-                  AND ac.estado = 'activo'
+                FROM campana_asesores ca
+                INNER JOIN campana_coordinadores cc ON cc.campana_id = ca.campana_id
+                WHERE ca.asesor_cedula = hg.asesor_cedula
+                  AND cc.coordinador_cedula = ?
+                  AND ca.estado = 'activo'
+                  AND cc.estado = 'activo'
               )
         " : "
             SELECT
@@ -1300,10 +1466,12 @@ class GestionModel {
             WHERE hg.fecha_creacion BETWEEN ? AND ?
               AND EXISTS (
                 SELECT 1
-                FROM asignaciones_cordinador ac
-                WHERE ac.asesor_cedula = hg.asesor_cedula
-                  AND ac.cordinador_cedula = ?
-                  AND ac.estado = 'activo'
+                FROM campana_asesores ca
+                INNER JOIN campana_coordinadores cc ON cc.campana_id = ca.campana_id
+                WHERE ca.asesor_cedula = hg.asesor_cedula
+                  AND cc.coordinador_cedula = ?
+                  AND ca.estado = 'activo'
+                  AND cc.estado = 'activo'
               )
         ");
         $stmt->execute([(string)$inicio, (string)$fin, $coordinadorCedula]);
@@ -1322,10 +1490,12 @@ class GestionModel {
             WHERE hg.fecha_creacion BETWEEN ? AND ?
               AND EXISTS (
                 SELECT 1
-                FROM asignaciones_cordinador ac
-                WHERE ac.asesor_cedula = hg.asesor_cedula
-                  AND ac.cordinador_cedula = ?
-                  AND ac.estado = 'activo'
+                FROM campana_asesores ca
+                INNER JOIN campana_coordinadores cc ON cc.campana_id = ca.campana_id
+                WHERE ca.asesor_cedula = hg.asesor_cedula
+                  AND cc.coordinador_cedula = ?
+                  AND ca.estado = 'activo'
+                  AND cc.estado = 'activo'
               )
         ");
         $stmt->execute([(string)$inicio, (string)$fin, $coordinadorCedula]);
@@ -1649,10 +1819,12 @@ class GestionModel {
             WHERE {$condVolver}
               AND EXISTS (
                 SELECT 1
-                FROM asignaciones_cordinador ac
-                WHERE ac.asesor_cedula = hg.asesor_cedula
-                  AND ac.cordinador_cedula = ?
-                  AND ac.estado = 'activo'
+                FROM campana_asesores ca
+                INNER JOIN campana_coordinadores cc ON cc.campana_id = ca.campana_id
+                WHERE ca.asesor_cedula = hg.asesor_cedula
+                  AND cc.coordinador_cedula = ?
+                  AND ca.estado = 'activo'
+                  AND cc.estado = 'activo'
               )
             ORDER BY hg.fecha_creacion DESC
             LIMIT 200

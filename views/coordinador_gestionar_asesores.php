@@ -26,8 +26,15 @@ if (!isset($asesoresDisponibles) || !is_array($asesoresDisponibles)) {
     <div class="container">
         <div class="page-header">
             <h1><?php echo htmlspecialchars($page_title); ?></h1>
-            <p class="page-description">Gestiona los asesores asignados a tu equipo</p>
+            <p class="page-description">Asesores de tus campañas activas (solo lectura). Para asignar o liberar asesores, contacta al administrador.</p>
         </div>
+
+        <?php if (!empty($campanas)): ?>
+            <div class="alert alert-info" style="margin-bottom:16px;">
+                Campañas activas:
+                <?php echo htmlspecialchars(implode(', ', array_column($campanas, 'nombre'))); ?>
+            </div>
+        <?php endif; ?>
 
         <?php if (!empty($_SESSION['success_message'])): ?>
             <div class="alert alert-success">
@@ -69,6 +76,7 @@ if (!isset($asesoresDisponibles) || !is_array($asesoresDisponibles)) {
                                                 <small><?php echo htmlspecialchars($asesor['usuario'] ?? ''); ?></small>
                                             </div>
                                         </div>
+                                        <?php if (empty($soloLectura)): ?>
                                         <div class="asesor-actions">
                                             <form method="POST" style="display: inline;">
                                                 <input type="hidden" name="action" value="liberar">
@@ -79,6 +87,7 @@ if (!isset($asesoresDisponibles) || !is_array($asesoresDisponibles)) {
                                                 </button>
                                             </form>
                                         </div>
+                                        <?php endif; ?>
                                     </div>
                                 <?php endforeach; ?>
                             </div>
@@ -88,6 +97,7 @@ if (!isset($asesoresDisponibles) || !is_array($asesoresDisponibles)) {
             </div>
 
             <!-- Asesores Disponibles -->
+            <?php if (empty($soloLectura)): ?>
             <div class="col-md-6">
                 <div class="card">
                     <div class="card-header">
@@ -128,6 +138,7 @@ if (!isset($asesoresDisponibles) || !is_array($asesoresDisponibles)) {
                     </div>
                 </div>
             </div>
+            <?php endif; ?>
         </div>
 
         <div class="row mt-4">

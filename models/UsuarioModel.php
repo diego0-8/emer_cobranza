@@ -324,12 +324,15 @@ class UsuarioModel {
      * Obtiene los asesores asignados a un coordinador específico
      */
     public function getAsesoresByCoordinador($coordinador_id) {
-        // Tabla real del dump: asignaciones_cordinador (con cédulas).
-        $sql = "SELECT u.*, ac.fecha_asignacion, ac.estado as estado_asignacion
+        $sql = "SELECT DISTINCT u.*, ca.fecha_asignacion, ca.estado as estado_asignacion
                 FROM usuarios u
-                JOIN asignaciones_cordinador ac ON u.cedula = ac.asesor_cedula
-                WHERE ac.cordinador_cedula = ? AND ac.estado = 'activo' AND u.estado = 'activo'
-                ORDER BY ac.fecha_asignacion DESC, u.nombre";
+                JOIN campana_asesores ca ON u.cedula = ca.asesor_cedula
+                JOIN campana_coordinadores cc ON cc.campana_id = ca.campana_id
+                WHERE cc.coordinador_cedula = ?
+                  AND cc.estado = 'activo'
+                  AND ca.estado = 'activo'
+                  AND u.estado = 'activo'
+                ORDER BY ca.fecha_asignacion DESC, u.nombre";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([(string)$coordinador_id]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -347,9 +350,9 @@ class UsuarioModel {
         $sql = "SELECT u.* FROM usuarios u
                 WHERE u.rol = 'asesor' AND u.estado = 'activo'
                 AND u.cedula NOT IN (
-                    SELECT DISTINCT ac.asesor_cedula
-                    FROM asignaciones_cordinador ac
-                    WHERE ac.estado = 'activo'
+                    SELECT DISTINCT ca.asesor_cedula
+                    FROM campana_asesores ca
+                    WHERE ca.estado = 'activo'
                 )
                 ORDER BY u.nombre";
         $stmt = $this->pdo->prepare($sql);
@@ -421,8 +424,10 @@ class UsuarioModel {
      * Verifica si un coordinador tiene asesores asignados
      */
     public function tieneCoordinadorAsesoresAsignados($coordinadorId) {
-        $sql = "SELECT COUNT(*) as total FROM asignaciones_cordinador 
-                WHERE cordinador_cedula = ? AND estado = 'activo'";
+        $sql = "SELECT COUNT(DISTINCT ca.asesor_cedula) as total
+                FROM campana_asesores ca
+                JOIN campana_coordinadores cc ON cc.campana_id = ca.campana_id
+                WHERE cc.coordinador_cedula = ? AND cc.estado = 'activo' AND ca.estado = 'activo'";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([(string)$coordinadorId]);
         $result = $stmt->fetch(PDO::FETCH_ASSOC);

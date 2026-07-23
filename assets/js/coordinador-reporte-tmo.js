@@ -14,7 +14,7 @@
     let modalDetalleInstance = null;
 
     function esAsesorActivo(estado) {
-        return estado === 'en_linea' || estado === 'en_pausa';
+        return estado === 'en_linea' || estado === 'en_pausa' || estado === 'en_llamada';
     }
 
     function dividirAsesores(asesores) {
@@ -70,6 +70,7 @@
     function claseBadge(estado) {
         const map = {
             en_linea: 'badge-estado badge-en-linea',
+            en_llamada: 'badge-estado badge-en-llamada',
             en_pausa: 'badge-estado badge-en-pausa',
             offline: 'badge-estado badge-offline',
         };

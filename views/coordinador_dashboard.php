@@ -19,6 +19,208 @@
             min-height: 100vh;
         }
         
+        .btn-search:disabled {
+            opacity: 0.65;
+            cursor: wait;
+        }
+
+        .historial-cliente-meta {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+            padding: 16px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+        }
+
+        .historial-cliente-meta .meta-label {
+            display: block;
+            font-size: 0.75rem;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            margin-bottom: 4px;
+        }
+
+        .historial-cliente-meta .meta-value {
+            font-weight: 600;
+            color: #1f2937;
+            word-break: break-word;
+        }
+
+        .historial-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.92rem;
+        }
+
+        .historial-table th,
+        .historial-table td {
+            padding: 12px 10px;
+            border-bottom: 1px solid #e5e7eb;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        .historial-table th {
+            background: #f1f5f9;
+            color: #334155;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .historial-table tr:hover td {
+            background: #f8fafc;
+        }
+
+        .badge-base-estado {
+            display: inline-block;
+            margin-left: 6px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .badge-base-activa {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .badge-base-inactiva {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .btn-ojo-obs {
+            background: #eff6ff;
+            color: #1d4ed8;
+            border: 1px solid #bfdbfe;
+            border-radius: 8px;
+            width: 36px;
+            height: 36px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn-ojo-obs:hover {
+            background: #dbeafe;
+        }
+
+        .historial-paginacion {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 12px;
+            margin-top: 18px;
+            flex-wrap: wrap;
+        }
+
+        .historial-paginacion button {
+            background: #3b82f6;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 14px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .historial-paginacion button:disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
+        }
+
+        .obs-modal-texto {
+            white-space: pre-wrap;
+            word-break: break-word;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 16px;
+            min-height: 120px;
+            color: #1f2937;
+            line-height: 1.5;
+        }
+
+        #modalHistorialCliente .modal-content,
+        #modalObservacionesGestion .modal-content {
+            max-width: 980px;
+            width: 95%;
+            max-height: 90vh;
+            overflow: auto;
+            position: relative;
+            top: auto;
+            left: auto;
+            transform: none;
+            margin: 3% auto;
+        }
+
+        #modalObservacionesGestion .modal-content {
+            max-width: 640px;
+        }
+
+        /* Evitar título blanco sobre header claro (conflicto de .modal-header) */
+        #modalHistorialCliente .modal-header,
+        #modalObservacionesGestion .modal-header {
+            background: #1e40af;
+            color: #ffffff;
+            border-bottom: none;
+            border-radius: 16px 16px 0 0;
+        }
+
+        #modalHistorialCliente .modal-title,
+        #modalObservacionesGestion .modal-title {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            background: none !important;
+            background-clip: border-box !important;
+            -webkit-background-clip: border-box !important;
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin: 0;
+        }
+
+        #modalHistorialCliente .close,
+        #modalObservacionesGestion .close {
+            color: #ffffff !important;
+            opacity: 0.95;
+            line-height: 1;
+        }
+
+        #modalHistorialCliente .close:hover,
+        #modalObservacionesGestion .close:hover {
+            opacity: 0.75;
+            color: #fecaca !important;
+        }
+
+        #modalHistorialCliente .modal-body,
+        #modalObservacionesGestion .modal-body {
+            max-height: none;
+            color: #1f2937;
+        }
+
+        .btn-ojo-obs {
+            background: #eff6ff !important;
+            color: #1d4ed8 !important;
+            border: 1px solid #93c5fd !important;
+            font-size: 1.1rem;
+            line-height: 1;
+        }
+
+        .btn-ojo-obs i,
+        .btn-ojo-obs .ojo-icon {
+            color: #1d4ed8 !important;
+            -webkit-text-fill-color: #1d4ed8 !important;
+            font-size: 1.15rem;
+            font-style: normal;
+        }
+        
         /* Header principal */
         .dashboard-header {
             text-align: center;
@@ -578,6 +780,61 @@
         .status-inactivo {
             background: #fef2f2;
             color: #dc2626;
+        }
+
+        .estado-rt {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+            line-height: 1.2;
+        }
+
+        .estado-rt::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            flex-shrink: 0;
+        }
+
+        .estado-rt-en_linea {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .estado-rt-en_llamada {
+            background: #dbeafe;
+            color: #1d4ed8;
+        }
+
+        .estado-rt-en_pausa {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .estado-rt-offline {
+            background: #f1f5f9;
+            color: #64748b;
+        }
+
+        .estado-rt-loading {
+            background: #f8fafc;
+            color: #94a3b8;
+        }
+
+        .estado-rt-loading::before {
+            animation: estado-rt-pulse 1.2s ease-in-out infinite;
+        }
+
+        @keyframes estado-rt-pulse {
+            0%, 100% { opacity: 0.35; }
+            50% { opacity: 1; }
         }
         
         .text-center {
@@ -1198,118 +1455,33 @@
             </div>
         </div>
         
-        <!-- Barra de búsqueda y filtros -->
+        <!-- Búsqueda de cliente por cédula -->
         <div class="search-filters-section fade-in">
-            <h3 style="margin-bottom: 20px; color: #1f2937; text-align: center;">🔍 Búsqueda y Filtros de Asesores</h3>
-            
-            <form method="GET" action="index.php" class="search-form">
-                <input type="hidden" name="action" value="dashboard">
+            <h3 style="margin-bottom: 20px; color: #1f2937; text-align: center;">🔍 Búsqueda de clientes por cédula</h3>
+            <div class="search-form" id="formBusquedaCedula">
                 <div class="search-input-group">
-                    <input type="text" 
-                           name="buscar" 
-                           placeholder="Buscar asesor por nombre o usuario..." 
-                           value="<?php echo htmlspecialchars($_GET['buscar'] ?? ''); ?>"
+                    <input type="text"
+                           id="inputCedulaCliente"
+                           inputmode="numeric"
+                           autocomplete="off"
+                           placeholder="Ingrese la cédula del cliente..."
                            class="search-input">
-                    <i class="fas fa-search search-icon"></i>
+                    <i class="fas fa-id-card search-icon"></i>
                 </div>
-                <button type="submit" class="btn btn-search">
+                <button type="button" class="btn btn-search" id="btnBuscarCedula">
                     <i class="fas fa-search"></i> Buscar
                 </button>
-                <?php if (!empty($_GET['buscar'])): ?>
-                    <a href="index.php?action=dashboard" class="btn btn-clear">
-                        <i class="fas fa-times"></i> Limpiar
-                    </a>
-                <?php endif; ?>
-            </form>
-            
-            <!-- Filtros rápidos -->
-            <div class="filtros-rapidos">
-                <button class="filter-btn active" onclick="filtrarAsesores('todos')">
-                    👥 Todos (<?php echo $total_asesores ?? 0; ?>)
-                </button>
-                <button class="filter-btn" onclick="filtrarAsesores('activos')">
-                    ✅ Activos
-                </button>
-                <button class="filter-btn" onclick="filtrarAsesores('con_clientes')">
-                    📊 Con Clientes
-                </button>
-                <button class="filter-btn" onclick="filtrarAsesores('con_ventas')">
-                    💰 Con Ventas
-                </button>
             </div>
-            
-            <!-- Mensaje de búsqueda -->
-            <?php if (!empty($_GET['buscar'])): ?>
-                <div class="search-results-info">
-                    <i class="fas fa-search"></i>
-                    <strong>Búsqueda activa:</strong> Mostrando asesores que contengan "<?php echo htmlspecialchars($_GET['buscar'] ?? ''); ?>"
-                    <span class="search-results-count">(<?php echo count($asesores ?? []) !== 1 ? 's' : ''; ?>)</span>
-                </div>
-            <?php endif; ?>
+            <p id="msgBusquedaCedula" style="display:none; text-align:center; margin-top:12px; color:#6b7280;"></p>
         </div>
-        
-        <!-- Filtros de fechas -->
-        <div class="filtros-fechas fade-in">
-            <h3>📅 Filtros por Fechas</h3>
-            <div class="filtros-fechas-grid">
-                <div class="filtro-fecha-group">
-                    <label class="filtro-fecha-label">Fecha de inicio:</label>
-                    <input type="date" id="fechaInicio" class="filtro-fecha-input" name="fecha_inicio" 
-                           value="<?php echo $_GET['fecha_inicio'] ?? date('Y-m-d', strtotime('-7 days')); ?>">
-                </div>
-                <div class="filtro-fecha-group">
-                    <label class="filtro-fecha-label">Fecha de fin:</label>
-                    <input type="date" id="fechaFin" class="filtro-fecha-input" name="fecha_fin" 
-                           value="<?php echo $_GET['fecha_fin'] ?? date('Y-m-d'); ?>">
-                </div>
-                <div class="filtro-fecha-group">
-                    <label class="filtro-fecha-label">Período:</label>
-                    <select id="periodoRapido" class="filtro-fecha-input" onchange="aplicarPeriodoRapido()">
-                        <option value="">Seleccionar período</option>
-                        <option value="hoy">Hoy</option>
-                        <option value="ayer">Ayer</option>
-                        <option value="semana">Esta semana</option>
-                        <option value="mes">Este mes</option>
-                        <option value="trimestre">Este trimestre</option>
-                        <option value="año">Este año</option>
-                    </select>
-                </div>
-                <div class="filtro-fecha-group">
-                    <button type="button" class="btn-aplicar-fechas" onclick="aplicarFiltrosFechas()">
-                        <i class="fas fa-filter"></i> Aplicar Filtros
-                    </button>
-                </div>
-                <div class="filtro-fecha-group">
-                    <button type="button" class="btn-limpiar-fechas" onclick="limpiarFiltrosFechas()">
-                        <i class="fas fa-times"></i> Limpiar Filtros
-                    </button>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Indicador de filtros activos -->
-        <?php if (isset($_GET['fecha_inicio']) || isset($_GET['fecha_fin'])): ?>
-            <div class="filtros-activos fade-in">
-                <div class="filtro-activo-badge">
-                    <i class="fas fa-filter"></i>
-                    <strong>Filtros aplicados:</strong> 
-                    <?php if (isset($_GET['fecha_inicio']) && isset($_GET['fecha_fin'])): ?>
-                        <?php echo date('d/m/Y', strtotime($_GET['fecha_inicio'])); ?> - <?php echo date('d/m/Y', strtotime($_GET['fecha_fin'])); ?>
-                    <?php elseif (isset($_GET['fecha_inicio'])): ?>
-                        Desde: <?php echo date('d/m/Y', strtotime($_GET['fecha_inicio'])); ?>
-                    <?php elseif (isset($_GET['fecha_fin'])): ?>
-                        Hasta: <?php echo date('d/m/Y', strtotime($_GET['fecha_fin'])); ?>
-                    <?php endif; ?>
-                    <button type="button" class="btn-limpiar-filtro-activo" onclick="limpiarFiltrosFechas()">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-            </div>
-        <?php endif; ?>
         
         <!-- Lista de Asesores -->
         <div class="search-filters-section fade-in">
-            <h3 style="margin-bottom: 20px; color: #1f2937; text-align: center;">👥 Gestión de Asesores</h3>
+            <h3 style="margin-bottom: 8px; color: #1f2937; text-align: center;">👥 Gestión de Asesores</h3>
+            <p style="text-align: center; color: #6b7280; margin-bottom: 20px; font-size: 0.95rem;">
+                Total clientes, gestiones y contactos efectivos corresponden al mes actual
+                (<?php echo date('m/Y'); ?>)
+            </p>
             
             <?php if (!empty($asesores)): ?>
                 <div class="asesores-table-container">
@@ -1317,30 +1489,32 @@
                         <thead>
                             <tr>
                                 <th>Asesor</th>
-                                <th>Estado</th>
-                                <th>Total Clientes</th>
-                                <th>Gestiones</th>
-                                <th>Contactos Efectivos</th>
+                                <th>Estado<br><small style="font-weight:500;text-transform:none;letter-spacing:0;">(en vivo)</small></th>
+                                <th>Total Clientes<br><small style="font-weight:500;text-transform:none;letter-spacing:0;">(mes)</small></th>
+                                <th>Gestiones<br><small style="font-weight:500;text-transform:none;letter-spacing:0;">(mes)</small></th>
+                                <th>Contactos Efectivos<br><small style="font-weight:500;text-transform:none;letter-spacing:0;">(mes)</small></th>
                                 <th>Tareas/Actividad</th>
-                                <th>Acciones</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php foreach ($asesores as $asesor): ?>
-                                <tr class="asesor-row">
+                                <?php
+                                    $asesorCedulaRt = (string)($asesor['id'] ?? $asesor['cedula'] ?? '');
+                                ?>
+                                <tr class="asesor-row" data-asesor-cedula="<?php echo htmlspecialchars($asesorCedulaRt); ?>">
                                     <td>
                                         <div class="asesor-info">
                                             <strong><?php echo htmlspecialchars($asesor['nombre_completo'] ?? ''); ?></strong>
                                         </div>
                                     </td>
-                                    <td>
-                                        <span class="asesor-status <?php echo ($asesor['estado'] ?? '') === 'Activo' ? 'status-activo' : 'status-inactivo'; ?>">
-                                            <?php echo htmlspecialchars($asesor['estado'] ?? ''); ?>
+                                    <td class="text-center">
+                                        <span class="estado-rt estado-rt-loading asesor-estado-rt" data-estado="loading" title="Actualizando...">
+                                            Actualizando...
                                         </span>
                                     </td>
-                                    <td class="text-center"><?php echo $asesor['total_clientes'] ?? 0; ?></td>
-                                    <td class="text-center"><?php echo $asesor['llamadas_realizadas'] ?? 0; ?></td>
-                                    <td class="text-center"><?php echo (($asesor['metricas'] ?? [])['contactos_efectivos'] ?? 0); ?></td>
+                                    <td class="text-center"><?php echo (int)($asesor['total_clientes'] ?? 0); ?></td>
+                                    <td class="text-center"><?php echo (int)($asesor['llamadas_realizadas'] ?? 0); ?></td>
+                                    <td class="text-center"><?php echo (int)(($asesor['contactos_efectivos'] ?? (($asesor['metricas'] ?? [])['contactos_efectivos'] ?? 0))); ?></td>
                                     <td class="text-center">
                                         <?php if (($asesor['tareas_pendientes'] ?? 0) > 0): ?>
                                             <div style="background: #fef3c7; padding: 8px; border-radius: 6px; border-left: 4px solid #f59e0b;">
@@ -1367,11 +1541,6 @@
                                                 </div>
                                             </div>
                                         <?php endif; ?>
-                                    </td>
-                                    <td>
-                                        <button class="btn-detalles-table" onclick="mostrarDetallesAsesor(<?php echo $asesor['id'] ?? 0; ?>)">
-                                            📊 Ver Detalles
-                                        </button>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
@@ -1454,6 +1623,37 @@
                 <div>
                     <strong>Última actualización:</strong> <?php echo date('d/m/Y H:i'); ?>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal historial por cédula -->
+    <div id="modalHistorialCliente" class="modal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">📋 Historial del cliente</h2>
+                <span class="close" onclick="cerrarModalHistorialCliente()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="historialClienteMeta" class="historial-cliente-meta"></div>
+                <div id="historialClienteLoading" class="loading" style="display:none;">
+                    <p>Cargando historial...</p>
+                </div>
+                <div id="historialClienteTablaWrap"></div>
+                <div id="historialClientePaginacion" class="historial-paginacion"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal observaciones de una gestión -->
+    <div id="modalObservacionesGestion" class="modal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">👁 Observaciones</h2>
+                <span class="close" onclick="cerrarModalObservacionesGestion()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="obsGestionTexto" class="obs-modal-texto"></div>
             </div>
         </div>
     </div>
@@ -2080,6 +2280,14 @@
             if (event.target === modal) {
                 cerrarModal();
             }
+            const modalHist = document.getElementById('modalHistorialCliente');
+            if (event.target === modalHist) {
+                cerrarModalHistorialCliente();
+            }
+            const modalObs = document.getElementById('modalObservacionesGestion');
+            if (event.target === modalObs) {
+                cerrarModalObservacionesGestion();
+            }
         }
         
         // Variables globales para paginación
@@ -2087,173 +2295,292 @@
         let clientesPorPagina = 10;
         let clientesFiltrados = [];
         let clientesOriginales = [];
-        
-        // Función para filtrar asesores
-        function filtrarAsesores(tipo) {
-            // Remover clase active de todos los botones
-            document.querySelectorAll('.filter-btn').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            
-            // Agregar clase active al botón clickeado
-            event.target.classList.add('active');
-            
-            // Aquí puedes implementar la lógica de filtrado
-            // Por ahora solo cambiamos la clase visual
-            console.log('Filtro aplicado:', tipo);
+
+        // --- Búsqueda historial por cédula ---
+        let historialCedulaActual = '';
+        let historialPageActual = 1;
+        let historialObservacionesCache = {};
+
+        function escHtml(str) {
+            return String(str ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
-        
-        // Función para aplicar filtros de fechas
-        function aplicarFiltrosFechas() {
-            const fechaInicio = document.getElementById('fechaInicio').value;
-            const fechaFin = document.getElementById('fechaFin').value;
-            
-            if (!fechaInicio && !fechaFin) {
-                alert('Por favor selecciona al menos una fecha');
+
+        function setMsgBusquedaCedula(texto, esError) {
+            const el = document.getElementById('msgBusquedaCedula');
+            if (!el) return;
+            if (!texto) {
+                el.style.display = 'none';
+                el.textContent = '';
                 return;
             }
-            
-            if (fechaInicio && fechaFin && fechaInicio > fechaFin) {
-                alert('La fecha de inicio no puede ser mayor que la fecha de fin');
-                return;
-            }
-            
-            // Recargar el dashboard con los filtros de fechas
-            recargarDashboardConFiltros(fechaInicio, fechaFin);
+            el.style.display = 'block';
+            el.style.color = esError ? '#b91c1c' : '#6b7280';
+            el.textContent = texto;
         }
-        
-        // Función para recargar el dashboard con filtros
-        function recargarDashboardConFiltros(fechaInicio = null, fechaFin = null) {
-            let url = 'index.php?action=dashboard';
-            
-            if (fechaInicio) {
-                url += '&fecha_inicio=' + encodeURIComponent(fechaInicio);
-            }
-            if (fechaFin) {
-                url += '&fecha_fin=' + encodeURIComponent(fechaFin);
-            }
-            
-            // Mostrar indicador de carga
-            mostrarIndicadorCarga();
-            
-            // Recargar la página con los filtros
-            window.location.href = url;
+
+        function abrirModalHistorialCliente() {
+            const modal = document.getElementById('modalHistorialCliente');
+            if (modal) modal.style.display = 'block';
         }
-        
-        // Función para mostrar indicador de carga
-        function mostrarIndicadorCarga() {
-            const overlay = document.createElement('div');
-            overlay.id = 'loading-overlay';
-            overlay.style.cssText = `
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: rgba(0,0,0,0.5);
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                z-index: 9999;
+
+        function cerrarModalHistorialCliente() {
+            const modal = document.getElementById('modalHistorialCliente');
+            if (modal) modal.style.display = 'none';
+        }
+
+        function abrirModalObservacionesGestion(obs) {
+            const texto = (obs && String(obs).trim() !== '') ? String(obs) : 'Sin observaciones registradas.';
+            document.getElementById('obsGestionTexto').textContent = texto;
+            document.getElementById('modalObservacionesGestion').style.display = 'block';
+        }
+
+        function cerrarModalObservacionesGestion() {
+            document.getElementById('modalObservacionesGestion').style.display = 'none';
+        }
+
+        function verObservacionesGestion(idGestion) {
+            const obs = historialObservacionesCache[String(idGestion)] ?? '';
+            abrirModalObservacionesGestion(obs);
+        }
+
+        function renderHistorialMeta(cliente, total) {
+            const c = cliente || {};
+            document.getElementById('historialClienteMeta').innerHTML = `
+                <div><span class="meta-label">Cédula</span><span class="meta-value">${escHtml(c.cedula || historialCedulaActual)}</span></div>
+                <div><span class="meta-label">Nombre</span><span class="meta-value">${escHtml(c.nombre || '—')}</span></div>
+                <div><span class="meta-label">Teléfono</span><span class="meta-value">${escHtml(c.telefono || '—')}</span></div>
+                <div><span class="meta-label">Ciudad</span><span class="meta-value">${escHtml(c.ciudad || '—')}</span></div>
+                <div><span class="meta-label">Gestiones</span><span class="meta-value">${escHtml(total ?? 0)}</span></div>
+                <div><span class="meta-label">Bases distintas</span><span class="meta-value">${escHtml(c.bases_distintas ?? 0)}</span></div>
             `;
-            
-            overlay.innerHTML = `
-                <div style="background: white; padding: 30px; border-radius: 10px; text-align: center;">
-                    <div style="font-size: 2rem; margin-bottom: 15px;">⏳</div>
-                    <div>Cargando dashboard con filtros...</div>
+        }
+
+        function renderHistorialTabla(gestiones) {
+            const wrap = document.getElementById('historialClienteTablaWrap');
+            historialObservacionesCache = {};
+            if (!gestiones || gestiones.length === 0) {
+                wrap.innerHTML = '<div class="no-data" style="text-align:center;padding:24px;color:#6b7280;">No hay gestiones registradas para esta cédula.</div>';
+                return;
+            }
+            let rows = '';
+            gestiones.forEach(g => {
+                const id = g.id_gestion || 0;
+                historialObservacionesCache[String(id)] = g.observaciones || '';
+                const estado = (g.estado_base || '').toLowerCase();
+                const badgeClass = estado === 'activa' ? 'badge-base-activa' : 'badge-base-inactiva';
+                const badgeText = estado === 'activa' ? 'activa' : (estado === 'inactiva' ? 'inactiva' : escHtml(estado || '—'));
+                rows += `
+                    <tr>
+                        <td>${escHtml(g.fecha_gestion_fmt || g.fecha_gestion || '—')}</td>
+                        <td>${escHtml(g.tipificacion_arbol || '—')}</td>
+                        <td>
+                            ${escHtml(g.nombre_base || '—')}
+                            <span class="badge-base-estado ${badgeClass}">${badgeText}</span>
+                        </td>
+                        <td>${escHtml(g.asesor_nombre || '—')}</td>
+                        <td style="text-align:center;">
+                            <button type="button" class="btn-ojo-obs" title="Ver observaciones" onclick="verObservacionesGestion(${Number(id)})" aria-label="Ver observaciones">
+                                <span class="ojo-icon" aria-hidden="true">👁</span>
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+            wrap.innerHTML = `
+                <div style="overflow-x:auto;">
+                    <table class="historial-table">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Tipificación</th>
+                                <th>Base</th>
+                                <th>Asesor</th>
+                                <th>Obs.</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
                 </div>
             `;
-            
-            document.body.appendChild(overlay);
         }
-        
-        // Función para aplicar período rápido
-        function aplicarPeriodoRapido() {
-            const periodo = document.getElementById('periodoRapido').value;
-            if (!periodo) return;
-            
-            const hoy = new Date();
-            let fechaInicio = new Date();
-            let fechaFin = new Date();
-            
-            switch (periodo) {
-                case 'hoy':
-                    fechaInicio = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
-                    fechaFin = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
-                    break;
-                case 'ayer':
-                    fechaInicio = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - 1);
-                    fechaFin = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - 1);
-                    break;
-                case 'semana':
-                    const inicioSemana = hoy.getDate() - hoy.getDay();
-                    fechaInicio = new Date(hoy.getFullYear(), hoy.getMonth(), inicioSemana);
-                    fechaFin = new Date(hoy.getFullYear(), hoy.getMonth(), inicioSemana + 6);
-                    break;
-                case 'mes':
-                    fechaInicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-                    fechaFin = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
-                    break;
-                case 'trimestre':
-                    const trimestre = Math.floor(hoy.getMonth() / 3);
-                    fechaInicio = new Date(hoy.getFullYear(), trimestre * 3, 1);
-                    fechaFin = new Date(hoy.getFullYear(), (trimestre + 1) * 3, 0);
-                    break;
-                case 'año':
-                    fechaInicio = new Date(hoy.getFullYear(), 0, 1);
-                    fechaFin = new Date(hoy.getFullYear(), 11, 31);
-                    break;
+
+        function renderHistorialPaginacion(page, totalPages) {
+            const el = document.getElementById('historialClientePaginacion');
+            if (!el) return;
+            if (!totalPages || totalPages <= 1) {
+                el.innerHTML = totalPages === 1 ? `<span>Página 1 de 1</span>` : '';
+                return;
             }
-            
-            // Actualizar los campos de fecha
-            document.getElementById('fechaInicio').value = fechaInicio.toISOString().split('T')[0];
-            document.getElementById('fechaFin').value = fechaFin.toISOString().split('T')[0];
-            
-            // Limpiar el select de período
-            document.getElementById('periodoRapido').value = '';
-            
-            // Aplicar filtros automáticamente
-            recargarDashboardConFiltros(fechaInicio.toISOString().split('T')[0], fechaFin.toISOString().split('T')[0]);
+            el.innerHTML = `
+                <button type="button" ${page <= 1 ? 'disabled' : ''} onclick="cargarHistorialClienteCedula(${page - 1})">Anterior</button>
+                <span>Página ${page} de ${totalPages}</span>
+                <button type="button" ${page >= totalPages ? 'disabled' : ''} onclick="cargarHistorialClienteCedula(${page + 1})">Siguiente</button>
+            `;
         }
-        
-        // Función para verificar si hay filtros activos y actualizar la interfaz
-        function verificarFiltrosActivos() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const fechaInicio = urlParams.get('fecha_inicio');
-            const fechaFin = urlParams.get('fecha_fin');
-            
-            if (fechaInicio || fechaFin) {
-                // Si hay filtros activos, actualizar los campos de fecha
-                if (fechaInicio) {
-                    document.getElementById('fechaInicio').value = fechaInicio;
-                }
-                if (fechaFin) {
-                    document.getElementById('fechaFin').value = fechaFin;
-                }
-                
-                // Limpiar el select de período
-                document.getElementById('periodoRapido').value = '';
+
+        function cargarHistorialClienteCedula(page) {
+            if (!historialCedulaActual) return;
+            historialPageActual = Math.max(1, parseInt(page, 10) || 1);
+            const loading = document.getElementById('historialClienteLoading');
+            const btn = document.getElementById('btnBuscarCedula');
+            if (loading) loading.style.display = 'block';
+            if (btn) btn.disabled = true;
+
+            const url = `index.php?action=buscar_historial_cliente_cedula&cedula=${encodeURIComponent(historialCedulaActual)}&page=${historialPageActual}`;
+            fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+                .then(r => r.json().then(data => ({ ok: r.ok, data })))
+                .then(({ ok, data }) => {
+                    if (loading) loading.style.display = 'none';
+                    if (btn) btn.disabled = false;
+                    if (!ok || !data.success) {
+                        setMsgBusquedaCedula(data.message || 'No se encontró información para esa cédula.', true);
+                        const modal = document.getElementById('modalHistorialCliente');
+                        if (modal && modal.style.display !== 'none' && modal.style.display !== '') {
+                            document.getElementById('historialClienteTablaWrap').innerHTML =
+                                `<div class="no-data" style="text-align:center;padding:24px;color:#b91c1c;">${escHtml(data.message || 'Sin resultados')}</div>`;
+                            renderHistorialPaginacion(1, 0);
+                        }
+                        return;
+                    }
+                    setMsgBusquedaCedula('');
+                    abrirModalHistorialCliente();
+                    renderHistorialMeta(data.cliente, data.total);
+                    renderHistorialTabla(data.gestiones || []);
+                    renderHistorialPaginacion(data.page || 1, data.total_pages || 0);
+                })
+                .catch(err => {
+                    if (loading) loading.style.display = 'none';
+                    if (btn) btn.disabled = false;
+                    console.error(err);
+                    setMsgBusquedaCedula('Error de red al consultar el historial.', true);
+                });
+        }
+
+        function buscarHistorialPorCedula() {
+            const input = document.getElementById('inputCedulaCliente');
+            const cedula = (input && input.value ? input.value : '').trim();
+            if (!cedula) {
+                setMsgBusquedaCedula('Ingrese una cédula para buscar.', true);
+                return;
             }
+            historialCedulaActual = cedula;
+            setMsgBusquedaCedula('Buscando...', false);
+            cargarHistorialClienteCedula(1);
         }
-        
-        // Ejecutar verificación de filtros activos al cargar la página
+
         document.addEventListener('DOMContentLoaded', function() {
-            verificarFiltrosActivos();
+            const btn = document.getElementById('btnBuscarCedula');
+            const input = document.getElementById('inputCedulaCliente');
+            if (btn) btn.addEventListener('click', buscarHistorialPorCedula);
+            if (input) {
+                input.addEventListener('keydown', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        buscarHistorialPorCedula();
+                    }
+                });
+            }
+            iniciarPollingEstadoAsesores();
+        });
+
+        // --- Estado en vivo (línea / llamada / pausa) ---
+        const ESTADO_ASESORES_POLL_MS = 10000;
+        let estadoAsesoresPollTimer = null;
+
+        function claseEstadoRt(estado) {
+            const map = {
+                en_linea: 'estado-rt estado-rt-en_linea asesor-estado-rt',
+                en_llamada: 'estado-rt estado-rt-en_llamada asesor-estado-rt',
+                en_pausa: 'estado-rt estado-rt-en_pausa asesor-estado-rt',
+                offline: 'estado-rt estado-rt-offline asesor-estado-rt',
+            };
+            return map[estado] || map.offline;
+        }
+
+        function aplicarEstadoAsesoresDashboard(lista) {
+            if (!Array.isArray(lista)) return;
+            const byCedula = {};
+            lista.forEach(function(row) {
+                const ced = String(row.cedula || '');
+                if (ced) byCedula[ced] = row;
+            });
+
+            document.querySelectorAll('.asesor-row[data-asesor-cedula]').forEach(function(tr) {
+                const cedula = tr.getAttribute('data-asesor-cedula') || '';
+                const badge = tr.querySelector('.asesor-estado-rt');
+                if (!badge) return;
+                const info = byCedula[cedula];
+                const estado = info ? (info.estado || 'offline') : 'offline';
+                const label = info ? (info.estado_label || 'Offline') : 'Offline';
+                badge.className = claseEstadoRt(estado);
+                badge.setAttribute('data-estado', estado);
+                badge.textContent = label;
+                let title = label;
+                if (estado === 'en_pausa' && info && info.pausa_desde) {
+                    title += ' desde ' + info.pausa_desde;
+                } else if (estado === 'en_llamada' && info && info.llamada_desde) {
+                    title += ' desde ' + info.llamada_desde;
+                }
+                badge.title = title;
+            });
+        }
+
+        function fetchEstadoAsesoresDashboard() {
+            fetch('index.php?action=obtener_estado_tiempo_asesores', {
+                credentials: 'same-origin',
+                headers: { 'Accept': 'application/json' },
+                cache: 'no-store',
+            })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data || !data.success) return;
+                    aplicarEstadoAsesoresDashboard(data.asesores || []);
+                })
+                .catch(function(err) {
+                    console.error('Error estado asesores:', err);
+                });
+        }
+
+        function iniciarPollingEstadoAsesores() {
+            if (!document.querySelector('.asesor-estado-rt')) return;
+            fetchEstadoAsesoresDashboard();
+            if (estadoAsesoresPollTimer) clearInterval(estadoAsesoresPollTimer);
+            estadoAsesoresPollTimer = setInterval(fetchEstadoAsesoresDashboard, ESTADO_ASESORES_POLL_MS);
+        }
+
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'visible') {
+                fetchEstadoAsesoresDashboard();
+            }
         });
         
-        // Función para limpiar filtros de fechas
+        function filtrarAsesores(tipo) {
+            console.log('Filtro asesores no disponible en dashboard:', tipo);
+        }
+        
+        function aplicarFiltrosFechas() {
+            console.log('Filtros de fechas del dashboard deshabilitados');
+        }
+        
+        function recargarDashboardConFiltros(fechaInicio = null, fechaFin = null) {
+            console.log('recargarDashboardConFiltros deshabilitado', fechaInicio, fechaFin);
+        }
+        
+        function mostrarIndicadorCarga() {}
+        
+        function aplicarPeriodoRapido() {
+            console.log('aplicarPeriodoRapido deshabilitado');
+        }
+        
+        function verificarFiltrosActivos() {}
+        
         function limpiarFiltrosFechas() {
-            // Restaurar fechas por defecto (últimos 7 días)
-            const hoy = new Date();
-            const hace7Dias = new Date(hoy.getTime() - (7 * 24 * 60 * 60 * 1000));
-            
-            // Actualizar los campos de fecha
-            document.getElementById('fechaInicio').value = hace7Dias.toISOString().split('T')[0];
-            document.getElementById('fechaFin').value = hoy.toISOString().split('T')[0];
-            document.getElementById('periodoRapido').value = '';
-            
-            // Recargar dashboard con fechas por defecto
-            recargarDashboardConFiltros(hace7Dias.toISOString().split('T')[0], hoy.toISOString().split('T')[0]);
+            console.log('limpiarFiltrosFechas deshabilitado');
         }
         
         // Función para aplicar período rápido en el modal
