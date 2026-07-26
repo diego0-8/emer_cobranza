@@ -322,7 +322,7 @@ $gestiones = isset($gestiones) && is_array($gestiones) ? $gestiones : [];
                 <a href="javascript:history.back()" class="btn btn-secondary">
                     <i class="fas fa-arrow-left"></i> Volver
                 </a>
-                <a href="index.php?action=tareas_coordinador" class="btn btn-primary">
+                <a href="index.php?action=gestionar_tareas" class="btn btn-primary">
                     <i class="fas fa-tasks"></i> Gestionar Tareas
                 </a>
                 <a href="index.php?action=dashboard" class="btn btn-outline-primary">

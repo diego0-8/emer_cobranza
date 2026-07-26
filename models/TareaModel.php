@@ -29,61 +29,160 @@ class TareaModel {
         return $estadoUi;
     }
 
+    /**
+     * Crea tarea + detalle_tareas en transacción (handoff wcentro5).
+     * Dual write: JSON en tareas + filas en detalle_tareas.
+     */
     public function crearTarea($datos) {
         $clienteIds = $datos['cliente_ids'] ?? [];
-        if (!is_array($clienteIds)) $clienteIds = [];
+        if (!is_array($clienteIds)) {
+            $clienteIds = [];
+        }
+        $clienteIds = array_values(array_unique(array_map('intval', array_filter($clienteIds))));
 
-        // Nota: en dump el campo es `obligaciones_asignadas`. Lo dejamos NULL por ahora.
-
-        $stmt = $this->pdo->prepare("
-            INSERT INTO tareas (nombre_tarea, base_id, coordinador_cedula, asesor_cedula, estado, clientes_asignados, obligaciones_asignadas, fecha_creacion, fecha_completa)
-            VALUES (?, ?, ?, ?, 'pendiente', ?, NULL, NOW(), NOW())
-        ");
-
-        $nombre = (string)($datos['nombre_tarea'] ?? ($datos['descripcion'] ?? 'Tarea'));
+        $nombre = trim((string)($datos['nombre_tarea'] ?? ($datos['descripcion'] ?? '')));
         $baseId = (int)($datos['carga_id'] ?? $datos['base_id'] ?? 0);
         $coordinador = (string)($datos['coordinador_id'] ?? $datos['coordinador_cedula'] ?? '');
         $asesor = (string)($datos['asesor_id'] ?? $datos['asesor_cedula'] ?? '');
 
-        // #region agent log b7eaa7 tareaModel crearTarea before execute
-        try { @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode([
-            'sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'TM1',
-            'location'=>'models/TareaModel.php:crearTarea:before',
-            'message'=>'insert_prepare',
-            'data'=>[
-                'baseId'=>(int)$baseId,
-                'coordinadorLen'=>strlen((string)$coordinador),
-                'asesorLen'=>strlen((string)$asesor),
-                'nombreLen'=>strlen((string)$nombre),
-                'clienteIdsCount'=>is_array($clienteIds)?count($clienteIds):-1
-            ],
-            'timestamp'=>(int) round(microtime(true)*1000)
-        ], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
-        // #endregion
-
-        $ok = $stmt->execute([$nombre, $baseId, $coordinador, $asesor, json_encode(array_values($clienteIds))]);
-        if (!$ok) return false;
-
-        $tareaId = (int)$this->pdo->lastInsertId();
-        // #region agent log b7eaa7 tareaModel crearTarea after execute
-        try { @file_put_contents(__DIR__ . '/../debug-b7eaa7.log', json_encode([
-            'sessionId'=>'b7eaa7','runId'=>'pre','hypothesisId'=>'TM2',
-            'location'=>'models/TareaModel.php:crearTarea:after',
-            'message'=>'insert_ok',
-            'data'=>['tareaId'=>(int)$tareaId],
-            'timestamp'=>(int) round(microtime(true)*1000)
-        ], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n", FILE_APPEND); } catch (Throwable $e) {}
-        // #endregion
-
-        // Poblar detalle_tareas (opcional)
-        if (!empty($clienteIds)) {
-            $stmtDet = $this->pdo->prepare("INSERT INTO detalle_tareas (tarea_id, cliente_id, gestionado) VALUES (?, ?, 'no')");
-            foreach ($clienteIds as $cid) {
-                $stmtDet->execute([$tareaId, (int)$cid]);
-            }
+        if ($nombre === '') {
+            $nombre = 'Tarea ' . $asesor . ' - ' . date('Y-m-d H:i');
+        }
+        if ($baseId <= 0 || $coordinador === '' || $asesor === '' || empty($clienteIds)) {
+            return false;
         }
 
-        return $tareaId;
+        $obligacionesIds = $datos['obligaciones_ids'] ?? null;
+        if (!is_array($obligacionesIds)) {
+            $obligacionesIds = $this->obtenerObligacionesIdsPorClientes($clienteIds, $baseId);
+        }
+
+        try {
+            $this->pdo->beginTransaction();
+
+            $stmt = $this->pdo->prepare("
+                INSERT INTO tareas (
+                    nombre_tarea, base_id, coordinador_cedula, asesor_cedula, estado,
+                    clientes_asignados, obligaciones_asignadas, fecha_creacion, fecha_completa
+                ) VALUES (?, ?, ?, ?, 'pendiente', ?, ?, NOW(), NULL)
+            ");
+            $ok = $stmt->execute([
+                $nombre,
+                $baseId,
+                $coordinador,
+                $asesor,
+                json_encode($clienteIds, JSON_UNESCAPED_UNICODE),
+                json_encode(array_values($obligacionesIds), JSON_UNESCAPED_UNICODE),
+            ]);
+            if (!$ok) {
+                $this->pdo->rollBack();
+                return false;
+            }
+
+            $tareaId = (int)$this->pdo->lastInsertId();
+            $this->insertarDetalleTareas($tareaId, $clienteIds);
+
+            $this->pdo->commit();
+            return $tareaId;
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            error_log('TareaModel::crearTarea: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * IDs de clientes ocupados en tareas activas (pendiente / en progreso) de una base.
+     * @return int[]
+     */
+    public function obtenerClientesAsignadosOcupados(int $baseId): array {
+        if ($baseId <= 0) {
+            return [];
+        }
+        $stmt = $this->pdo->prepare("
+            SELECT DISTINCT dt.cliente_id
+            FROM detalle_tareas dt
+            INNER JOIN tareas t ON t.id_tarea = dt.tarea_id
+            WHERE t.base_id = ?
+              AND t.estado IN ('pendiente', 'en progreso')
+        ");
+        $stmt->execute([$baseId]);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
+    }
+
+    public function insertarDetalleTareas(int $idTarea, array $clienteIds): void {
+        if ($idTarea <= 0 || empty($clienteIds)) {
+            return;
+        }
+        $stmtDet = $this->pdo->prepare(
+            "INSERT INTO detalle_tareas (tarea_id, cliente_id, gestionado) VALUES (?, ?, 'no')"
+        );
+        foreach ($clienteIds as $cid) {
+            $cid = (int)$cid;
+            if ($cid > 0) {
+                $stmtDet->execute([$idTarea, $cid]);
+            }
+        }
+    }
+
+    /** @return int[] id_obligacion */
+    public function obtenerObligacionesIdsPorClientes(array $clienteIds, int $baseId = 0): array {
+        $clienteIds = array_values(array_unique(array_map('intval', array_filter($clienteIds))));
+        if (empty($clienteIds)) {
+            return [];
+        }
+        $ph = implode(',', array_fill(0, count($clienteIds), '?'));
+        $sql = "SELECT id_obligacion FROM obligaciones WHERE cliente_id IN ($ph)";
+        $params = $clienteIds;
+        if ($baseId > 0) {
+            $sql .= " AND base_id = ?";
+            $params[] = $baseId;
+        }
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
+    }
+
+    public function eliminarTarea(int $tareaId, string $coordinadorCedula): bool {
+        $tarea = $this->getTareaByIdAndCoordinador($tareaId, $coordinadorCedula);
+        if (!$tarea) {
+            return false;
+        }
+        $stmt = $this->pdo->prepare("DELETE FROM tareas WHERE id_tarea = ? AND coordinador_cedula = ?");
+        return $stmt->execute([$tareaId, $coordinadorCedula]);
+    }
+
+    public function completarTarea(int $tareaId, string $coordinadorCedula): bool {
+        $tarea = $this->getTareaByIdAndCoordinador($tareaId, $coordinadorCedula);
+        if (!$tarea) {
+            return false;
+        }
+        $stmt = $this->pdo->prepare("
+            UPDATE tareas
+            SET estado = 'completa', fecha_completa = NOW()
+            WHERE id_tarea = ? AND coordinador_cedula = ?
+        ");
+        return $stmt->execute([$tareaId, $coordinadorCedula]);
+    }
+
+    public function actualizarEstadoTarea($tareaId, $nuevoEstado, $usuarioId) {
+        $estadoDb = $this->mapEstadoTareaUiToDb((string)$nuevoEstado);
+        if ($estadoDb === 'completa') {
+            $stmt = $this->pdo->prepare("
+                UPDATE tareas
+                SET estado = ?, fecha_completa = NOW()
+                WHERE id_tarea = ? AND coordinador_cedula = ?
+            ");
+            return $stmt->execute([(string)$estadoDb, (int)$tareaId, (string)$usuarioId]);
+        }
+        $stmt = $this->pdo->prepare("
+            UPDATE tareas
+            SET estado = ?
+            WHERE id_tarea = ? AND coordinador_cedula = ?
+        ");
+        return $stmt->execute([(string)$estadoDb, (int)$tareaId, (string)$usuarioId]);
     }
 
     public function getTareasByAsesor($asesorId, $estado = null) {
@@ -119,12 +218,6 @@ class TareaModel {
 
     public function getTareasPendientesByAsesor($asesorId) {
         return $this->getTareasByAsesor($asesorId, 'pendiente');
-    }
-
-    public function actualizarEstadoTarea($tareaId, $nuevoEstado, $usuarioId) {
-        $estadoDb = $this->mapEstadoTareaUiToDb((string)$nuevoEstado);
-        $stmt = $this->pdo->prepare("UPDATE tareas SET estado = ?, fecha_completa = NOW() WHERE id_tarea = ?");
-        return $stmt->execute([(string)$estadoDb, (int)$tareaId]);
     }
 
     public function tieneTareasPendientes($asesorId) {

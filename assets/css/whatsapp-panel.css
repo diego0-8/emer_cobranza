@@ -1,0 +1,418 @@
+/* WhatsApp panel — bajo softphone en gestionar_cliente */
+
+#waBubbleRail {
+    position: fixed;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 1200;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 70vh;
+    overflow: visible;
+}
+
+.wa-bubble {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    background: linear-gradient(145deg, #25d366, #128c7e);
+    color: #fff;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(18, 140, 126, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    font-weight: 700;
+    position: relative;
+    text-decoration: none;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.wa-bubble:hover {
+    transform: scale(1.08);
+    color: #fff;
+    text-decoration: none;
+}
+
+.wa-bubble.is-active {
+    box-shadow: 0 0 0 3px #25d366, 0 4px 14px rgba(18, 140, 126, 0.45);
+}
+
+.wa-bubble-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: #ef4444;
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #fff;
+}
+
+.wa-bubble-more {
+    background: #374151;
+}
+
+#waPanel {
+    margin-bottom: 20px;
+    border: 1px solid #d1fae5;
+    border-radius: 10px;
+    background: #fff;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.08);
+}
+
+.wa-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px;
+    background: linear-gradient(135deg, #128c7e 0%, #25d366 100%);
+    color: #fff;
+}
+
+.wa-panel-header h5 {
+    margin: 0;
+    font-size: 0.85rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.wa-panel-mode {
+    font-size: 0.65rem;
+    background: rgba(255, 255, 255, 0.2);
+    padding: 2px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.wa-panel-body {
+    padding: 10px;
+}
+
+.wa-write-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.wa-write-row label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #374151;
+    margin: 0;
+}
+
+.wa-write-row select {
+    flex: 1;
+    min-width: 120px;
+    font-size: 0.75rem;
+    padding: 4px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    background: #f9fafb;
+}
+
+.wa-activo-badge {
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 6px;
+    border: 1px solid #e5e7eb;
+    background: #f3f4f6;
+    color: #6b7280;
+}
+
+.wa-activo-badge.si {
+    background: #d1fae5;
+    border-color: #6ee7b7;
+    color: #047857;
+}
+
+.wa-activo-badge.no {
+    background: #fee2e2;
+    border-color: #fca5a5;
+    color: #b91c1c;
+}
+
+.wa-activo-badge.desconocido {
+    background: #fef3c7;
+    border-color: #fcd34d;
+    color: #92400e;
+}
+
+.wa-thread {
+    height: 220px;
+    overflow-y: auto;
+    background: #ece5dd;
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.wa-msg {
+    max-width: 88%;
+    padding: 6px 10px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    line-height: 1.35;
+    word-break: break-word;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.08);
+}
+
+.wa-msg.in {
+    align-self: flex-start;
+    background: #fff;
+    border-top-left-radius: 2px;
+}
+
+.wa-msg.out {
+    align-self: flex-end;
+    background: #dcf8c6;
+    border-top-right-radius: 2px;
+}
+
+.wa-msg-meta {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.62rem;
+    color: #6b7280;
+    text-align: right;
+}
+
+.wa-msg.status-error_envio {
+    border: 1px solid #fca5a5;
+}
+
+.wa-msg-text {
+    display: block;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.wa-msg-media {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+}
+
+.wa-msg-img {
+    display: block;
+    padding: 0;
+    border: none;
+    background: transparent;
+    cursor: zoom-in;
+    text-align: left;
+}
+
+.wa-msg-img img {
+    display: block;
+    max-width: 220px;
+    max-height: 260px;
+    width: auto;
+    height: auto;
+    border-radius: 8px;
+    pointer-events: none;
+}
+
+.wa-msg-file {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: 8px;
+    color: #075e54;
+    font-size: 0.8rem;
+    max-width: 240px;
+}
+
+.wa-msg-file i {
+    font-size: 1.3rem;
+    flex: 0 0 auto;
+}
+
+.wa-msg-file span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wa-msg-media + .wa-msg-text {
+    margin-top: 5px;
+}
+
+/* Lightbox previsualización de imagen */
+body.wa-lightbox-open {
+    overflow: hidden;
+}
+
+.wa-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 10050;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.wa-lightbox[hidden] {
+    display: none !important;
+}
+
+.wa-lightbox-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.82);
+    cursor: pointer;
+}
+
+.wa-lightbox-dialog {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: min(920px, 96vw);
+    max-height: 92vh;
+}
+
+.wa-lightbox-img {
+    display: block;
+    max-width: 100%;
+    max-height: calc(92vh - 64px);
+    width: auto;
+    height: auto;
+    border-radius: 10px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+    background: #111;
+    object-fit: contain;
+}
+
+.wa-lightbox-close {
+    position: absolute;
+    top: -12px;
+    right: -12px;
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: 50%;
+    background: #fff;
+    color: #111;
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    z-index: 2;
+}
+
+.wa-lightbox-bar {
+    margin-top: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: 100%;
+    color: #f8fafc;
+    font-size: 0.85rem;
+}
+
+.wa-lightbox-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 360px;
+    opacity: 0.9;
+}
+
+.wa-lightbox-download {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    background: #25d366;
+    color: #fff;
+    text-decoration: none;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.wa-lightbox-download:hover {
+    background: #1ebe57;
+    color: #fff;
+}
+
+.wa-compose {
+    display: flex;
+    gap: 6px;
+}
+
+.wa-compose textarea {
+    flex: 1;
+    resize: none;
+    min-height: 40px;
+    max-height: 80px;
+    font-size: 0.78rem;
+    padding: 6px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+}
+
+.wa-compose button {
+    border: none;
+    background: #25d366;
+    color: #fff;
+    border-radius: 8px;
+    padding: 0 12px;
+    font-weight: 600;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.wa-compose button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.wa-empty {
+    text-align: center;
+    color: #6b7280;
+    font-size: 0.75rem;
+    padding: 24px 8px;
+}
+
+.wa-error {
+    color: #b91c1c;
+    font-size: 0.72rem;
+    margin-top: 6px;
+}
+
+@media (max-width: 991px) {
+    #waBubbleRail {
+        top: auto;
+        bottom: 16px;
+        left: 8px;
+        transform: none;
+        flex-direction: row;
+        max-width: calc(100vw - 24px);
+        overflow-x: auto;
+    }
+}

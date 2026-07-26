@@ -27,11 +27,17 @@ $basePath = $basePath ?? '';
     <?php require_once 'shared_styles.php'; ?>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="assets/css/softphone-web.css">
+    <link rel="stylesheet" href="assets/css/whatsapp-panel.css?v=3">
     <script>
         // Contexto global para que el softphone pueda registrar call_log incluso si se marca desde el dialpad.
         window.__callLogContext = {
             cliente_id: <?php echo (int)($cliente['id'] ?? 0); ?>,
             telefono_contacto: ''
+        };
+        window.__waConfig = {
+            clienteId: <?php echo (int)($cliente['id'] ?? $cliente['id_cliente'] ?? 0); ?>,
+            waId: <?php echo (int)($_GET['wa'] ?? 0); ?>,
+            pollMs: 5000
         };
     </script>
     <style>
@@ -2117,6 +2123,9 @@ $basePath = $basePath ?? '';
     require_once 'shared_navbar.php';
     echo getNavbar('Gestión de Cliente', $_SESSION['user_role'] ?? '');
     ?>
+
+    <!-- Rail de burbujas WhatsApp (máx. 10) -->
+    <div id="waBubbleRail" aria-label="Chats WhatsApp"></div>
     
     <div class="gestion-container">
 
@@ -2863,7 +2872,34 @@ $basePath = $basePath ?? '';
                         </div>
                     </div>
                 </div>
-                
+                <?php endif; ?>
+
+                <!-- WhatsApp (bajo softphone) -->
+                <div id="waPanel" class="cliente-info-card" style="padding: 0; overflow: hidden;">
+                    <div class="wa-panel-header">
+                        <h5><i class="fab fa-whatsapp"></i> WhatsApp</h5>
+                        <span class="wa-panel-mode" id="waPanelMode">…</span>
+                    </div>
+                    <div class="wa-panel-body">
+                        <div class="wa-write-row">
+                            <label for="waPhoneSelect">Escribir a</label>
+                            <select id="waPhoneSelect" aria-label="Número del perfil"></select>
+                            <span class="wa-activo-badge desconocido" id="waActivoBadge" title="Estado WhatsApp">?</span>
+                        </div>
+                        <div class="wa-thread" id="waThread">
+                            <div class="wa-empty">Cargando conversación…</div>
+                        </div>
+                        <div class="wa-compose">
+                            <textarea id="waComposeInput" rows="2" placeholder="Escribe un mensaje…" maxlength="4000"></textarea>
+                            <button type="button" id="waComposeSend" title="Enviar">
+                                <i class="fas fa-paper-plane"></i>
+                            </button>
+                        </div>
+                        <div class="wa-error" id="waError" style="display:none;"></div>
+                    </div>
+                </div>
+
+                <?php if ($tieneTelefono && !empty($datosTelefono['extension_telefono'])): ?>
                 <!-- Canales de Comunicación Autorizados -->
                 <div class="cliente-info-card">
                     <div class="canales-autorizados-section">
@@ -5230,6 +5266,8 @@ $basePath = $basePath ?? '';
         console.warn('⚠️ [Softphone] Usuario sin teléfono configurado');
     </script>
     <?php endif; ?>
+
+    <script src="assets/js/whatsapp-panel.js?v=3"></script>
 
 </body>
 </html>

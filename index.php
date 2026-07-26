@@ -46,6 +46,15 @@ $accionesAPI = [
     'obtener_historial_completo',
     'obtener_estado_tiempo_asesores',
     'obtener_detalle_pausas_asesor_tmo',
+    // WhatsApp + Kommo
+    'wa_webhook_kommo',
+    'wa_mis_chats',
+    'wa_mensajes',
+    'wa_enviar',
+    'wa_conversacion_cliente',
+    'wa_emparejar',
+    'wa_sin_cliente',
+    'wa_estado',
 ];
 
 if (!in_array($action, $accionesExportacion) && !in_array($action, $accionesAPI)) {
@@ -54,6 +63,26 @@ if (!in_array($action, $accionesExportacion) && !in_array($action, $accionesAPI)
 }
 
 session_start();
+
+// #region agent log
+try {
+    $__dbg = [
+        'sessionId' => '9434e9',
+        'runId' => 'cleanup-verify',
+        'hypothesisId' => 'H1',
+        'location' => 'index.php:action',
+        'message' => 'route_dispatch',
+        'data' => [
+            'action' => (string)$action,
+            'method' => $_SERVER['REQUEST_METHOD'] ?? '',
+            'role' => $_SESSION['user_role'] ?? null,
+        ],
+        'timestamp' => (int) round(microtime(true) * 1000),
+    ];
+    file_put_contents(__DIR__ . '/debug-9434e9.log', json_encode($__dbg, JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND);
+} catch (Throwable $e) {}
+// #endregion
+
 require_once __DIR__ . '/models/UsuarioModel.php';
 require_once __DIR__ . '/models/CargaExcelModel.php';
 require_once __DIR__ . '/models/ClienteModel.php';
@@ -64,6 +93,7 @@ require_once __DIR__ . '/controllers/CoordinadorController.php';
 require_once __DIR__ . '/controllers/AsesorController.php';
 require_once __DIR__ . '/controllers/ProductoClienteController.php';
 require_once __DIR__ . '/controllers/ActividadController.php';
+require_once __DIR__ . '/controllers/WhatsappController.php';
 
 // Conexión a la base de datos
 try {
@@ -83,7 +113,7 @@ $user_role = isset($_SESSION['user_role']) ? $_SESSION['user_role'] : '';
 
 // Control de sesión
 // Permitir acciones públicas sin sesión (login + procesamiento del login).
-$accionesPublicas = ['login', 'process_login'];
+$accionesPublicas = ['login', 'process_login', 'wa_webhook_kommo'];
 if (!isset($_SESSION['user_id']) && !in_array($action, $accionesPublicas, true)) {
     header('Location: index.php?action=login');
     exit;
@@ -261,6 +291,7 @@ switch ($action) {
     case 'get_asesores_disponibles_carga':
     case 'get_bases_asignadas_asesor':
     case 'actualizar_estado_tarea':
+    case 'eliminar_tarea':
     case 'get_detalles_tarea':
     case 'get_asesores_base':
     case 'get_clientes_no_gestionados':
@@ -307,7 +338,7 @@ switch ($action) {
         $controller = new CoordinadorController($pdo);
         
         switch ($action) {
-            case 'tareas_coordinador': $controller->tareas(); break;
+            case 'tareas_coordinador':
             case 'gestionar_tareas': $controller->gestionarTareas(); break;
             case 'gestionar_asesores': $controller->gestionarAsesores(); break;
             case 'crear_tarea': $controller->crearTarea(); break;
@@ -318,6 +349,7 @@ switch ($action) {
             case 'get_asesores_disponibles_carga': $controller->getAsesoresDisponiblesCarga(); break;
             case 'get_bases_asignadas_asesor': $controller->getBasesAsignadasAsesor(); break;
             case 'actualizar_estado_tarea': $controller->actualizarEstadoTarea(); break;
+            case 'eliminar_tarea': $controller->eliminarTarea(); break;
             case 'get_detalles_tarea': $controller->getDetallesTarea(); break;
             case 'get_asesores_base': $controller->getAsesoresBase(); break;
             case 'get_clientes_no_gestionados': $controller->getClientesNoGestionados(); break;
@@ -562,6 +594,40 @@ switch ($action) {
             ]);
         }
         exit;
+        break;
+
+    // WhatsApp + Kommo
+    case 'wa_webhook_kommo':
+        $wa = new WhatsappController($pdo);
+        $wa->webhookKommo();
+        break;
+    case 'wa_estado':
+        $wa = new WhatsappController($pdo);
+        $wa->estado();
+        break;
+    case 'wa_mis_chats':
+        $wa = new WhatsappController($pdo);
+        $wa->misChats();
+        break;
+    case 'wa_conversacion_cliente':
+        $wa = new WhatsappController($pdo);
+        $wa->conversacionCliente();
+        break;
+    case 'wa_mensajes':
+        $wa = new WhatsappController($pdo);
+        $wa->mensajes();
+        break;
+    case 'wa_enviar':
+        $wa = new WhatsappController($pdo);
+        $wa->enviar();
+        break;
+    case 'wa_sin_cliente':
+        $wa = new WhatsappController($pdo);
+        $wa->sinCliente();
+        break;
+    case 'wa_emparejar':
+        $wa = new WhatsappController($pdo);
+        $wa->emparejar();
         break;
         
     default:

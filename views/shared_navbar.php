@@ -45,7 +45,7 @@ function getNavbar($currentPage = '', $userRole = '') {
                 'Inicio' => 'index.php?action=dashboard',
                 'Gestión' => 'index.php?action=list_cargas',
                 'Resultados' => $urlResultadosCoordinador,
-                'Tareas' => 'index.php?action=tareas_coordinador',
+                'Tareas' => 'index.php?action=gestionar_tareas',
                 'Llamadas' => 'index.php?action=coord_call',
                 'Reportes CSV' => 'index.php?action=reportes_exportacion',
                 'Reporte TMO' => 'index.php?action=reporte_tmo'

@@ -1298,143 +1298,23 @@ class AdminController extends BaseController {
      * Ver la gestión y métricas de un coordinador específico
      */
     public function verGestionCoordinador($coordinadorId) {
-        $page_title = "Gestión del Coordinador";
-        
-        // Verificar que el usuario sea administrador
-        if (!isset($_SESSION['user_role']) || $_SESSION['user_role'] !== 'administrador') {
-            header('Location: index.php?action=login');
-            exit;
-        }
-        
-        // Obtener datos del coordinador
-        $coordinador = $this->usuarioModel->getUsuarioById($coordinadorId);
-        
-        if (!$coordinador || $coordinador['rol'] !== 'coordinador') {
-            header('Location: index.php?action=asignar_personal&error=coordinador_no_encontrado');
-            exit;
-        }
-        
-        // Obtener asesores asignados al coordinador
-        $asesoresAsignados = $this->usuarioModel->getAsesoresByCoordinador($coordinadorId);
-        
-        // Obtener métricas básicas
-        $metricas = [
-            'total_asesores_asignados' => count($asesoresAsignados),
-            'asesores_activos' => count(array_filter($asesoresAsignados, function($asesor) {
-                return $asesor['estado'] === 'Activo';
-            })),
-            'coordinador_estado' => $coordinador['estado']
-        ];
-        
-        require __DIR__ . '/../views/admin_gestion_coordinador.php';
+        header('Location: index.php?action=list_campanas');
+        exit;
     }
 
     /**
      * Ver la gestión y métricas de un asesor específico
      */
     public function verGestionAsesor($asesorId) {
-        $page_title = "Gestión del Asesor";
-        
-        // Verificar que el usuario sea administrador
-        if (!isset($_SESSION['user_role']) || $_SESSION['user_role'] !== 'administrador') {
-            header('Location: index.php?action=login');
-            exit;
-        }
-        
-        // Obtener datos del asesor
-        $asesor = $this->usuarioModel->getUsuarioById($asesorId);
-        
-        if (!$asesor || $asesor['rol'] !== 'asesor') {
-            header('Location: index.php?action=asignar_personal&error=asesor_no_encontrado');
-            exit;
-        }
-        
-        // Obtener coordinador asignado al asesor
-        $coordinadorAsignado = null;
-        $coordinadores = $this->usuarioModel->getUsuariosByRol('coordinador');
-        
-        foreach ($coordinadores as $coordinador) {
-            if ($this->usuarioModel->isAsesorAsignadoACoordinador($asesorId, $coordinador['id'])) {
-                $coordinadorAsignado = $coordinador;
-                break;
-            }
-        }
-        
-        // Obtener métricas básicas
-        $metricas = [
-            'asesor_estado' => $asesor['estado'],
-            'coordinador_asignado' => $coordinadorAsignado ? $coordinadorAsignado['nombre_completo'] : 'Sin asignar',
-            'fecha_registro' => $asesor['fecha_registro'] ?? 'No disponible'
-        ];
-        
-        require __DIR__ . '/../views/admin_gestion_asesor.php';
+        header('Location: index.php?action=list_campanas');
+        exit;
     }
 
     /**
      * Procesar la asignación de un asesor a un coordinador
      */
     public function asignarAsesor() {
-        // Verificar que el usuario sea administrador
-        if (!isset($_SESSION['user_role']) || $_SESSION['user_role'] !== 'administrador') {
-            header('Location: index.php?action=login');
-            exit;
-        }
-        
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $coordinadorId = $_POST['coordinador_id'] ?? null;
-            $asesorId = $_POST['asesor_id'] ?? null;
-            
-            // Validar datos
-            if (empty($coordinadorId) || empty($asesorId)) {
-                header('Location: index.php?action=asignar_personal&error=datos_incompletos');
-                exit;
-            }
-            
-            // Verificar que existan los usuarios
-            $coordinador = $this->usuarioModel->getUsuarioById($coordinadorId);
-            $asesor = $this->usuarioModel->getUsuarioById($asesorId);
-            
-            if (!$coordinador || $coordinador['rol'] !== 'coordinador') {
-                header('Location: index.php?action=asignar_personal&error=coordinador_invalido');
-                exit;
-            }
-            
-            if (!$asesor || $asesor['rol'] !== 'asesor') {
-                header('Location: index.php?action=asignar_personal&error=asesor_invalido');
-                exit;
-            }
-            
-            // Verificar que ambos usuarios estén activos
-            if ($coordinador['estado'] !== 'Activo' || $asesor['estado'] !== 'Activo') {
-                header('Location: index.php?action=asignar_personal&error=usuarios_inactivos');
-                exit;
-            }
-            
-            try {
-                // Realizar la asignación
-                $result = $this->usuarioModel->asignarAsesorACoordinador($asesorId, $coordinadorId);
-                
-                if ($result) {
-                    // Log de la asignación
-                    error_log("Asignación exitosa - Asesor ID: {$asesorId} asignado a Coordinador ID: {$coordinadorId} por Admin ID: {$_SESSION['user_id']}");
-                    
-                    // Limpiar cualquier cache de sesión
-                    if (isset($_SESSION['asesores_cache'])) {
-                        unset($_SESSION['asesores_cache']);
-                    }
-                    
-                    header('Location: index.php?action=asignar_personal&success=asignacion_exitosa&t=' . time());
-                } else {
-                    header('Location: index.php?action=asignar_personal&error=error_asignacion&t=' . time());
-                }
-            } catch (Exception $e) {
-                error_log("Error en asignación de asesor: " . $e->getMessage());
-                header('Location: index.php?action=asignar_personal&error=error_sistema');
-            }
-        } else {
-            // Si no es POST, redirigir
-            header('Location: index.php?action=asignar_personal');
-        }
+        header('Location: index.php?action=list_campanas');
         exit;
     }
 
@@ -1442,32 +1322,7 @@ class AdminController extends BaseController {
      * Liberar un asesor de un coordinador
      */
     public function liberarAsesor($asesorId, $coordinadorId) {
-        // Verificar que el usuario sea administrador
-        if (!isset($_SESSION['user_role']) || $_SESSION['user_role'] !== 'administrador') {
-            header('Location: index.php?action=login');
-            exit;
-        }
-        
-        try {
-            $result = $this->usuarioModel->liberarAsesorDeCoordinador($asesorId, $coordinadorId);
-            
-            if ($result) {
-                // Log de la liberación
-                error_log("Liberación exitosa - Asesor ID: {$asesorId} liberado del Coordinador ID: {$coordinadorId} por Admin ID: {$_SESSION['user_id']}");
-                
-                // Limpiar cualquier cache de sesión
-                if (isset($_SESSION['asesores_cache'])) {
-                    unset($_SESSION['asesores_cache']);
-                }
-                
-                header('Location: index.php?action=asignar_personal&success=liberacion_exitosa&t=' . time());
-            } else {
-                header('Location: index.php?action=asignar_personal&error=error_liberacion&t=' . time());
-            }
-        } catch (Exception $e) {
-            error_log("Error en liberación de asesor: " . $e->getMessage());
-            header('Location: index.php?action=asignar_personal&error=error_sistema');
-        }
+        header('Location: index.php?action=list_campanas');
         exit;
     }
 }

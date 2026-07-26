@@ -11,3 +11,7 @@ debug-*.log
 # OS
 Thumbs.db
 Desktop.ini
+
+# Secretos Kommo / WhatsApp
+config/kommo.local.php
+

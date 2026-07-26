@@ -16,7 +16,8 @@ class CoordinadorController extends BaseController {
 
         $page_title = "Dashboard Coordinador";
         $coordinador_id = $_SESSION['user_id'];
-        $periodo = 'total';
+        // KPIs del encabezado: mes en curso (asesores asignados + gestiones/acuerdos/recaudo)
+        $periodo = 'mes';
         $metricas_equipo = $this->gestionModel->getMetricasEquipo($coordinador_id, $periodo);
         
         // Obtener asesores asignados al coordinador (sin filtro GET de búsqueda)
@@ -51,13 +52,11 @@ class CoordinadorController extends BaseController {
                 // Métricas de la tabla "Gestión de Asesores": siempre del mes en curso
                 $metricasMes = $this->gestionModel->getMetricasAsesor($asesor['id'], 'mes');
                 $asesores[$key]['metricas'] = $metricasMes;
-                $asesores[$key]['total_clientes'] = (int)($metricasMes['total_clientes'] ?? 0);
                 $asesores[$key]['llamadas_realizadas'] = (int)($metricasMes['total_gestiones'] ?? 0);
                 $asesores[$key]['contactos_efectivos'] = (int)($metricasMes['contactos_efectivos'] ?? 0);
-                $asesores[$key]['ventas_realizadas'] = (int)($metricasMes['ventas_exitosas'] ?? 0);
-                $asesores[$key]['porcentaje_llamadas'] = $asesores[$key]['total_clientes'] > 0
-                    ? round(($asesores[$key]['llamadas_realizadas'] / $asesores[$key]['total_clientes']) * 100, 1)
-                    : 0;
+                $asesores[$key]['acuerdos_mes'] = (int)($metricasMes['ventas_exitosas'] ?? 0);
+                $asesores[$key]['ventas_realizadas'] = $asesores[$key]['acuerdos_mes'];
+                $asesores[$key]['porcentaje_llamadas'] = 0;
 
                 // #region agent log b7eaa7 metricas per-asesor sample (solo primeros 3)
                 if ((int)$key < 3) {
@@ -135,8 +134,9 @@ class CoordinadorController extends BaseController {
                     'promedio_venta' => 0
                 ];
                 
-                $asesores[$key]['total_clientes'] = 0;
                 $asesores[$key]['llamadas_realizadas'] = 0;
+                $asesores[$key]['contactos_efectivos'] = 0;
+                $asesores[$key]['acuerdos_mes'] = 0;
                 $asesores[$key]['ventas_realizadas'] = 0;
                 $asesores[$key]['porcentaje_llamadas'] = 0;
             }
@@ -147,10 +147,15 @@ class CoordinadorController extends BaseController {
             $metricas_equipo = [];
         }
 
-        $total_asesores = (int)($metricas_equipo['total_asesores'] ?? count($asesores));
-        $total_clientes = (int)($metricas_equipo['total_clientes'] ?? 0);
-        $total_llamadas = (int)($metricas_equipo['total_gestiones'] ?? 0);
-        $total_ventas = (int)($metricas_equipo['ventas_exitosas'] ?? 0);
+        // KPIs principales del dashboard (orden: asesores → gestiones → acuerdos → recaudo)
+        $total_asesores = is_array($asesores) ? count($asesores) : 0;
+        $total_gestiones_mes = (int)($metricas_equipo['total_gestiones'] ?? 0);
+        $total_acuerdos_mes = (int)($metricas_equipo['ventas_exitosas'] ?? 0);
+        $total_recaudo_mes = (float)($metricas_equipo['total_ventas_monto'] ?? 0);
+        // Compatibilidad con variables antiguas usadas en logs/otras secciones
+        $total_clientes = $total_recaudo_mes;
+        $total_llamadas = $total_gestiones_mes;
+        $total_ventas = $total_acuerdos_mes;
         
         // Obtener recordatorios pendientes del equipo
         $llamadasPendientes = $this->gestionModel->getLlamadasPendientesCoordinador($coordinador_id);
@@ -162,13 +167,16 @@ class CoordinadorController extends BaseController {
         // Datos adicionales para el dashboard
         $datos_dashboard = [
             'total_asesores' => $total_asesores,
+            'total_gestiones_mes' => $total_gestiones_mes,
+            'total_acuerdos_mes' => $total_acuerdos_mes,
+            'total_recaudo_mes' => $total_recaudo_mes,
             'total_clientes' => $total_clientes,
             'total_llamadas' => $total_llamadas,
             'total_ventas' => $total_ventas,
             'tasa_conversion' => (float)($metricas_equipo['tasa_conversion'] ?? 0),
             'tasa_contacto_efectivo' => (float)($metricas_equipo['tasa_contacto_efectivo'] ?? 0),
             'tiempo_promedio_conversacion' => (float)($metricas_equipo['tiempo_promedio_conversacion'] ?? 0),
-            'total_ventas_monto' => (float)($metricas_equipo['total_ventas_monto'] ?? 0),
+            'total_ventas_monto' => $total_recaudo_mes,
             'promedio_venta' => (float)($metricas_equipo['promedio_venta'] ?? 0),
             'periodo' => $periodo,
             'llamadas_pendientes' => $llamadasPendientes,
@@ -1455,37 +1463,6 @@ class CoordinadorController extends BaseController {
         ];
     }
 
-    public function listClientsByCarga($cargaId) {
-        $page_title = "Clientes de la Carga";
-        $coordinador_id = $_SESSION['user_id'];
-        
-        // Verificar que la carga pertenezca al coordinador
-        $carga = $this->cargaExcelModel->getCargaByIdAndCoordinador($cargaId, $coordinador_id);
-        if (!$carga) {
-            $_SESSION['error_message'] = "No tienes acceso a esta carga o no existe.";
-            header('Location: index.php?action=list_cargas');
-            exit;
-        }
-        
-        // Se implementa la paginación.
-        $clientesPorPagina = 25;
-        $paginaActual = $this->getGet('pagina', 1);
-        $paginaActual = $this->validarId($paginaActual, 'página');
-        
-        // Se usa la función del modelo para obtener el total de clientes por carga.
-        $totalClientes = $this->clienteModel->getTotalClientsByCargaIdAndCoordinador($cargaId, $coordinador_id);
-        $totalPaginas = ceil($totalClientes / $clientesPorPagina);
-
-        $offset = ($paginaActual - 1) * $clientesPorPagina;
-        
-        // Se llama a la función corregida en el modelo para obtener los clientes paginados.
-        $clientes = $this->clienteModel->getClientsByCargaIdAndCoordinador($cargaId, $coordinador_id, $clientesPorPagina, $offset);
-        $asesores = $this->usuarioModel->getUsuariosByRol('asesor');
-        $carga_id = $cargaId;
-        
-        require __DIR__ . '/../views/clientes_list.php';
-    }
-    
     public function assignClients($cargaId) {
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['clientes']) && isset($_POST['asesor_id'])) {
             $clienteIds = $_POST['clientes']; // Array de IDs, validar cada uno
@@ -1497,65 +1474,22 @@ class CoordinadorController extends BaseController {
         }
     }
 
-    public function viewAsesorProgress($asesorId) {
-        $page_title = "Progreso del Asesor";
-        $asesor = $this->usuarioModel->getUsuarioById($asesorId);
-        $gestiones = $this->gestionModel->getGestionByAsesor($asesorId);
-        $clientes = $this->clienteModel->getAssignedClientsForAsesor($asesorId);
-
-        // Contar el número de gestiones por cliente
-        $gestiones_por_cliente = [];
-        foreach ($gestiones as $gestion) {
-            $clienteId = $gestion['cliente_id'];
-            if (!isset($gestiones_por_cliente[$clienteId])) {
-                $gestiones_por_cliente[$clienteId] = 0;
-            }
-            $gestiones_por_cliente[$clienteId]++;
-        }
-        
-        require __DIR__ . '/../views/asesor_progreso.php';
-    }
-
     public function tareas() {
-        $page_title = "Tareas del Coordinador";
-        $coordinador_id = $_SESSION['user_id'];
-        $cargas = $this->clienteModel->getCargasByCoordinador($coordinador_id, true); // Solo bases habilitadas
-        $asesores = $this->usuarioModel->getAsesoresByCoordinador($coordinador_id);
-        
-        // Calcular estadísticas para cada carga
-        $cargas_con_stats = [];
-        foreach ($cargas as $carga) {
-            $carga['total_clientes'] = $this->clienteModel->getTotalClientsByCargaIdAndCoordinador($carga['id'], $coordinador_id);
-            $carga['clientes_asignados'] = $this->clienteModel->getTotalClientsAsignadosByCargaIdAndCoordinador($carga['id'], $coordinador_id);
-            $carga['clientes_pendientes'] = $carga['total_clientes'] - $carga['clientes_asignados'];
-            $cargas_con_stats[] = $carga;
-        }
-        $cargas = $cargas_con_stats;
-        
-        // Calcular clientes asignados por asesor para cada carga
-        $asesores_con_clientes = [];
-        foreach ($asesores as $asesor) {
-            $asesor['clientes_por_carga'] = [];
-            foreach ($cargas as $carga) {
-                $asesor['clientes_por_carga'][$carga['id']] = $this->clienteModel->getTotalClientsByAsesorAndCarga($asesor['id'], $carga['id'], $coordinador_id);
-            }
-            $asesores_con_clientes[] = $asesor;
-        }
-        $asesores = $asesores_con_clientes;
-        
-        require __DIR__ . '/../views/tareas_coordinador.php';
+        header('Location: index.php?action=gestionar_tareas');
+        exit;
     }
 
     public function asignarClientes() {
         $cargaId = $this->getPost('carga_id');
         $cargaId = $this->validarId($cargaId, 'carga');
         $coordinador_id = $_SESSION['user_id'];
+        $redirectAsignar = "index.php?action=asignar_clientes&carga_id=" . $cargaId;
         
         // Verificar que la carga pertenezca al coordinador
         $carga = $this->cargaExcelModel->getCargaByIdAndCoordinador($cargaId, $coordinador_id);
         if (!$carga) {
             $_SESSION['error_message'] = "No tienes acceso a esta carga o no existe.";
-            header("Location: index.php?action=tareas_coordinador");
+            header("Location: index.php?action=list_cargas");
             exit;
         }
         
@@ -1564,7 +1498,7 @@ class CoordinadorController extends BaseController {
         
         if (empty($clientes)) {
             $_SESSION['error_message'] = "No hay clientes disponibles para asignar.";
-            header("Location: index.php?action=tareas_coordinador");
+            header("Location: " . $redirectAsignar);
             exit;
         }
 
@@ -1593,7 +1527,7 @@ class CoordinadorController extends BaseController {
             $_SESSION['error_message'] = "No se pudo asignar ningún cliente.";
         }
         
-        header("Location: index.php?action=tareas_coordinador");
+        header("Location: " . $redirectAsignar);
         exit;
     }
 
@@ -1601,19 +1535,20 @@ class CoordinadorController extends BaseController {
         $cargaId = $this->getPost('carga_id');
         $cargaId = $this->validarId($cargaId, 'carga');
         $coordinador_id = $_SESSION['user_id'];
+        $redirectAsignar = "index.php?action=asignar_clientes&carga_id=" . $cargaId;
         
         // Verificar que la carga pertenezca al coordinador
         $carga = $this->cargaExcelModel->getCargaByIdAndCoordinador($cargaId, $coordinador_id);
         if (!$carga) {
             $_SESSION['error_message'] = "No tienes acceso a esta carga o no existe.";
-            header("Location: index.php?action=tareas_coordinador");
+            header("Location: index.php?action=list_cargas");
             exit;
         }
         
         $asesores = $this->usuarioModel->getAsesoresByCoordinador($coordinador_id);
         if (empty($asesores)) {
             $_SESSION['error_message'] = "No tienes asesores asignados. Contacta al administrador.";
-            header("Location: index.php?action=tareas_coordinador");
+            header("Location: " . $redirectAsignar);
             exit;
         }
         
@@ -1627,7 +1562,7 @@ class CoordinadorController extends BaseController {
             $index++;
         }
         $_SESSION['success_message'] = "Clientes asignados automáticamente.";
-        header("Location: index.php?action=tareas_coordinador");
+        header("Location: " . $redirectAsignar);
         exit;
     }
     
@@ -1635,69 +1570,16 @@ class CoordinadorController extends BaseController {
      * Gestiona la asignación de asesores al coordinador
      */
     public function gestionarAsesores() {
-        $page_title = "Gestión de Asesores";
-        $coordinador_id = $_SESSION['user_id'];
-
-        $asesoresAsignados = $this->usuarioModel->getAsesoresByCoordinador($coordinador_id);
-        $campanas = $this->campanaModel->getCampanasByCoordinador($coordinador_id);
-        $soloLectura = true;
-
-        require __DIR__ . '/../views/coordinador_gestionar_asesores.php';
+        header('Location: index.php?action=gestionar_tareas');
+        exit;
     }
     
     /**
      * Gestiona el traspaso de clientes entre asesores
      */
     public function gestionarTraspasos() {
-        $page_title = "Gestión de Traspasos de Clientes";
-        $coordinador_id = $_SESSION['user_id'];
-        
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            if (isset($_POST['action'])) {
-                try {
-                    switch ($_POST['action']) {
-                        case 'traspasar':
-                            if (isset($_POST['cliente_id']) && isset($_POST['nuevo_asesor_id']) && isset($_POST['asesor_origen_id'])) {
-                                $clienteId = $this->validarId($_POST['cliente_id'], 'cliente');
-                                $nuevoAsesorId = $this->validarId($_POST['nuevo_asesor_id'], 'nuevo asesor');
-                                $asesorOrigenId = $this->validarId($_POST['asesor_origen_id'], 'asesor origen');
-                                
-                                $this->clienteModel->traspasarCliente($clienteId, $nuevoAsesorId, $asesorOrigenId);
-                                $_SESSION['success_message'] = "Cliente traspasado correctamente.";
-                            }
-                            break;
-                            
-                        case 'liberar':
-                            if (isset($_POST['cliente_id']) && isset($_POST['asesor_id'])) {
-                                $clienteId = $this->validarId($_POST['cliente_id'], 'cliente');
-                                $asesorId = $this->validarId($_POST['asesor_id'], 'asesor');
-                                
-                                $this->clienteModel->liberarCliente($clienteId, $asesorId);
-                                $_SESSION['success_message'] = "Cliente liberado correctamente.";
-                            }
-                            break;
-                    }
-                } catch (Exception $e) {
-                    $_SESSION['error_message'] = "Error: " . $e->getMessage();
-                }
-                header("Location: index.php?action=gestionar_traspasos");
-                exit;
-            }
-        }
-        
-        // Obtener asesores del coordinador
-        $asesores = $this->usuarioModel->getAsesoresByCoordinador($coordinador_id);
-        
-        // Obtener clientes de cada asesor
-        $clientesPorAsesor = [];
-        foreach ($asesores as $asesor) {
-            $clientesPorAsesor[$asesor['id']] = [
-                'asesor' => $asesor,
-                'clientes' => $this->clienteModel->getClientesByAsesor($asesor['id'])
-            ];
-        }
-        
-        require __DIR__ . '/../views/coordinador_gestionar_traspasos.php';
+        header('Location: index.php?action=gestionar_tareas');
+        exit;
     }
     
     /**
@@ -1712,7 +1594,7 @@ class CoordinadorController extends BaseController {
         
         if (!$cliente) {
             $_SESSION['error_message'] = "No tienes acceso a este cliente o no existe.";
-            header("Location: index.php?action=tareas_coordinador");
+            header("Location: index.php?action=resultados_equipo");
             exit;
         }
         
@@ -1740,7 +1622,7 @@ class CoordinadorController extends BaseController {
         
         if (!$cliente) {
             $_SESSION['error_message'] = "No tienes acceso a este cliente o no existe.";
-            header("Location: index.php?action=tareas_coordinador");
+            header("Location: index.php?action=resultados_equipo");
             exit;
         }
         
@@ -1748,7 +1630,7 @@ class CoordinadorController extends BaseController {
         $asesor = $this->usuarioModel->getUsuarioById($asesorId);
         if (!$asesor || $asesor['rol'] !== 'asesor') {
             $_SESSION['error_message'] = "El asesor especificado no existe o no es válido.";
-            header("Location: index.php?action=tareas_coordinador");
+            header("Location: index.php?action=resultados_equipo");
             exit;
         }
         
@@ -1825,7 +1707,7 @@ class CoordinadorController extends BaseController {
         $asesor = $this->usuarioModel->getUsuarioById($asesorId);
         if (!$asesor || !$this->usuarioModel->isAsesorAsignadoACoordinador($asesorId, $coordinador_id)) {
             $_SESSION['error_message'] = "No tienes acceso a este asesor.";
-            header('Location: index.php?action=tareas_coordinador');
+            header('Location: index.php?action=gestionar_tareas');
             exit;
         }
         
@@ -4869,6 +4751,7 @@ class CoordinadorController extends BaseController {
 
         // Filtros (gestión)
         $solo_no_gestionados = isset($_POST['solo_no_gestionados']) ? (int)$_POST['solo_no_gestionados'] : 1;
+        $incluir_en_tareas_pendientes = isset($_POST['incluir_en_tareas_pendientes']) ? (int)$_POST['incluir_en_tareas_pendientes'] : 0;
         $forma_contacto = isset($_POST['forma_contacto']) ? trim((string)$_POST['forma_contacto']) : '';
         $tipo_contacto = isset($_POST['tipo_contacto']) ? trim((string)$_POST['tipo_contacto']) : '';
         $resultado_contacto = isset($_POST['resultado_contacto']) ? trim((string)$_POST['resultado_contacto']) : '';
@@ -4928,6 +4811,7 @@ class CoordinadorController extends BaseController {
             'mora_max' => $mora_max,
             'franja' => $franja,
             'solo_no_gestionados' => $solo_no_gestionados ? 1 : 0,
+            'incluir_en_tareas_pendientes' => $incluir_en_tareas_pendientes ? 1 : 0,
             'forma_contacto' => $forma_contacto,
             'tipo_contacto' => $tipo_contacto,
             'resultado_contacto' => $resultado_contacto,
@@ -4991,12 +4875,40 @@ class CoordinadorController extends BaseController {
         // #endregion
 
         if ($tarea_id) {
-            $_SESSION['success_message'] = "Tarea creada exitosamente. Se asignaron {$cantidad_clientes} clientes no gestionados al asesor.";
+            $nAsignados = is_array($datos['cliente_ids'] ?? null) ? count($datos['cliente_ids']) : $cantidad_clientes;
+            $_SESSION['success_message'] = "Tarea creada exitosamente. Se asignaron {$nAsignados} clientes al asesor.";
         } else {
             $_SESSION['error_message'] = 'Error al crear la tarea';
         }
 
         header('Location: index.php?action=gestionar_tareas');
+        exit;
+    }
+
+    /**
+     * Eliminar tarea (cascade detalle_tareas). Solo el coordinador dueño.
+     */
+    public function eliminarTarea() {
+        if (ob_get_level()) ob_clean();
+        header('Content-Type: application/json; charset=UTF-8');
+
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            echo json_encode(['success' => false, 'error' => 'Método no permitido']);
+            exit;
+        }
+
+        $tarea_id = (int)($_POST['tarea_id'] ?? 0);
+        $coordinador_id = (string)($_SESSION['user_id'] ?? '');
+        if ($tarea_id <= 0 || $coordinador_id === '') {
+            echo json_encode(['success' => false, 'error' => 'Datos inválidos']);
+            exit;
+        }
+
+        $ok = $this->tareaModel->eliminarTarea($tarea_id, $coordinador_id);
+        echo json_encode($ok
+            ? ['success' => true, 'message' => 'Tarea eliminada']
+            : ['success' => false, 'error' => 'No se pudo eliminar la tarea']
+        );
         exit;
     }
 
@@ -5489,18 +5401,22 @@ class CoordinadorController extends BaseController {
                 'mora_max' => isset($_GET['mora_max']) && $_GET['mora_max'] !== '' ? (int)$_GET['mora_max'] : null,
                 'franja' => isset($_GET['franja']) ? trim((string)$_GET['franja']) : '',
                 'solo_no_gestionados' => isset($_GET['solo_no_gestionados']) ? (int)$_GET['solo_no_gestionados'] : 1,
+                'incluir_en_tareas_pendientes' => isset($_GET['incluir_en_tareas_pendientes']) ? (int)$_GET['incluir_en_tareas_pendientes'] : 0,
                 'forma_contacto' => isset($_GET['forma_contacto']) ? trim((string)$_GET['forma_contacto']) : '',
                 'tipo_contacto' => isset($_GET['tipo_contacto']) ? trim((string)$_GET['tipo_contacto']) : '',
                 'resultado_contacto' => isset($_GET['resultado_contacto']) ? trim((string)$_GET['resultado_contacto']) : '',
                 'razon_especifica' => isset($_GET['razon_especifica']) ? trim((string)$_GET['razon_especifica']) : '',
             ];
             $totalFiltrados = $this->contarClientesFiltradosBase((int)$carga_id, $filtros);
+            $ocupados = $this->tareaModel->obtenerClientesAsignadosOcupados((int)$carga_id);
             
             echo json_encode([
                 'success' => true,
                 'total_clientes' => (int)($estadisticas['total_clientes'] ?? 0),
                 'total_no_gestionados' => (int)($estadisticas['total_no_gestionados'] ?? 0),
-                'total_filtrados' => (int)$totalFiltrados
+                'total_filtrados' => (int)$totalFiltrados,
+                'clientes_ocupados_tareas' => count($ocupados),
+                'clientes_disponibles' => (int)$totalFiltrados,
             ]);
             exit;
         } catch (Exception $e) {
@@ -5558,22 +5474,18 @@ class CoordinadorController extends BaseController {
             exit;
         }
 
-        // Verificar que la tarea pertenece al coordinador
-        $tareas = $this->getTareasByCoordinador($coordinador_id);
-        $tarea_existe = false;
-        foreach ($tareas as $tarea) {
-            if ($tarea['id'] == $tarea_id) {
-                $tarea_existe = true;
-                break;
-            }
-        }
-
-        if (!$tarea_existe) {
+        // Verificar ownership con modelo (handoff)
+        $tarea = $this->tareaModel->getTareaByIdAndCoordinador((int)$tarea_id, (string)$coordinador_id);
+        if (!$tarea) {
             echo json_encode(['error' => 'No tienes permisos para modificar esta tarea']);
             exit;
         }
 
-        $resultado = $this->tareaModel->actualizarEstadoTarea($tarea_id, $nuevo_estado, $coordinador_id);
+        if (in_array((string)$nuevo_estado, ['completada', 'completa'], true)) {
+            $resultado = $this->tareaModel->completarTarea((int)$tarea_id, (string)$coordinador_id);
+        } else {
+            $resultado = $this->tareaModel->actualizarEstadoTarea($tarea_id, $nuevo_estado, $coordinador_id);
+        }
 
         if ($resultado) {
             echo json_encode(['success' => true, 'message' => 'Estado actualizado correctamente']);
@@ -5687,6 +5599,20 @@ class CoordinadorController extends BaseController {
         $soloNoGestionados = (int)($filtros['solo_no_gestionados'] ?? 1) === 1;
         if ($soloNoGestionados) {
             $wheres[] = "NOT EXISTS (SELECT 1 FROM historial_gestiones hg0 WHERE hg0.cliente_id = c.id_cliente)";
+        }
+
+        // Por defecto excluir clientes ocupados en tareas activas (handoff).
+        // CSV no usa este builder; el flag incluir_en_tareas_pendientes los incluye.
+        $incluirOcupados = (int)($filtros['incluir_en_tareas_pendientes'] ?? 0) === 1;
+        if (!$incluirOcupados) {
+            $wheres[] = "NOT EXISTS (
+                SELECT 1
+                FROM detalle_tareas dt
+                INNER JOIN tareas t ON t.id_tarea = dt.tarea_id
+                WHERE dt.cliente_id = c.id_cliente
+                  AND t.base_id = c.base_id
+                  AND t.estado IN ('pendiente', 'en progreso')
+            )";
         }
 
         // Obligaciones (si hay algún filtro de obligaciones, debe existir al menos una obligación que cumpla)

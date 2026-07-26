@@ -1435,23 +1435,28 @@
         <!-- Estadísticas Principales -->
         <div class="stats-grid-main fade-in">
             <div class="stat-card-main">
-                <div class="stat-number-main"><?php echo $total_asesores ?? 0; ?></div>
-                <div class="stat-label-main">Total Asesores</div>
+                <div class="stat-number-main"><?php echo (int)($total_asesores ?? 0); ?></div>
+                <div class="stat-label-main">Asesores</div>
             </div>
             
             <div class="stat-card-main">
-                <div class="stat-number-main"><?php echo $total_clientes ?? 0; ?></div>
-                <div class="stat-label-main">Total Clientes</div>
+                <div class="stat-number-main"><?php echo number_format((int)($total_gestiones_mes ?? 0), 0, ',', '.'); ?></div>
+                <div class="stat-label-main">Gestiones</div>
+                <div style="color:#94a3b8;font-size:0.8rem;margin-top:6px;">mes <?php echo date('m/Y'); ?></div>
             </div>
             
             <div class="stat-card-main">
-                <div class="stat-number-main"><?php echo $total_llamadas ?? 0; ?></div>
-                <div class="stat-label-main">Total Llamadas</div>
+                <div class="stat-number-main"><?php echo number_format((int)($total_acuerdos_mes ?? 0), 0, ',', '.'); ?></div>
+                <div class="stat-label-main">Acuerdos</div>
+                <div style="color:#94a3b8;font-size:0.8rem;margin-top:6px;">mes <?php echo date('m/Y'); ?></div>
             </div>
             
             <div class="stat-card-main">
-                <div class="stat-number-main"><?php echo $total_ventas ?? 0; ?></div>
-                <div class="stat-label-main">Total Ventas</div>
+                <div class="stat-number-main" style="font-size:1.7rem;">
+                    $<?php echo number_format((float)($total_recaudo_mes ?? 0), 0, ',', '.'); ?>
+                </div>
+                <div class="stat-label-main">Recaudo</div>
+                <div style="color:#94a3b8;font-size:0.8rem;margin-top:6px;">mes <?php echo date('m/Y'); ?></div>
             </div>
         </div>
         
@@ -1479,7 +1484,7 @@
         <div class="search-filters-section fade-in">
             <h3 style="margin-bottom: 8px; color: #1f2937; text-align: center;">👥 Gestión de Asesores</h3>
             <p style="text-align: center; color: #6b7280; margin-bottom: 20px; font-size: 0.95rem;">
-                Total clientes, gestiones y contactos efectivos corresponden al mes actual
+                Gestiones, contactos efectivos y acuerdos corresponden al mes actual
                 (<?php echo date('m/Y'); ?>)
             </p>
             
@@ -1490,9 +1495,9 @@
                             <tr>
                                 <th>Asesor</th>
                                 <th>Estado<br><small style="font-weight:500;text-transform:none;letter-spacing:0;">(en vivo)</small></th>
-                                <th>Total Clientes<br><small style="font-weight:500;text-transform:none;letter-spacing:0;">(mes)</small></th>
                                 <th>Gestiones<br><small style="font-weight:500;text-transform:none;letter-spacing:0;">(mes)</small></th>
                                 <th>Contactos Efectivos<br><small style="font-weight:500;text-transform:none;letter-spacing:0;">(mes)</small></th>
+                                <th>Acuerdos<br><small style="font-weight:500;text-transform:none;letter-spacing:0;">(mes)</small></th>
                                 <th>Tareas/Actividad</th>
                             </tr>
                         </thead>
@@ -1512,9 +1517,9 @@
                                             Actualizando...
                                         </span>
                                     </td>
-                                    <td class="text-center"><?php echo (int)($asesor['total_clientes'] ?? 0); ?></td>
                                     <td class="text-center"><?php echo (int)($asesor['llamadas_realizadas'] ?? 0); ?></td>
                                     <td class="text-center"><?php echo (int)(($asesor['contactos_efectivos'] ?? (($asesor['metricas'] ?? [])['contactos_efectivos'] ?? 0))); ?></td>
+                                    <td class="text-center"><?php echo (int)($asesor['acuerdos_mes'] ?? ($asesor['ventas_realizadas'] ?? 0)); ?></td>
                                     <td class="text-center">
                                         <?php if (($asesor['tareas_pendientes'] ?? 0) > 0): ?>
                                             <div style="background: #fef3c7; padding: 8px; border-radius: 6px; border-left: 4px solid #f59e0b;">
@@ -1593,7 +1598,7 @@
                     <div class="action-icon">⚡</div>
                     <div class="action-title">Gestionar Tareas</div>
                     <div class="action-description">Supervisa y gestiona las tareas del equipo</div>
-                    <a href="index.php?action=tareas_coordinador" class="btn btn-success">
+                    <a href="index.php?action=gestionar_tareas" class="btn btn-success">
                         Gestionar
                     </a>
                 </div>

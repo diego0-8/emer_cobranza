@@ -18,7 +18,7 @@ $cargas = isset($cargas) && is_array($cargas) ? $cargas : [];
 <body>
     <?php 
     require_once __DIR__ . '/shared_navbar.php';
-    echo getNavbar('Gestión de Tareas', $_SESSION['user_role'] ?? ''); 
+    echo getNavbar('Tareas', $_SESSION['user_role'] ?? ''); 
     ?>
     
     <div class="main-container">
@@ -142,22 +142,28 @@ $cargas = isset($cargas) && is_array($cargas) ? $cargas : [];
                         <div class="tarea-item">
                             <div class="tarea-header">
                                 <div class="tarea-info">
-                                    <h4>Tarea de <?php echo htmlspecialchars($tarea['asesor_nombre'] ?? ''); ?></h4>
+                                    <h4><?php echo htmlspecialchars($tarea['nombre_tarea'] ?? ('Tarea de ' . ($tarea['asesor_nombre'] ?? ''))); ?></h4>
                                     <div class="tarea-meta">
                                         <span class="badge badge-<?php echo $tarea['estado'] === 'completada' ? 'success' : ($tarea['estado'] === 'en_proceso' ? 'warning' : 'secondary'); ?>">
-                                            <?php echo ucfirst($tarea['estado']); ?>
+                                            <?php echo ucfirst(str_replace('_', ' ', (string)($tarea['estado'] ?? ''))); ?>
+                                        </span>
+                                        <span style="margin-left:8px;color:#6b7280;font-size:0.9rem;">
+                                            Asesor: <?php echo htmlspecialchars($tarea['asesor_nombre'] ?? ''); ?>
                                         </span>
                                     </div>
                                 </div>
                                 <div class="tarea-actions">
-                                    <button class="btn btn-sm btn-outline-primary" onclick="verDetallesTarea(<?php echo $tarea['id']; ?>)">
+                                    <button class="btn btn-sm btn-outline-primary" onclick="verDetallesTarea(<?php echo (int)$tarea['id']; ?>)">
                                         <i class="fas fa-eye"></i> Ver Detalles
                                     </button>
                                     <?php if ($tarea['estado'] !== 'completada'): ?>
-                                        <button class="btn btn-sm btn-success" onclick="marcarCompletada(<?php echo $tarea['id']; ?>)">
+                                        <button class="btn btn-sm btn-success" onclick="marcarCompletada(<?php echo (int)$tarea['id']; ?>)">
                                             <i class="fas fa-check"></i> Completar
                                         </button>
                                     <?php endif; ?>
+                                    <button class="btn btn-sm btn-outline-danger" onclick="eliminarTarea(<?php echo (int)$tarea['id']; ?>)">
+                                        <i class="fas fa-trash"></i> Eliminar
+                                    </button>
                                 </div>
                             </div>
                             <div class="tarea-body">
@@ -260,8 +266,12 @@ $cargas = isset($cargas) && is_array($cargas) ? $cargas : [];
                                 <input type="checkbox" id="solo_no_gestionados" name="solo_no_gestionados" value="1" checked>
                                 <span>Solo clientes sin gestiones (no gestionados)</span>
                             </label>
+                            <label style="display:flex; align-items:center; gap:8px; margin:10px 0 0;">
+                                <input type="checkbox" id="incluir_en_tareas_pendientes" name="incluir_en_tareas_pendientes" value="1">
+                                <span>Incluir clientes ya ocupados en tareas pendientes/en progreso</span>
+                            </label>
                             <small class="form-text text-muted" style="margin-top:6px;">
-                                Si desmarcas esta opción, podrás filtrar por forma/tipo/resultado/razón y se incluirán clientes con historial.
+                                Por defecto se excluyen clientes ocupados en tareas activas. El CSV no aplica esta exclusión.
                             </small>
                         </div>
                         <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px;">
@@ -466,6 +476,7 @@ $cargas = isset($cargas) && is_array($cargas) ? $cargas : [];
             const getVal = (id) => (document.getElementById(id)?.value ?? '').toString().trim();
             const cargaId = getVal('carga_id');
             const soloNoGestionados = document.getElementById('solo_no_gestionados')?.checked ? '1' : '0';
+            const incluirOcupados = document.getElementById('incluir_en_tareas_pendientes')?.checked ? '1' : '0';
 
             const params = new URLSearchParams();
             if (cargaId) params.set('carga_id', cargaId);
@@ -478,6 +489,7 @@ $cargas = isset($cargas) && is_array($cargas) ? $cargas : [];
 
             // Gestión
             params.set('solo_no_gestionados', soloNoGestionados);
+            params.set('incluir_en_tareas_pendientes', incluirOcupados);
             ['forma_contacto','tipo_contacto','resultado_contacto','razon_especifica'].forEach(k => {
                 const v = getVal(k);
                 if (v !== '') params.set(k, v);
@@ -504,13 +516,14 @@ $cargas = isset($cargas) && is_array($cargas) ? $cargas : [];
                         const totalFiltrados = Number(data.total_filtrados ?? 0);
                         const totalNoGestionados = Number(data.total_no_gestionados ?? 0);
                         const totalClientes = Number(data.total_clientes ?? 0);
+                        const ocupados = Number(data.clientes_ocupados_tareas ?? 0);
 
                         const soloNoGest = document.getElementById('solo_no_gestionados')?.checked;
                         const baseMsg = soloNoGest
                             ? `No gestionados: ${totalNoGestionados} de ${totalClientes} clientes`
                             : `Clientes en base: ${totalClientes}`;
 
-                        clientesInfo.textContent = `${baseMsg} | Total con filtro: ${totalFiltrados}`;
+                        clientesInfo.textContent = `${baseMsg} | Disponibles con filtro: ${totalFiltrados} | Ocupados en tareas activas: ${ocupados}`;
                         const inputCant = document.getElementById('cantidad_clientes');
                         if (inputCant) inputCant.max = Math.max(0, totalFiltrados);
                     })
@@ -586,6 +599,30 @@ $cargas = isset($cargas) && is_array($cargas) ? $cargas : [];
         });
         const chk = document.getElementById('solo_no_gestionados');
         if (chk) chk.addEventListener('change', actualizarConteoFiltrado);
+        const chkOcup = document.getElementById('incluir_en_tareas_pendientes');
+        if (chkOcup) chkOcup.addEventListener('change', actualizarConteoFiltrado);
+
+        function eliminarTarea(tareaId) {
+            if (!confirm('¿Eliminar esta tarea? Se liberarán los clientes asociados.')) return;
+            fetch('index.php?action=eliminar_tarea', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `tarea_id=${encodeURIComponent(tareaId)}`,
+                credentials: 'same-origin'
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data && data.success) {
+                    window.location.reload();
+                } else {
+                    alert('Error: ' + (data.error || data.message || 'No se pudo eliminar'));
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                alert('Error al eliminar la tarea');
+            });
+        }
 
         function verDetallesTarea(tareaId) {
             const container = document.getElementById('detalles-tarea-content');
