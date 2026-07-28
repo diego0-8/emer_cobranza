@@ -27,7 +27,7 @@ $basePath = $basePath ?? '';
     <?php require_once 'shared_styles.php'; ?>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="assets/css/softphone-web.css">
-    <link rel="stylesheet" href="assets/css/whatsapp-panel.css?v=3">
+    <link rel="stylesheet" href="assets/css/whatsapp-panel.css?v=10">
     <script>
         // Contexto global para que el softphone pueda registrar call_log incluso si se marca desde el dialpad.
         window.__callLogContext = {
@@ -37,7 +37,10 @@ $basePath = $basePath ?? '';
         window.__waConfig = {
             clienteId: <?php echo (int)($cliente['id'] ?? $cliente['id_cliente'] ?? 0); ?>,
             waId: <?php echo (int)($_GET['wa'] ?? 0); ?>,
-            pollMs: 5000
+            claim: <?php echo !empty($_GET['claim']) || !empty($_GET['wa']) ? 'true' : 'false'; ?>,
+            pollMs: 5000,
+            clienteNombre: <?php echo json_encode((string)($cliente['nombre'] ?? ''), JSON_UNESCAPED_UNICODE); ?>,
+            clienteCedula: <?php echo json_encode((string)($cliente['cedula'] ?? ''), JSON_UNESCAPED_UNICODE); ?>
         };
     </script>
     <style>
@@ -2120,11 +2123,11 @@ $basePath = $basePath ?? '';
 </head>
 <body>
     <?php 
-    require_once 'shared_navbar.php';
-    echo getNavbar('Gestión de Cliente', $_SESSION['user_role'] ?? '');
+    require_once __DIR__ . '/shared_navbar.php';
+    includeNavbar('Gestión de Cliente', $_SESSION['user_role'] ?? '');
     ?>
 
-    <!-- Rail de burbujas WhatsApp (máx. 10) -->
+    <!-- Rail de burbujas WhatsApp (máx. 10) — también lo crea whatsapp-bubbles.js global -->
     <div id="waBubbleRail" aria-label="Chats WhatsApp"></div>
     
     <div class="gestion-container">
@@ -2886,11 +2889,21 @@ $basePath = $basePath ?? '';
                             <select id="waPhoneSelect" aria-label="Número del perfil"></select>
                             <span class="wa-activo-badge desconocido" id="waActivoBadge" title="Estado WhatsApp">?</span>
                         </div>
+                        <div class="wa-template-row" id="waTemplateRow">
+                            <label for="waTemplateSelect"><i class="fas fa-file-alt"></i> Iniciar con plantilla</label>
+                            <select id="waTemplateSelect" aria-label="Plantilla WhatsApp">
+                                <option value="">Cargando plantillas…</option>
+                            </select>
+                            <button type="button" id="waTemplateSend" class="wa-tpl-send" title="Enviar plantilla aprobada" disabled>
+                                <i class="fas fa-paper-plane"></i> Enviar plantilla
+                            </button>
+                        </div>
+                        <div class="wa-template-preview" id="waTemplatePreview" hidden></div>
                         <div class="wa-thread" id="waThread">
                             <div class="wa-empty">Cargando conversación…</div>
                         </div>
                         <div class="wa-compose">
-                            <textarea id="waComposeInput" rows="2" placeholder="Escribe un mensaje…" maxlength="4000"></textarea>
+                            <textarea id="waComposeInput" rows="2" placeholder="Escribe un mensaje… (solo si el cliente ya escribió / ventana 24h)" maxlength="4000"></textarea>
                             <button type="button" id="waComposeSend" title="Enviar">
                                 <i class="fas fa-paper-plane"></i>
                             </button>
@@ -4406,10 +4419,10 @@ $basePath = $basePath ?? '';
                         return;
                     }
                     
-                    // Esperar 300ms antes de buscar (debounce)
+                    // Esperar 400ms antes de buscar (debounce)
                     timeoutBuscador = setTimeout(function() {
                         buscarClientes(termino);
-                    }, 300);
+                    }, 400);
                 });
                 
                 // Mostrar resultados al hacer focus si hay término
@@ -5267,7 +5280,7 @@ $basePath = $basePath ?? '';
     </script>
     <?php endif; ?>
 
-    <script src="assets/js/whatsapp-panel.js?v=3"></script>
+    <script src="assets/js/whatsapp-panel.js?v=10"></script>
 
 </body>
 </html>

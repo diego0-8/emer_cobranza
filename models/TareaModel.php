@@ -428,6 +428,7 @@ class TareaModel {
 
     /**
      * Buscar clientes por término (nombre/cedula/teléfono) dentro de las bases asignadas al asesor.
+     * Optimizado: evita OR multi-columna (causaba ~9s de full scan) y usa índices / FULLTEXT.
      */
     public function buscarClientesPorTermino($asesorCedula, $termino, $limit = 20) {
         $bases = $this->getBasesAsignadasByAsesor($asesorCedula);
@@ -439,44 +440,14 @@ class TareaModel {
             return [];
         }
 
-        $limit = max(1, min(200, (int)$limit));
+        $limit = max(1, min(50, (int)$limit));
         $termino = trim((string)$termino);
-        if ($termino === '') return [];
-
-        $placeholders = implode(',', array_fill(0, count($baseIds), '?'));
-
-        // Buscar por cedula exacta si es numérico
-        if (ctype_digit($termino)) {
-            $sql = "
-                SELECT
-                    c.id_cliente as id,
-                    c.id_cliente,
-                    c.base_id as carga_excel_id,
-                    c.base_id,
-                    c.cedula,
-                    c.nombre,
-                    c.email,
-                    c.ciudad,
-                    c.tel1 as telefono,
-                    c.tel2 as celular2,
-                    c.estado as estado_cliente,
-                    b.nombre as nombre_cargue
-                FROM clientes c
-                JOIN base_clientes b ON c.base_id = b.id_base
-                WHERE c.base_id IN ($placeholders)
-                  AND (c.cedula = ? OR c.tel1 = ? OR c.tel2 = ? OR c.tel3 = ? OR c.tel4 = ?)
-                ORDER BY c.nombre ASC
-                LIMIT $limit
-            ";
-            $params = array_merge($baseIds, [$termino, $termino, $termino, $termino, $termino]);
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute($params);
-            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            if (!empty($rows)) return $rows;
+        if ($termino === '' || mb_strlen($termino) < 2) {
+            return [];
         }
 
-        $like = '%' . $termino . '%';
-        $sql = "
+        $placeholders = implode(',', array_fill(0, count($baseIds), '?'));
+        $select = "
             SELECT
                 c.id_cliente as id,
                 c.id_cliente,
@@ -492,21 +463,101 @@ class TareaModel {
                 b.nombre as nombre_cargue
             FROM clientes c
             JOIN base_clientes b ON c.base_id = b.id_base
-            WHERE c.base_id IN ($placeholders)
-              AND (
-                c.nombre LIKE ?
-                OR c.cedula LIKE ?
-                OR c.tel1 LIKE ?
-                OR c.tel2 LIKE ?
-                OR c.email LIKE ?
-              )
-            ORDER BY c.nombre ASC
-            LIMIT $limit
         ";
-        $params = array_merge($baseIds, [$like, $like, $like, $like, $like]);
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $seen = [];
+        $out = [];
+
+        $merge = static function (array $rows) use (&$seen, &$out, $limit): bool {
+            foreach ($rows as $row) {
+                $id = (int)($row['id_cliente'] ?? $row['id'] ?? 0);
+                if ($id <= 0 || isset($seen[$id])) {
+                    continue;
+                }
+                $seen[$id] = true;
+                $out[] = $row;
+                if (count($out) >= $limit) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        // 1) Cédula / teléfono exactos (usa índices; sin OR multi-columna)
+        $digits = preg_replace('/\D+/', '', $termino);
+        if ($digits !== '' && strlen($digits) >= 2) {
+            $sqlCed = $select . " WHERE c.base_id IN ($placeholders) AND c.cedula = ? ORDER BY c.nombre ASC LIMIT {$limit}";
+            $stmt = $this->pdo->prepare($sqlCed);
+            $stmt->execute(array_merge($baseIds, [$digits]));
+            if ($merge($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [])) {
+                return $out;
+            }
+            // También cédula tal cual (por si tiene formato)
+            if ($termino !== $digits) {
+                $stmt = $this->pdo->prepare($sqlCed);
+                $stmt->execute(array_merge($baseIds, [$termino]));
+                if ($merge($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [])) {
+                    return $out;
+                }
+            }
+
+            // Prefijo de cédula (índice idx_cliente_cedula_search) — evita LIKE '%x%'
+            if (strlen($digits) >= 3) {
+                $sqlPref = $select . " WHERE c.base_id IN ($placeholders) AND c.cedula LIKE ? ORDER BY c.nombre ASC LIMIT {$limit}";
+                $stmt = $this->pdo->prepare($sqlPref);
+                $stmt->execute(array_merge($baseIds, [$digits . '%']));
+                $merge($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+            }
+
+            // Teléfonos: solo números tipo celular (10+ dígitos). tel* no está indexado.
+            if (strlen($digits) >= 10 && count($out) < $limit) {
+                foreach (['tel1', 'tel2', 'tel3', 'tel4', 'tel5', 'tel6', 'tel7', 'tel8', 'tel9', 'tel10'] as $col) {
+                    $sqlTel = $select . " WHERE c.base_id IN ($placeholders) AND c.{$col} = ? ORDER BY c.nombre ASC LIMIT {$limit}";
+                    $stmt = $this->pdo->prepare($sqlTel);
+                    $stmt->execute(array_merge($baseIds, [$digits]));
+                    if ($merge($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [])) {
+                        return $out;
+                    }
+                }
+            }
+
+            // Solo dígitos: no caer a FULLTEXT/LIKE nombre (ya resolvimos por cédula)
+            if (ctype_digit($termino) || preg_match('/^\d[\d\s\-\.]+$/', $termino)) {
+                return $out;
+            }
+        }
+
+        // 2) Nombre: FULLTEXT si está disponible; si no, prefijo LIKE (sin % inicial)
+        try {
+            $ft = trim(preg_replace('/[^\p{L}\p{N}\s]+/u', ' ', $termino));
+            $ft = preg_replace('/\s+/', ' ', $ft);
+            if ($ft !== '') {
+                $bool = '+' . preg_replace('/\s+/', '* +', $ft) . '*';
+                $sqlFt = $select . "
+                    WHERE c.base_id IN ($placeholders)
+                      AND MATCH(c.nombre, c.cedula, c.tel1) AGAINST (? IN BOOLEAN MODE)
+                    ORDER BY c.nombre ASC
+                    LIMIT {$limit}";
+                $stmt = $this->pdo->prepare($sqlFt);
+                $stmt->execute(array_merge($baseIds, [$bool]));
+                if ($merge($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [])) {
+                    return $out;
+                }
+            }
+        } catch (Throwable $e) {
+            // FULLTEXT puede fallar si el índice no está; caer a LIKE prefijo
+        }
+
+        $sqlLike = $select . "
+            WHERE c.base_id IN ($placeholders)
+              AND c.nombre LIKE ?
+            ORDER BY c.nombre ASC
+            LIMIT {$limit}";
+        $stmt = $this->pdo->prepare($sqlLike);
+        $stmt->execute(array_merge($baseIds, [$termino . '%']));
+        $merge($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+
+        return $out;
     }
 
     public function getAsesoresCampanaByBase($baseId) {

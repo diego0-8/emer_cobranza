@@ -12,6 +12,22 @@ debug-*.log
 Thumbs.db
 Desktop.ini
 
-# Secretos Kommo / WhatsApp
+# Secretos Kommo / WhatsApp / Meta
 config/kommo.local.php
+config/meta.local.php
+*.env
+.env.*
 
+# No subir scripts locales / probes / benches
+scripts/
+
+# No subir dumps ni bases de datos
+*.sql.gz
+*.dump
+*.db
+*.sqlite
+*.sqlite3
+**/backups/
+**/database/
+**/dumps/
+uploads/

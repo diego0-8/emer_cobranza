@@ -9,7 +9,7 @@ if (session_status() === PHP_SESSION_NONE) {
     // Verificar que no se hayan enviado headers
     if (!headers_sent()) {
         // Establece un nombre de sesión único para este CRM
-        $session_name = "EMERCOBRANZAV3_SID";  // Nombre único para este CRM
+        $session_name = "EMERWATTSAP2_SID";  // Nombre único para este CRM
         session_name($session_name);
         
         ini_set('session.cookie_httponly', 1);
@@ -38,7 +38,7 @@ define('TMO_JORNADA_MAX_INACTIVIDAD_HORAS', 5);
 define('DB_HOST', 'localhost');
 define('DB_USER', 'root');
 define('DB_PASS', '');
-define('DB_NAME', 'emermedica_db');
+define('DB_NAME', 'emermedica_watt');
 
 // Configuración de errores
 error_reporting(E_ALL);

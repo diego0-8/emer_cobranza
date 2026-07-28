@@ -33,6 +33,7 @@ function getNavbar($currentPage = '', $userRole = '') {
                 'Inicio' => 'index.php?action=dashboard',
                 'Gestión' => 'index.php?action=ver_actividades',
                 'Campañas' => 'index.php?action=list_campanas',
+                'WhatsApp' => 'index.php?action=coord_whatsapp',
                 'Tareas' => 'index.php?action=ver_actividades',
                 'Localización' => 'index.php?action=ver_actividades',
                 'Registrar usuario' => 'index.php?action=crear_usuario',
@@ -46,6 +47,7 @@ function getNavbar($currentPage = '', $userRole = '') {
                 'Gestión' => 'index.php?action=list_cargas',
                 'Resultados' => $urlResultadosCoordinador,
                 'Tareas' => 'index.php?action=gestionar_tareas',
+                'WhatsApp' => 'index.php?action=coord_whatsapp',
                 'Llamadas' => 'index.php?action=coord_call',
                 'Reportes CSV' => 'index.php?action=reportes_exportacion',
                 'Reporte TMO' => 'index.php?action=reporte_tmo'
@@ -119,6 +121,25 @@ function renderPageHead($pageTitle = '') {
 if (!function_exists('includeNavbar')) {
 function includeNavbar($currentPage = '', $userRole = '') {
     echo getNavbar($currentPage, $userRole);
+
+    // Burbujas WhatsApp globales (solo asesor — claim y gestionar_cliente)
+    $role = $userRole !== '' ? $userRole : ($_SESSION['user_role'] ?? '');
+    $role = strtolower(trim((string)$role));
+    if ($role === 'cordinador') {
+        $role = 'coordinador';
+    }
+    if ($role === 'asesor') {
+        static $waGlobalInjected = false;
+        if (!$waGlobalInjected) {
+            $waGlobalInjected = true;
+            echo '<link rel="stylesheet" href="assets/css/whatsapp-panel.css?v=9">' . "\n";
+            echo '<script>window.__waGlobal=' . json_encode([
+                'role' => $role,
+                'pollMs' => 5000,
+            ], JSON_UNESCAPED_UNICODE) . ';</script>' . "\n";
+            echo '<script src="assets/js/whatsapp-bubbles.js?v=4"></script>' . "\n";
+        }
+    }
 }
 }
 ?>

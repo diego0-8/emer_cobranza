@@ -46,7 +46,8 @@ $accionesAPI = [
     'obtener_historial_completo',
     'obtener_estado_tiempo_asesores',
     'obtener_detalle_pausas_asesor_tmo',
-    // WhatsApp + Kommo
+    // WhatsApp (Meta Cloud API / fallback Kommo)
+    'wa_webhook',
     'wa_webhook_kommo',
     'wa_mis_chats',
     'wa_mensajes',
@@ -55,6 +56,18 @@ $accionesAPI = [
     'wa_emparejar',
     'wa_sin_cliente',
     'wa_estado',
+    'wa_media',
+    'wa_burbuja_dismiss',
+    'wa_burbuja_restore',
+    'wa_templates_list',
+    'wa_templates_crear',
+    'wa_templates_sync',
+    'wa_enviar_plantilla',
+    'wa_campana_preview_cedulas',
+    'wa_campana_crear',
+    'wa_campana_estado',
+    'wa_campana_list',
+    'wa_campana_procesar_lote',
 ];
 
 if (!in_array($action, $accionesExportacion) && !in_array($action, $accionesAPI)) {
@@ -113,7 +126,7 @@ $user_role = isset($_SESSION['user_role']) ? $_SESSION['user_role'] : '';
 
 // Control de sesión
 // Permitir acciones públicas sin sesión (login + procesamiento del login).
-$accionesPublicas = ['login', 'process_login', 'wa_webhook_kommo'];
+$accionesPublicas = ['login', 'process_login', 'wa_webhook', 'wa_webhook_kommo'];
 if (!isset($_SESSION['user_id']) && !in_array($action, $accionesPublicas, true)) {
     header('Location: index.php?action=login');
     exit;
@@ -394,6 +407,15 @@ switch ($action) {
         }
         break;
         
+    case 'coord_whatsapp':
+        $roleWa = $user_role === 'cordinador' ? 'coordinador' : $user_role;
+        if (!in_array($roleWa, ['coordinador', 'administrador'], true)) {
+            redirectToLogin();
+        }
+        $wa = new WhatsappController($pdo);
+        $wa->vistaCoordWhatsapp();
+        break;
+        
     // Acciones de asesor
     case 'mis_clientes':
     case 'mis_tareas':
@@ -596,7 +618,8 @@ switch ($action) {
         exit;
         break;
 
-    // WhatsApp + Kommo
+    // WhatsApp (Meta Cloud API / fallback Kommo)
+    case 'wa_webhook':
     case 'wa_webhook_kommo':
         $wa = new WhatsappController($pdo);
         $wa->webhookKommo();
@@ -628,6 +651,54 @@ switch ($action) {
     case 'wa_emparejar':
         $wa = new WhatsappController($pdo);
         $wa->emparejar();
+        break;
+    case 'wa_media':
+        $wa = new WhatsappController($pdo);
+        $wa->media();
+        break;
+    case 'wa_burbuja_dismiss':
+        $wa = new WhatsappController($pdo);
+        $wa->burbujaDismiss();
+        break;
+    case 'wa_burbuja_restore':
+        $wa = new WhatsappController($pdo);
+        $wa->burbujaRestore();
+        break;
+    case 'wa_templates_list':
+        $wa = new WhatsappController($pdo);
+        $wa->templatesList();
+        break;
+    case 'wa_templates_crear':
+        $wa = new WhatsappController($pdo);
+        $wa->templatesCrear();
+        break;
+    case 'wa_templates_sync':
+        $wa = new WhatsappController($pdo);
+        $wa->templatesSync();
+        break;
+    case 'wa_enviar_plantilla':
+        $wa = new WhatsappController($pdo);
+        $wa->enviarPlantilla();
+        break;
+    case 'wa_campana_preview_cedulas':
+        $wa = new WhatsappController($pdo);
+        $wa->campanaPreviewCedulas();
+        break;
+    case 'wa_campana_crear':
+        $wa = new WhatsappController($pdo);
+        $wa->campanaCrear();
+        break;
+    case 'wa_campana_estado':
+        $wa = new WhatsappController($pdo);
+        $wa->campanaEstado();
+        break;
+    case 'wa_campana_list':
+        $wa = new WhatsappController($pdo);
+        $wa->campanaList();
+        break;
+    case 'wa_campana_procesar_lote':
+        $wa = new WhatsappController($pdo);
+        $wa->campanaProcesarLote();
         break;
         
     default:

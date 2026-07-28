@@ -2049,43 +2049,21 @@ class AsesorController extends BaseController {
                 ]);
                 exit;
             }
-            
-            $agentLogPath = __DIR__ . '/../debug-a2fdce.log';
-            // #region agent log
-            @file_put_contents($agentLogPath, json_encode([
-                'sessionId' => 'a2fdce',
-                'runId' => 'pre-fix',
-                'hypothesisId' => 'H2',
-                'location' => 'controllers/AsesorController.php:buscarClientesPorTermino',
-                'message' => 'Buscar clientes por término en bases asignadas',
-                'data' => [
-                    'hasAsesorId' => $asesorId !== null && $asesorId !== '',
-                    'terminoLen' => strlen((string)$termino),
-                ],
-                'timestamp' => (int) round(microtime(true) * 1000),
-            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
-            // #endregion
 
+            // Liberar session lock para no congelar softphone/WA mientras busca
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                session_write_close();
+            }
+
+            $t0 = microtime(true);
             $clientes = $this->tareaModel->buscarClientesPorTermino($asesorId, $termino, 20);
-
-            // #region agent log
-            @file_put_contents($agentLogPath, json_encode([
-                'sessionId' => 'a2fdce',
-                'runId' => 'pre-fix',
-                'hypothesisId' => 'H2',
-                'location' => 'controllers/AsesorController.php:buscarClientesPorTermino',
-                'message' => 'Resultado búsqueda término',
-                'data' => [
-                    'resultCount' => is_array($clientes) ? count($clientes) : -1,
-                ],
-                'timestamp' => (int) round(microtime(true) * 1000),
-            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
-            // #endregion
+            $elapsedMs = (int) round((microtime(true) - $t0) * 1000);
             
             echo json_encode([
                 'success' => true,
                 'clientes' => $clientes,
-                'total' => count($clientes)
+                'total' => count($clientes),
+                'elapsed_ms' => $elapsedMs,
             ], JSON_UNESCAPED_UNICODE);
             exit;
             

@@ -1,5 +1,6 @@
 /**
- * Panel WhatsApp (espejo Kommo) — gestionar_cliente
+ * Panel WhatsApp (Meta Cloud API / fallback Kommo) — gestionar_cliente
+ * Init no bloqueante: no congela softphone/buscador.
  */
 (function () {
     'use strict';
@@ -13,6 +14,8 @@
     let lastMsgId = 0;
     let pollTimer = null;
     let sending = false;
+    let sendingTpl = false;
+    let templatesCache = [];
 
     const els = {};
 
@@ -41,7 +44,7 @@
     }
 
     async function apiGet(action, params) {
-        const q = new URLSearchParams(Object.assign({ action }, params || {}));
+        const q = new URLSearchParams(Object.assign({ action: action }, params || {}));
         const res = await fetch('index.php?' + q.toString(), {
             credentials: 'same-origin',
             headers: { Accept: 'application/json' },
@@ -82,35 +85,6 @@
         return data;
     }
 
-    function renderBubbles(chats, total, extra) {
-        if (!els.rail) return;
-        els.rail.innerHTML = '';
-        (chats || []).forEach(function (c) {
-            const a = document.createElement('a');
-            a.className = 'wa-bubble' + (Number(c.id) === Number(conversacionId) ? ' is-active' : '');
-            a.href = 'index.php?action=gestionar_cliente&id=' + encodeURIComponent(c.cliente_id) +
-                '&wa=' + encodeURIComponent(c.id);
-            a.title = (c.cliente_nombre || 'Cliente') + ' · ' + (c.telefono_e164 || '');
-            const initials = String(c.cliente_nombre || 'WA').trim().slice(0, 2).toUpperCase();
-            a.textContent = initials;
-            const n = Number(c.no_leidos || 0);
-            if (n > 0) {
-                const b = document.createElement('span');
-                b.className = 'wa-bubble-badge';
-                b.textContent = n > 99 ? '99+' : String(n);
-                a.appendChild(b);
-            }
-            els.rail.appendChild(a);
-        });
-        if (extra > 0) {
-            const more = document.createElement('div');
-            more.className = 'wa-bubble wa-bubble-more';
-            more.title = 'Otros chats: ' + extra;
-            more.textContent = '+' + extra;
-            els.rail.appendChild(more);
-        }
-    }
-
     function isImageMsg(m) {
         const t = String(m.tipo || '').toLowerCase();
         if (t === 'picture' || t === 'image' || t === 'sticker') return true;
@@ -118,40 +92,77 @@
         return /\.(png|jpe?g|gif|webp|bmp)$/.test(url);
     }
 
+    function isPdfMsg(m) {
+        const t = String(m.tipo || '').toLowerCase();
+        const url = String(m.media_url || '').toLowerCase().split('?')[0];
+        const name = String(m.media_name || '').toLowerCase();
+        return t === 'pdf' || /\.pdf$/.test(url) || /\.pdf$/.test(name);
+    }
+
+    function isAudioMsg(m) {
+        const t = String(m.tipo || '').toLowerCase();
+        if (t === 'voice' || t === 'audio' || t === 'ptt') return true;
+        const url = String(m.media_url || '').toLowerCase().split('?')[0];
+        const name = String(m.media_name || '').toLowerCase();
+        return /\.(ogg|mp3|opus|m4a|wav|aac|amr|oga)$/.test(url)
+            || /\.(ogg|mp3|opus|m4a|wav|aac|amr|oga)$/.test(name);
+    }
+
     function mediaIcon(m) {
         const t = String(m.tipo || '').toLowerCase();
         const url = String(m.media_url || '').toLowerCase().split('?')[0];
         if (t === 'video' || /\.(mp4|mov|3gp|webm)$/.test(url)) return 'fa-file-video';
-        if (t === 'voice' || t === 'audio' || /\.(ogg|mp3|opus|m4a|wav)$/.test(url)) return 'fa-file-audio';
-        if (/\.pdf$/.test(url)) return 'fa-file-pdf';
+        if (isAudioMsg(m)) return 'fa-file-audio';
+        if (isPdfMsg(m) || /\.pdf$/.test(url)) return 'fa-file-pdf';
         if (/\.(docx?|odt)$/.test(url)) return 'fa-file-word';
         if (/\.(xlsx?|csv|ods)$/.test(url)) return 'fa-file-excel';
         if (/\.(zip|rar|7z)$/.test(url)) return 'fa-file-archive';
         return 'fa-file';
     }
 
-    /**
-     * Devuelve el HTML del adjunto (imagen embebida o enlace descargable).
-     * Las imágenes abren lightbox de previsualización (no descargan al clic).
-     */
+    function mediaProxyUrl(m, fallbackUrl) {
+        const msgId = Number(m.id || 0);
+        return msgId > 0
+            ? ('index.php?action=wa_media&mensaje_id=' + msgId)
+            : fallbackUrl;
+    }
+
     function renderMediaHtml(m) {
         const url = String(m.media_url || '').trim();
         if (!url) return '';
         const safeUrl = escapeHtml(url);
         const name = String(m.media_name || '').trim();
         if (isImageMsg(m)) {
+            const label = name || 'imagen';
+            const previewUrl = mediaProxyUrl(m, url);
             return '<button type="button" class="wa-msg-media wa-msg-img" ' +
-                'data-wa-preview="' + safeUrl + '" ' +
-                'data-wa-name="' + escapeHtml(name || 'imagen') + '" ' +
-                'title="Ver imagen">' +
-                '<img src="' + safeUrl + '" alt="' + escapeHtml(name || 'imagen') + '" loading="lazy">' +
+                'data-wa-preview="' + escapeHtml(previewUrl) + '" data-wa-source="' + safeUrl + '" ' +
+                'data-wa-preview-type="image" data-wa-name="' + escapeHtml(label) + '" title="Ver imagen">' +
+                '<img src="' + escapeHtml(previewUrl) + '" alt="' + escapeHtml(label) + '" loading="lazy">' +
                 '</button>';
+        }
+        if (isAudioMsg(m)) {
+            const label = name || (String(m.tipo || '').toLowerCase() === 'voice' ? 'Nota de voz' : 'Audio');
+            const streamUrl = mediaProxyUrl(m, url);
+            return '<div class="wa-msg-media wa-msg-audio">' +
+                '<div class="wa-msg-audio-head"><i class="fas fa-microphone"></i><span>' +
+                escapeHtml(label) + '</span></div>' +
+                '<audio controls preload="none" controlsList="nodownload" src="' +
+                escapeHtml(streamUrl) + '">Tu navegador no reproduce audio.</audio></div>';
+        }
+        if (isPdfMsg(m)) {
+            const label = name || 'Documento PDF';
+            const previewUrl = mediaProxyUrl(m, url);
+            return '<button type="button" class="wa-msg-media wa-msg-file wa-msg-pdf" ' +
+                'data-wa-preview="' + escapeHtml(previewUrl) + '" data-wa-source="' + safeUrl + '" ' +
+                'data-wa-preview-type="pdf" data-wa-name="' + escapeHtml(label) + '" title="Previsualizar PDF">' +
+                '<i class="fas fa-file-pdf"></i><span>' + escapeHtml(label) + '</span>' +
+                '<em class="wa-msg-preview-hint">Ver</em></button>';
         }
         const label = name || 'Descargar archivo';
         return '<a class="wa-msg-media wa-msg-file" href="' + safeUrl +
             '" target="_blank" rel="noopener" title="' + escapeHtml(label) + '">' +
-            '<i class="fas ' + mediaIcon(m) + '"></i>' +
-            '<span>' + escapeHtml(label) + '</span></a>';
+            '<i class="fas ' + mediaIcon(m) + '"></i><span>' + escapeHtml(label) + '</span></a>';
     }
 
     function ensureLightbox() {
@@ -160,49 +171,54 @@
         box = document.createElement('div');
         box.id = 'waMediaLightbox';
         box.className = 'wa-lightbox';
-        box.setAttribute('role', 'dialog');
-        box.setAttribute('aria-modal', 'true');
-        box.setAttribute('aria-label', 'Previsualización de imagen');
         box.hidden = true;
         box.innerHTML =
             '<div class="wa-lightbox-backdrop" data-wa-lb-close></div>' +
             '<div class="wa-lightbox-dialog">' +
-            '  <button type="button" class="wa-lightbox-close" data-wa-lb-close title="Cerrar" aria-label="Cerrar">' +
-            '    <i class="fas fa-times"></i>' +
-            '  </button>' +
-            '  <img class="wa-lightbox-img" id="waLightboxImg" alt="Previsualización">' +
+            '  <button type="button" class="wa-lightbox-close" data-wa-lb-close aria-label="Cerrar"><i class="fas fa-times"></i></button>' +
+            '  <img class="wa-lightbox-img" id="waLightboxImg" alt="" hidden>' +
+            '  <iframe class="wa-lightbox-pdf" id="waLightboxPdf" title="PDF" hidden></iframe>' +
             '  <div class="wa-lightbox-bar">' +
             '    <span class="wa-lightbox-name" id="waLightboxName"></span>' +
-            '    <a class="wa-lightbox-download" id="waLightboxDownload" href="#" target="_blank" rel="noopener" download>' +
-            '      <i class="fas fa-download"></i> Descargar' +
-            '    </a>' +
+            '    <a class="wa-lightbox-open" id="waLightboxOpen" href="#" target="_blank" rel="noopener"><i class="fas fa-external-link-alt"></i> Abrir</a>' +
+            '    <a class="wa-lightbox-download" id="waLightboxDownload" href="#" target="_blank" rel="noopener" download><i class="fas fa-download"></i> Descargar</a>' +
             '  </div>' +
             '</div>';
         document.body.appendChild(box);
         box.addEventListener('click', function (ev) {
-            if (ev.target.closest('[data-wa-lb-close]')) {
-                closeLightbox();
-            }
+            if (ev.target.closest('[data-wa-lb-close]')) closeLightbox();
         });
         document.addEventListener('keydown', function (ev) {
-            if (ev.key === 'Escape' && box && !box.hidden) {
-                closeLightbox();
-            }
+            if (ev.key === 'Escape' && box && !box.hidden) closeLightbox();
         });
         return box;
     }
 
-    function openLightbox(url, name) {
+    function openLightbox(url, name, type, sourceUrl) {
         if (!url) return;
         const box = ensureLightbox();
         const img = document.getElementById('waLightboxImg');
+        const pdf = document.getElementById('waLightboxPdf');
         const nameEl = document.getElementById('waLightboxName');
+        const openBtn = document.getElementById('waLightboxOpen');
         const dl = document.getElementById('waLightboxDownload');
-        img.src = url;
-        img.alt = name || 'imagen';
-        nameEl.textContent = name || 'Imagen';
-        dl.href = url;
-        dl.setAttribute('download', name || 'imagen');
+        const kind = type === 'pdf' ? 'pdf' : 'image';
+        const external = sourceUrl || url;
+        nameEl.textContent = name || (kind === 'pdf' ? 'Documento PDF' : 'Imagen');
+        openBtn.href = external;
+        dl.href = external;
+        box.classList.toggle('wa-lightbox--pdf', kind === 'pdf');
+        if (kind === 'pdf') {
+            img.hidden = true;
+            img.removeAttribute('src');
+            pdf.hidden = false;
+            pdf.src = url + (url.indexOf('#') === -1 ? '#view=FitH' : '');
+        } else {
+            pdf.hidden = true;
+            pdf.removeAttribute('src');
+            img.hidden = false;
+            img.src = url;
+        }
         box.hidden = false;
         document.body.classList.add('wa-lightbox-open');
     }
@@ -212,7 +228,9 @@
         if (!box) return;
         box.hidden = true;
         const img = document.getElementById('waLightboxImg');
+        const pdf = document.getElementById('waLightboxPdf');
         if (img) img.removeAttribute('src');
+        if (pdf) pdf.removeAttribute('src');
         document.body.classList.remove('wa-lightbox-open');
     }
 
@@ -228,11 +246,9 @@
             }
             return;
         }
-        if (replace) {
-            els.thread.innerHTML = '';
-        } else if (els.thread.querySelector('.wa-empty')) {
-            els.thread.innerHTML = '';
-        }
+        if (replace) els.thread.innerHTML = '';
+        else if (els.thread.querySelector('.wa-empty')) els.thread.innerHTML = '';
+
         mensajes.forEach(function (m) {
             const id = Number(m.id || 0);
             if (id && id <= lastMsgId) return;
@@ -254,9 +270,7 @@
             }
             let html = renderMediaHtml(m);
             const cuerpo = (m.cuerpo || '').trim();
-            if (cuerpo) {
-                html += '<span class="wa-msg-text">' + escapeHtml(cuerpo) + '</span>';
-            }
+            if (cuerpo) html += '<span class="wa-msg-text">' + escapeHtml(cuerpo) + '</span>';
             html += '<span class="wa-msg-meta">' + escapeHtml(meta.join(' · ')) + '</span>';
             div.innerHTML = html;
             els.thread.appendChild(div);
@@ -269,8 +283,17 @@
         const info = waActivoLabel(v);
         els.activo.textContent = info.text;
         els.activo.className = 'wa-activo-badge ' + info.cls;
-        els.activo.title = v === 'si' ? 'WhatsApp activo'
-            : (v === 'no' ? 'Sin WhatsApp / rechazado' : 'Estado desconocido');
+    }
+
+    function setPuedeEnviar(puede) {
+        const allowed = puede !== false;
+        if (els.input) els.input.disabled = !allowed;
+        if (els.btn) els.btn.disabled = !allowed || sending;
+        if (!allowed && els.input) {
+            els.input.placeholder = 'Otro asesor tiene este chat activo';
+        } else if (els.input) {
+            els.input.placeholder = 'Escribe un mensaje…';
+        }
     }
 
     function fillTelefonos(telefonos, selectedE164) {
@@ -290,7 +313,13 @@
             opt.value = t.raw;
             opt.dataset.e164 = t.e164;
             opt.textContent = t.display + ' (' + t.e164 + ')';
-            if (selectedE164 && t.e164 === selectedE164) opt.selected = true;
+            if (selectedE164) {
+                const sel = String(selectedE164).replace(/\s/g, '');
+                const e164 = String(t.e164 || '').replace(/\s/g, '');
+                if (e164 === sel || e164.endsWith(sel.replace(/^\+/, '')) || sel.endsWith(e164.replace(/^\+/, ''))) {
+                    opt.selected = true;
+                }
+            }
             els.select.appendChild(opt);
         });
     }
@@ -299,34 +328,42 @@
         try {
             const data = await apiGet('wa_estado');
             if (els.mode) {
-                els.mode.textContent = data.kommo_enabled ? 'Kommo en vivo' : 'Modo demo';
+                if (data.mode !== 'live') {
+                    els.mode.textContent = 'Configuración pendiente';
+                } else {
+                    els.mode.textContent = data.provider === 'meta' ? 'Meta Cloud API' : 'Kommo en vivo';
+                }
             }
         } catch (e) { /* ignore */ }
     }
 
     async function loadBubbles() {
-        try {
-            const data = await apiGet('wa_mis_chats', { limit: 10 });
-            renderBubbles(data.chats || [], data.total || 0, data.extra || 0);
-        } catch (e) { /* ignore */ }
+        if (typeof window.__waBubblesRefresh === 'function') {
+            return window.__waBubblesRefresh();
+        }
     }
 
     async function ensureConversacion(telefono) {
         if (!clienteId) return null;
         const params = { cliente_id: clienteId };
         if (telefono) params.telefono = telefono;
+        if (cfg.claim) params.claim = 1;
         const data = await apiGet('wa_conversacion_cliente', params);
         fillTelefonos(data.telefonos || [], data.conversacion && data.conversacion.telefono_e164);
+        if (!data.telefonos || !data.telefonos.length) {
+            if (els.thread) {
+                els.thread.innerHTML = '<div class="wa-empty">Este cliente no tiene números en el perfil.</div>';
+            }
+            return null;
+        }
         if (data.conversacion) {
             conversacionId = Number(data.conversacion.id);
             updateWaActivo(data.conversacion.wa_activo);
-            // Deep-link limpio en URL
-            const url = new URL(window.location.href);
-            url.searchParams.set('id', String(clienteId));
-            url.searchParams.set('wa', String(conversacionId));
-            window.history.replaceState({}, '', url.toString());
         }
-        return data.conversacion;
+        if (typeof data.puede_enviar !== 'undefined') {
+            setPuedeEnviar(data.puede_enviar);
+        }
+        return data.conversacion || null;
     }
 
     async function loadMensajes(full) {
@@ -336,9 +373,22 @@
             cliente_id: clienteId,
         };
         if (!full && lastMsgId > 0) params.after_id = lastMsgId;
+        if (full) params.skip_sync = 1;
         const data = await apiGet('wa_mensajes', params);
         if (data.conversacion) updateWaActivo(data.conversacion.wa_activo);
+        if (typeof data.puede_enviar !== 'undefined') setPuedeEnviar(data.puede_enviar);
         appendMessages(data.mensajes || [], !!full || lastMsgId === 0);
+    }
+
+    function syncInBackground() {
+        if (!conversacionId || !clienteId) return;
+        apiGet('wa_mensajes', {
+            conversacion_id: conversacionId,
+            cliente_id: clienteId,
+            after_id: lastMsgId || 0,
+        }).then(function (d) {
+            if (d.mensajes && d.mensajes.length) appendMessages(d.mensajes, false);
+        }).catch(function () { /* ignore */ });
     }
 
     async function sendMessage() {
@@ -354,9 +404,7 @@
         if (els.btn) els.btn.disabled = true;
         setError('');
         try {
-            if (!conversacionId) {
-                await ensureConversacion(telefono);
-            }
+            if (!conversacionId) await ensureConversacion(telefono);
             const data = await apiPost('wa_enviar', {
                 conversacion_id: conversacionId,
                 cliente_id: clienteId,
@@ -369,12 +417,122 @@
             }
             els.input.value = '';
             await loadMensajes(true);
-            await loadBubbles();
+            syncInBackground();
         } catch (e) {
             setError(e.message || 'Error al enviar');
         } finally {
             sending = false;
             if (els.btn) els.btn.disabled = false;
+        }
+    }
+
+    function selectedTemplate() {
+        if (!els.tplSelect) return null;
+        const id = els.tplSelect.value;
+        if (!id) return null;
+        for (let i = 0; i < templatesCache.length; i++) {
+            if (String(templatesCache[i].id) === String(id)) return templatesCache[i];
+        }
+        return null;
+    }
+
+    function updateTemplatePreview() {
+        const t = selectedTemplate();
+        if (!els.tplPreview) return;
+        if (!t) {
+            els.tplPreview.hidden = true;
+            els.tplPreview.textContent = '';
+            if (els.tplBtn) els.tplBtn.disabled = true;
+            return;
+        }
+        const cat = t.category ? (' [' + t.category + ']') : '';
+        els.tplPreview.hidden = false;
+        els.tplPreview.textContent = (t.name || '') + cat + '\n\n' + (t.body || '(sin vista previa)');
+        if (els.tplBtn) els.tplBtn.disabled = sendingTpl;
+    }
+
+    async function loadTemplates() {
+        if (!els.tplSelect) return;
+        try {
+            const data = await apiGet('wa_templates_list');
+            templatesCache = (data.templates || []).filter(function (t) {
+                return !t.status || String(t.status).toLowerCase() === 'approved';
+            });
+            els.tplSelect.innerHTML = '';
+            if (!templatesCache.length) {
+                els.tplSelect.innerHTML = '<option value="">— Sin plantillas WABA —</option>';
+                if (els.tplBtn) els.tplBtn.disabled = true;
+                if (els.tplPreview) {
+                    els.tplPreview.hidden = false;
+                    els.tplPreview.textContent = data.hint || 'No hay plantillas aprobadas disponibles en Meta.';
+                }
+                return;
+            }
+            const opt0 = document.createElement('option');
+            opt0.value = '';
+            opt0.textContent = '— Selecciona plantilla para iniciar —';
+            els.tplSelect.appendChild(opt0);
+            templatesCache.forEach(function (t) {
+                const opt = document.createElement('option');
+                opt.value = t.id;
+                opt.textContent = t.name + (t.language ? ' (' + t.language + ')' : '') +
+                    (t.category ? ' · ' + t.category : '');
+                els.tplSelect.appendChild(opt);
+            });
+            updateTemplatePreview();
+        } catch (e) {
+            els.tplSelect.innerHTML = '<option value="">— Error al cargar plantillas —</option>';
+            if (els.tplBtn) els.tplBtn.disabled = true;
+            setError(e.message || 'No se pudieron cargar plantillas');
+        }
+    }
+
+    async function sendTemplate() {
+        if (sendingTpl) return;
+        const t = selectedTemplate();
+        if (!t) {
+            setError('Selecciona una plantilla');
+            return;
+        }
+        const telefono = els.select ? els.select.value : '';
+        if (!telefono) {
+            setError('Selecciona un número del perfil');
+            return;
+        }
+        sendingTpl = true;
+        if (els.tplBtn) els.tplBtn.disabled = true;
+        setError('');
+        try {
+            if (!conversacionId) await ensureConversacion(telefono);
+            const nombre = String(cfg.clienteNombre || '').trim();
+            const primer = nombre ? nombre.split(/\s+/)[0] : '';
+            const cedula = String(cfg.clienteCedula || '').trim();
+            const params = [];
+            if (primer) params.push(primer);
+            if (cedula) params.push(cedula);
+            const data = await apiPost('wa_enviar_plantilla', {
+                cliente_id: clienteId,
+                conversacion_id: conversacionId || 0,
+                telefono: telefono,
+                template_id: t.id,
+                template_name: t.name,
+                template_language: t.language || 'es',
+                params: params,
+            });
+            if (data.conversacion) {
+                conversacionId = Number(data.conversacion.id);
+                updateWaActivo(data.conversacion.wa_activo);
+            }
+            await loadMensajes(true);
+            syncInBackground();
+            if (typeof window.__waBubblesRefresh === 'function') {
+                window.__waBubblesRefresh();
+            }
+        } catch (e) {
+            setError(e.message || 'Error al enviar plantilla');
+        } finally {
+            sendingTpl = false;
+            updateTemplatePreview();
         }
     }
 
@@ -384,9 +542,10 @@
         setError('');
         try {
             lastMsgId = 0;
-            await ensureConversacion(telefono);
+            const conv = await ensureConversacion(telefono);
+            if (!conv) return;
             await loadMensajes(true);
-            await loadBubbles();
+            syncInBackground();
         } catch (e) {
             setError(e.message || 'No se pudo abrir el chat');
         }
@@ -394,12 +553,51 @@
 
     async function tick() {
         try {
-            await loadBubbles();
             if (conversacionId) await loadMensajes(false);
-        } catch (e) { /* ignore poll errors */ }
+        } catch (e) { /* ignore */ }
     }
 
-    async function init() {
+    async function bootWhatsapp() {
+        loadEstado().catch(function () {});
+        try {
+            if (initialWa) {
+                conversacionId = initialWa;
+                const data = await apiGet('wa_conversacion_cliente', {
+                    cliente_id: clienteId,
+                    conversacion_id: initialWa,
+                    claim: cfg.claim ? 1 : 0,
+                });
+                fillTelefonos(
+                    data.telefonos || [],
+                    (data.conversacion && data.conversacion.telefono_e164)
+                        || (data.telefono_preferido && data.telefono_preferido.e164)
+                );
+                if (typeof data.puede_enviar !== 'undefined') {
+                    setPuedeEnviar(data.puede_enviar);
+                }
+                if (!data.telefonos || !data.telefonos.length) {
+                    if (els.thread) {
+                        els.thread.innerHTML = '<div class="wa-empty">Este cliente no tiene números en el perfil.</div>';
+                    }
+                    return;
+                }
+                await loadMensajes(true);
+            } else {
+                const conv = await ensureConversacion(null);
+                if (!conv) return;
+                await loadMensajes(true);
+            }
+            setTimeout(syncInBackground, 800);
+        } catch (e) {
+            setError(e.message || 'No se pudo iniciar WhatsApp');
+            if (els.thread) {
+                els.thread.innerHTML = '<div class="wa-empty">WhatsApp no disponible ahora.</div>';
+            }
+        }
+        pollTimer = setInterval(tick, pollMs);
+    }
+
+    function init() {
         els.rail = $('waBubbleRail');
         els.panel = $('waPanel');
         els.select = $('waPhoneSelect');
@@ -409,10 +607,19 @@
         els.btn = $('waComposeSend');
         els.error = $('waError');
         els.mode = $('waPanelMode');
+        els.tplSelect = $('waTemplateSelect');
+        els.tplBtn = $('waTemplateSend');
+        els.tplPreview = $('waTemplatePreview');
 
         if (!els.panel || !clienteId) return;
 
+        if (els.thread) {
+            els.thread.innerHTML = '<div class="wa-empty">Cargando WhatsApp…</div>';
+        }
         if (els.btn) els.btn.addEventListener('click', sendMessage);
+        if (els.tplSelect) els.tplSelect.addEventListener('change', updateTemplatePreview);
+        if (els.tplBtn) els.tplBtn.addEventListener('click', sendTemplate);
+        loadTemplates();
         if (els.input) {
             els.input.addEventListener('keydown', function (ev) {
                 if (ev.key === 'Enter' && !ev.shiftKey) {
@@ -422,52 +629,27 @@
             });
         }
         if (els.select) els.select.addEventListener('change', onTelefonoChange);
-
-        // Clic en miniatura → previsualización (lightbox), no descarga directa
         if (els.thread) {
             els.thread.addEventListener('click', function (ev) {
-                const btn = ev.target.closest('.wa-msg-img[data-wa-preview]');
+                const btn = ev.target.closest('[data-wa-preview]');
                 if (!btn) return;
                 ev.preventDefault();
-                openLightbox(btn.getAttribute('data-wa-preview'), btn.getAttribute('data-wa-name') || 'imagen');
+                openLightbox(
+                    btn.getAttribute('data-wa-preview'),
+                    btn.getAttribute('data-wa-name') || '',
+                    btn.getAttribute('data-wa-preview-type') || 'image',
+                    btn.getAttribute('data-wa-source') || btn.getAttribute('data-wa-preview')
+                );
             });
         }
-
         ensureLightbox();
 
-        await loadEstado();
-        try {
-            if (initialWa) {
-                conversacionId = initialWa;
-                const data = await apiGet('wa_conversacion_cliente', { cliente_id: clienteId });
-                fillTelefonos(
-                    data.telefonos || [],
-                    data.conversacion && data.conversacion.telefono_e164
-                );
-                // Si deep-link wa=, preferir esa conversación
-                const msgs = await apiGet('wa_mensajes', {
-                    conversacion_id: conversacionId,
-                    cliente_id: clienteId,
-                });
-                if (msgs.conversacion) {
-                    updateWaActivo(msgs.conversacion.wa_activo);
-                    // Seleccionar el teléfono de esa conversación
-                    if (els.select && msgs.conversacion.telefono_e164) {
-                        Array.from(els.select.options).forEach(function (o) {
-                            if (o.dataset.e164 === msgs.conversacion.telefono_e164) o.selected = true;
-                        });
-                    }
-                }
-                appendMessages(msgs.mensajes || [], true);
-            } else {
-                await ensureConversacion(null);
-                await loadMensajes(true);
-            }
-        } catch (e) {
-            setError(e.message || 'No se pudo iniciar WhatsApp');
-        }
-        await loadBubbles();
-        pollTimer = setInterval(tick, pollMs);
+        // Diferido: deja que softphone/buscador arranquen primero
+        setTimeout(function () {
+            bootWhatsapp().catch(function (e) {
+                setError(e.message || 'No se pudo iniciar WhatsApp');
+            });
+        }, 50);
     }
 
     if (document.readyState === 'loading') {
