@@ -1,14 +1,13 @@
 <?php
 /**
- * WhatsApp — Meta Cloud API con fallback Kommo.
+ * WhatsApp + Kommo — endpoints del CRM.
  */
 require_once __DIR__ . '/../config/kommo.php';
-require_once __DIR__ . '/../config/meta.php';
-require_once __DIR__ . '/../services/MetaCloudApiGateway.php';
 require_once __DIR__ . '/../models/WhatsappConversacionModel.php';
 require_once __DIR__ . '/../models/WhatsappMensajeModel.php';
 require_once __DIR__ . '/../models/WhatsappCampanaMasivaModel.php';
 require_once __DIR__ . '/../models/WhatsappColaModel.php';
+require_once __DIR__ . '/../models/WhatsappHistorialModel.php';
 require_once __DIR__ . '/../models/CampanaModel.php';
 require_once __DIR__ . '/../models/CargaExcelModel.php';
 require_once __DIR__ . '/../models/TareaModel.php';
@@ -20,7 +19,7 @@ class WhatsappController {
     private $campanaMasivaModel;
     private $colaModel;
     private $campanaModel;
-    private MetaCloudApiGateway $metaGateway;
+    private $historialModel;
 
     public function __construct(PDO $pdo) {
         $this->pdo = $pdo;
@@ -29,7 +28,7 @@ class WhatsappController {
         $this->campanaMasivaModel = new WhatsappCampanaMasivaModel($pdo);
         $this->colaModel = new WhatsappColaModel($pdo);
         $this->campanaModel = new CampanaModel($pdo);
-        $this->metaGateway = new MetaCloudApiGateway();
+        $this->historialModel = new WhatsappHistorialModel($pdo);
     }
 
     private function jsonOut(array $payload, int $code = 200): void {
@@ -85,15 +84,11 @@ class WhatsappController {
 
     public function estado(): void {
         $this->requireSesion();
-        $provider = waProvider();
-        $enabled = $provider === 'meta' ? metaEnabled() : kommoEnabled();
         $this->jsonOut([
             'success' => true,
             'kommo_enabled' => kommoEnabled(),
-            'meta_enabled' => metaEnabled(),
-            'provider' => $provider,
-            'waba_phone' => $provider === 'meta' ? '' : KOMMO_WABA_PHONE_E164,
-            'mode' => $enabled ? 'live' : 'demo',
+            'waba_phone' => KOMMO_WABA_PHONE_E164,
+            'mode' => kommoEnabled() ? 'live' : 'demo',
         ]);
     }
 
@@ -112,7 +107,7 @@ class WhatsappController {
         // el asesor en OTRA ficha nunca ve mensajes nuevos en las burbujas.
         $syncBubbles = (int)($_GET['sync_bubbles'] ?? 0) === 1;
         $syncMeta = ['synced' => 0, 'ms' => 0, 'new_inbound' => 0];
-        if ($syncBubbles && waProvider() === 'kommo' && kommoEnabled()) {
+        if ($syncBubbles && kommoEnabled()) {
             $syncMeta = $this->sincronizarBurbujasAsesor($asesorId, 3, 2500);
         }
 
@@ -261,8 +256,6 @@ class WhatsappController {
                 'telefonos' => $telefonos,
                 'telefono_preferido' => $telefonoUi ? ['e164' => $telefonoUi] : $best,
                 'kommo_enabled' => kommoEnabled(),
-                'meta_enabled' => metaEnabled(),
-                'provider' => waProvider(),
                 'puede_enviar' => $this->asesorPuedeEnviar($conv),
             ]);
         } catch (Throwable $e) {
@@ -295,7 +288,7 @@ class WhatsappController {
 
         // Sync Kommo (puede tardar ~0.5–2s) sin retener session lock
         $skipSync = (int)($_GET['skip_sync'] ?? 0) === 1;
-        if (!$skipSync && waProvider() === 'kommo' && kommoEnabled() && !empty($conv['kommo_talk_id'])) {
+        if (!$skipSync && kommoEnabled() && !empty($conv['kommo_talk_id'])) {
             $this->sincronizarMensajesKommo($conv);
             $conv = $this->convModel->getById($convId) ?: $conv;
         }
@@ -330,7 +323,7 @@ class WhatsappController {
             exit;
         }
         $msg = $this->msgModel->getById($msgId);
-        if (!$msg || (empty($msg['media_url']) && empty($msg['media_id']))) {
+        if (!$msg || empty($msg['media_url'])) {
             http_response_code(404);
             header('Content-Type: text/plain; charset=UTF-8');
             echo 'Adjunto no encontrado';
@@ -348,28 +341,6 @@ class WhatsappController {
             http_response_code(403);
             header('Content-Type: text/plain; charset=UTF-8');
             echo 'Sin permiso';
-            exit;
-        }
-
-        if (($conv['provider'] ?? waProvider()) === 'meta' && !empty($msg['media_id'])) {
-            $download = $this->metaGateway->downloadMedia((string)$msg['media_id']);
-            if (empty($download['ok'])) {
-                http_response_code(502);
-                header('Content-Type: text/plain; charset=UTF-8');
-                echo (string)($download['error'] ?? 'No se pudo obtener el adjunto de Meta');
-                exit;
-            }
-            $bin = (string)($download['body'] ?? '');
-            $ctype = (string)($download['content_type'] ?? 'application/octet-stream');
-            if (ob_get_level()) {
-                ob_clean();
-            }
-            header('Content-Type: ' . $ctype);
-            header('Content-Length: ' . strlen($bin));
-            header('Cache-Control: private, max-age=300');
-            header('X-Content-Type-Options: nosniff');
-            header('Content-Disposition: inline');
-            echo $bin;
             exit;
         }
 
@@ -504,43 +475,15 @@ class WhatsappController {
             $this->releaseSessionLock();
 
             $status = 'pendiente_envio';
-            $externalMsgId = null;
             $kommoMsgId = null;
             $waActivo = $conv['wa_activo'] ?? 'desconocido';
             $send = null;
 
-            if (waProvider() === 'meta') {
-                if (!metaEnabled()) {
-                    $send = ['ok' => false, 'error' => 'Meta Cloud API no está configurada'];
-                } else {
-                    $lastInbound = $this->msgModel->lastInboundAt((int)$conv['id']);
-                    $insideWindow = $lastInbound !== null
-                        && strtotime($lastInbound) >= (time() - 24 * 60 * 60);
-                    if (!$insideWindow) {
-                        $send = [
-                            'ok' => false,
-                            'error' => 'La ventana de atención de 24 horas está cerrada. Envía una plantilla aprobada para iniciar o reabrir la conversación.',
-                        ];
-                    } else {
-                        $send = $this->metaGateway->sendText((string)$conv['telefono_e164'], $texto);
-                    }
-                }
-                if (!empty($send['ok'])) {
-                    $status = 'enviado';
-                    $externalMsgId = $send['external_message_id'] ?? null;
-                    $waActivo = 'si';
-                } else {
-                    $status = 'error_envio';
-                    if (!empty($send['invalid_number'])) {
-                        $waActivo = 'no';
-                    }
-                }
-            } elseif (kommoEnabled()) {
+            if (kommoEnabled()) {
                 $send = $this->enviarViaKommo($conv, $texto);
                 if (!empty($send['ok'])) {
                     $status = 'enviado';
                     $kommoMsgId = $send['kommo_message_id'] ?? null;
-                    $externalMsgId = $kommoMsgId;
                     $waActivo = 'si';
                 } else {
                     $status = 'error_envio';
@@ -557,24 +500,15 @@ class WhatsappController {
                 'tipo' => 'text',
                 'cuerpo' => $texto,
                 'kommo_message_id' => $kommoMsgId,
-                'external_message_id' => $externalMsgId,
                 'status' => $status,
             ]);
             $this->convModel->touchPreview((int)$conv['id'], $texto);
-            $convUpdates = [];
             if ($waActivo !== ($conv['wa_activo'] ?? '')) {
-                $convUpdates['wa_activo'] = $waActivo;
-            }
-            if (waProvider() === 'meta' && $status === 'enviado') {
-                $convUpdates['provider'] = 'meta';
-                $convUpdates['meta_phone_number_id'] = META_PHONE_NUMBER_ID;
-            }
-            if ($convUpdates) {
-                $this->convModel->update((int)$conv['id'], $convUpdates);
+                $this->convModel->update((int)$conv['id'], ['wa_activo' => $waActivo]);
             }
 
             // Reconsultar entrega en Kommo (a veces pasa de sent → delivered/error en segundos)
-            if ($status === 'enviado' && waProvider() === 'kommo' && kommoEnabled()) {
+            if ($status === 'enviado' && kommoEnabled()) {
                 usleep(400000);
                 $conv = $this->convModel->getById((int)$conv['id']);
                 $all = $this->msgModel->listByConversacion((int)$conv['id'], 50, 0);
@@ -598,8 +532,6 @@ class WhatsappController {
                 'status' => $status,
                 'conversacion' => $conv,
                 'kommo_enabled' => kommoEnabled(),
-                'meta_enabled' => metaEnabled(),
-                'provider' => waProvider(),
                 'hint' => $status === 'enviado' || $status === 'delivered'
                     ? ('Revisa WhatsApp del número ' . ($conv['telefono_e164'] ?? ''))
                     : null,
@@ -1177,13 +1109,9 @@ class WhatsappController {
     private function sincronizarBurbujasAsesor(string $asesorId, int $maxTalks = 3, int $budgetMs = 2500): array {
         $t0 = microtime(true);
         $maxTalks = max(1, min(5, $maxTalks));
-        $candidates = $this->convModel->listBubblesActivas($asesorId, 10);
-        $withTalk = [];
-        foreach ($candidates as $c) {
-            if (!empty($c['kommo_talk_id'])) {
-                $withTalk[] = $c;
-            }
-        }
+        // Incluye dismissed: si el asesor cerró la burbuja, igual hay que
+        // sincronizar para detectar inbound y reabrir notificación.
+        $withTalk = $this->convModel->listParaSyncBurbujas($asesorId, 20);
         if (!$withTalk) {
             return ['synced' => 0, 'ms' => 0, 'new_inbound' => 0];
         }
@@ -1213,6 +1141,266 @@ class WhatsappController {
     }
 
     /**
+     * Puente sin webhook: lista talks recientes de Kommo y crea/actualiza wa_conversaciones.
+     * Los sin match de teléfono quedan en sin_cliente para el inbox del coordinador.
+     *
+     * @return array{scanned:int,created:int,updated:int,skipped:int,errors:string[],ms:int,items:array}
+     */
+    private function descubrirTalksNuevosKommo(int $limit = 20, int $maxAgeHours = 72): array {
+        $t0 = microtime(true);
+        $out = [
+            'scanned' => 0,
+            'created' => 0,
+            'updated' => 0,
+            'skipped' => 0,
+            'errors' => [],
+            'ms' => 0,
+            'items' => [],
+        ];
+        $limit = max(5, min(50, $limit));
+        $maxAgeHours = max(1, min(168, $maxAgeHours));
+        $minUpdated = time() - ($maxAgeHours * 3600);
+
+        [$code, $body] = $this->kommoApiRequest('GET', '/api/v4/talks?limit=' . $limit);
+        if ($code < 200 || $code >= 300) {
+            $out['errors'][] = "No se pudieron listar talks (HTTP {$code})";
+            $out['ms'] = (int)round((microtime(true) - $t0) * 1000);
+            return $out;
+        }
+        $data = json_decode($body, true);
+        $talks = $data['_embedded']['talks'] ?? [];
+        if (!is_array($talks)) {
+            $talks = [];
+        }
+
+        foreach ($talks as $talk) {
+            $out['scanned']++;
+            $talkId = trim((string)($talk['talk_id'] ?? $talk['id'] ?? ''));
+            $chatId = trim((string)($talk['chat_id'] ?? ''));
+            $contactId = (int)($talk['contact_id'] ?? 0);
+            $leadId = (int)($talk['entity_id'] ?? 0);
+            $updatedAt = (int)($talk['updated_at'] ?? $talk['created_at'] ?? 0);
+            $origin = strtolower((string)($talk['origin'] ?? ''));
+
+            if ($talkId === '') {
+                $out['skipped']++;
+                $out['errors'][] = 'Talk sin talk_id';
+                continue;
+            }
+            if ($updatedAt > 0 && $updatedAt < $minUpdated) {
+                $out['skipped']++;
+                continue;
+            }
+            // Preferir WABA; aceptar otros orígenes de chat si traen contacto.
+            if ($origin !== '' && $origin !== 'waba' && $contactId <= 0) {
+                $out['skipped']++;
+                continue;
+            }
+
+            $existingByTalk = $this->convModel->getByKommoTalkId($talkId);
+            if ($existingByTalk) {
+                $out['skipped']++;
+                $out['items'][] = [
+                    'action' => 'exists',
+                    'talk_id' => $talkId,
+                    'conversacion_id' => (int)$existingByTalk['id'],
+                    'estado' => $existingByTalk['estado'],
+                    'telefono' => $existingByTalk['telefono_e164'],
+                    'lead_id' => $leadId ?: null,
+                ];
+                continue;
+            }
+
+            if ($contactId <= 0) {
+                $out['skipped']++;
+                $out['errors'][] = "Talk {$talkId} sin contact_id";
+                continue;
+            }
+
+            $phoneInfo = $this->kommoPhoneFromContactId($contactId);
+            $e164 = $phoneInfo['e164'] ?? null;
+            if (!$e164) {
+                $out['skipped']++;
+                $out['errors'][] = "Talk {$talkId} contacto {$contactId} sin teléfono";
+                continue;
+            }
+
+            $preview = $this->kommoUltimoPreviewTalk($talkId);
+            if ($preview === '') {
+                $preview = 'Lead #' . ($leadId ?: $talkId) . ' · ' . ($phoneInfo['name'] ?? $e164);
+            }
+            $at = $updatedAt > 0 ? date('Y-m-d H:i:s', $updatedAt) : date('Y-m-d H:i:s');
+
+            try {
+                $existingByPhone = $this->convModel->getByTelefonoE164($e164);
+                if ($existingByPhone) {
+                    $updates = [];
+                    if (empty($existingByPhone['kommo_talk_id'])) {
+                        $updates['kommo_talk_id'] = $talkId;
+                    }
+                    if ($chatId !== '' && empty($existingByPhone['kommo_chat_id'])) {
+                        $updates['kommo_chat_id'] = $chatId;
+                    }
+                    if (empty($existingByPhone['cliente_id'])) {
+                        $resolved = $this->convModel->resolveClienteByPhone($e164);
+                        if ($resolved) {
+                            $updates['cliente_id'] = (int)$resolved['id_cliente'];
+                            $updates['campana_id'] = $resolved['campana_id'] !== null
+                                ? (int)$resolved['campana_id']
+                                : null;
+                            $updates['estado'] = 'abierta';
+                        } elseif (($existingByPhone['estado'] ?? '') !== 'sin_cliente') {
+                            $updates['estado'] = 'sin_cliente';
+                        }
+                    }
+                    if ($preview !== '' && (
+                        empty($existingByPhone['ultimo_preview'])
+                        || strtotime((string)($existingByPhone['ultimo_mensaje_at'] ?? '')) < $updatedAt
+                    )) {
+                        $updates['ultimo_preview'] = mb_substr($preview, 0, 250);
+                        $updates['ultimo_mensaje_at'] = $at;
+                    }
+                    if ($updates) {
+                        $this->convModel->update((int)$existingByPhone['id'], $updates);
+                        $out['updated']++;
+                        $action = 'updated';
+                    } else {
+                        $out['skipped']++;
+                        $action = 'exists_phone';
+                    }
+                    $fresh = $this->convModel->getById((int)$existingByPhone['id']);
+                    if ($fresh && empty($fresh['asesor_notificacion_id']) && !empty($fresh['cliente_id'])) {
+                        $this->onInboundMessage($fresh);
+                    }
+                    $out['items'][] = [
+                        'action' => $action,
+                        'talk_id' => $talkId,
+                        'conversacion_id' => (int)$existingByPhone['id'],
+                        'estado' => $fresh['estado'] ?? $existingByPhone['estado'],
+                        'telefono' => $e164,
+                        'lead_id' => $leadId ?: null,
+                        'contact' => $phoneInfo['name'] ?? null,
+                    ];
+                    continue;
+                }
+
+                $resolved = $this->convModel->resolveClienteByPhone($e164);
+                $clienteId = $resolved ? (int)$resolved['id_cliente'] : null;
+                $campanaId = $resolved && $resolved['campana_id'] !== null
+                    ? (int)$resolved['campana_id']
+                    : null;
+                $estado = $clienteId ? 'abierta' : 'sin_cliente';
+                $convId = $this->convModel->create([
+                    'cliente_id' => $clienteId,
+                    'campana_id' => $campanaId,
+                    'origen' => 'organico',
+                    'telefono_e164' => $e164,
+                    'kommo_talk_id' => $talkId,
+                    'kommo_chat_id' => $chatId !== '' ? $chatId : null,
+                    'asesor_id' => null,
+                    'asesor_notificacion_id' => null,
+                    'estado' => $estado,
+                    'wa_activo' => 'si',
+                    'no_leidos' => 1,
+                    'ultimo_mensaje_at' => $at,
+                    'ultimo_preview' => mb_substr($preview, 0, 250),
+                ]);
+                $created = $this->convModel->getById($convId);
+                if ($created && $clienteId) {
+                    $this->onInboundMessage($created);
+                    $this->dispatchColaAsignacion();
+                }
+                $out['created']++;
+                $out['items'][] = [
+                    'action' => 'created',
+                    'talk_id' => $talkId,
+                    'conversacion_id' => $convId,
+                    'estado' => $estado,
+                    'telefono' => $e164,
+                    'lead_id' => $leadId ?: null,
+                    'contact' => $phoneInfo['name'] ?? null,
+                ];
+            } catch (Throwable $e) {
+                $out['errors'][] = "Talk {$talkId}: " . $e->getMessage();
+            }
+        }
+
+        $out['ms'] = (int)round((microtime(true) - $t0) * 1000);
+        return $out;
+    }
+
+    /**
+     * @return array{e164:?string,raw:?string,name:?string}
+     */
+    private function kommoPhoneFromContactId(int $contactId): array {
+        if ($contactId <= 0) {
+            return ['e164' => null, 'raw' => null, 'name' => null];
+        }
+        [$code, $body] = $this->kommoApiRequest('GET', '/api/v4/contacts/' . $contactId);
+        if ($code < 200 || $code >= 300) {
+            return ['e164' => null, 'raw' => null, 'name' => null];
+        }
+        $json = json_decode($body, true);
+        if (!is_array($json)) {
+            return ['e164' => null, 'raw' => null, 'name' => null];
+        }
+        $name = trim((string)($json['name'] ?? ''));
+        $raw = '';
+        foreach (($json['custom_fields_values'] ?? []) as $cf) {
+            if (($cf['field_code'] ?? '') === 'PHONE') {
+                $raw = (string)($cf['values'][0]['value'] ?? '');
+                break;
+            }
+        }
+        if ($raw === '') {
+            foreach (($json['custom_fields_values'] ?? []) as $cf) {
+                foreach (($cf['values'] ?? []) as $v) {
+                    $val = (string)($v['value'] ?? '');
+                    if (preg_match('/\d{7,}/', $val)) {
+                        $raw = $val;
+                        break 2;
+                    }
+                }
+            }
+        }
+        $e164 = $raw !== '' ? kommoNormalizePhoneE164($raw) : null;
+        return [
+            'e164' => $e164 ?: null,
+            'raw' => $raw !== '' ? $raw : null,
+            'name' => $name !== '' ? $name : null,
+        ];
+    }
+
+    private function kommoUltimoPreviewTalk(string $talkId): string {
+        $talkId = trim($talkId);
+        if ($talkId === '') {
+            return '';
+        }
+        [$code, $body] = $this->kommoApiRequest(
+            'GET',
+            '/api/v4/talks/' . rawurlencode($talkId) . '/messages?limit=5'
+        );
+        if ($code < 200 || $code >= 300) {
+            return '';
+        }
+        $data = json_decode($body, true);
+        $messages = $data['_embedded']['messages'] ?? [];
+        if (!is_array($messages) || !$messages) {
+            return '';
+        }
+        usort($messages, static function ($a, $b) {
+            return ((int)($b['created_at'] ?? 0)) <=> ((int)($a['created_at'] ?? 0));
+        });
+        $msg = $messages[0];
+        $text = trim((string)($msg['text'] ?? $msg['message']['text'] ?? ''));
+        if ($text !== '') {
+            return $text;
+        }
+        $type = (string)($msg['type'] ?? $msg['message']['type'] ?? 'mensaje');
+        return '[' . $type . ']';
+    }
+
+    /**
      * Etiqueta corta para vista previa de mensajes multimedia (sin texto).
      */
     private function previewParaMedia(string $messageType, string $attachmentType, string $fileName): string {
@@ -1237,26 +1425,8 @@ class WhatsappController {
     public function webhookKommo(): void {
         $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 
-        // Handshake oficial Meta.
-        if ($method === 'GET' && isset($_GET['hub_mode'], $_GET['hub_verify_token'], $_GET['hub_challenge'])) {
-            $valid = (string)$_GET['hub_mode'] === 'subscribe'
-                && META_VERIFY_TOKEN !== ''
-                && hash_equals(META_VERIFY_TOKEN, (string)$_GET['hub_verify_token']);
-            if (!$valid) {
-                http_response_code(403);
-                echo 'Token de verificación inválido';
-                exit;
-            }
-            if (ob_get_level()) {
-                ob_clean();
-            }
-            http_response_code(200);
-            header('Content-Type: text/plain; charset=UTF-8');
-            echo (string)$_GET['hub_challenge'];
-            exit;
-        }
-
-        // Health-check de navegador/Kommo.
+        // Kommo (y su validador) hace GET/HEAD para comprobar que la URL es pública.
+        // Debe responder 200; los mensajes reales llegan por POST.
         if ($method === 'GET' || $method === 'HEAD') {
             if (ob_get_level()) {
                 ob_clean();
@@ -1273,18 +1443,7 @@ class WhatsappController {
             exit;
         }
 
-        $rawBody = file_get_contents('php://input');
-        $decodedBody = json_decode((string)$rawBody, true);
-        if (is_array($decodedBody) && ($decodedBody['object'] ?? '') === 'whatsapp_business_account') {
-            $signature = (string)($_SERVER['HTTP_X_HUB_SIGNATURE_256'] ?? '');
-            if (!$this->metaGateway->verifyWebhookSignature((string)$rawBody, $signature)) {
-                $this->jsonOut(['success' => false, 'error' => 'Firma Meta inválida'], 401);
-            }
-            $result = $this->procesarWebhookMeta($decodedBody);
-            $this->jsonOut(['success' => true] + $result);
-        }
-
-        // Webhook legacy Kommo: validar secret opcional.
+        // Público: validar secret opcional
         $secret = KOMMO_WEBHOOK_SECRET;
         if ($secret !== '') {
             $hdr = $_SERVER['HTTP_X_WA_WEBHOOK_SECRET'] ?? '';
@@ -1293,7 +1452,7 @@ class WhatsappController {
             }
         }
 
-        $body = is_array($decodedBody) ? $decodedBody : ($_POST ?: []);
+        $body = $this->readJsonBody();
         // Formato simplificado del handoff + posibles wrappers Kommo
         $phone = (string)($body['phone'] ?? $body['telefono'] ?? '');
         $text = (string)($body['text'] ?? $body['message'] ?? $body['cuerpo'] ?? '');
@@ -1331,12 +1490,16 @@ class WhatsappController {
 
         $conv = $this->convModel->getByTelefonoE164($e164);
         if (!$conv) {
-            $clienteId = $this->convModel->findClienteIdByPhone($e164);
+            $resolved = $this->convModel->resolveClienteByPhone($e164);
+            $clienteId = $resolved ? (int)$resolved['id_cliente'] : null;
             $estado = $clienteId ? 'abierta' : 'sin_cliente';
             $asesorId = null;
             // Sin columna asesor_id en clientes: se asigna al abrir ficha / emparejar
             $id = $this->convModel->create([
                 'cliente_id' => $clienteId,
+                'campana_id' => $resolved && $resolved['campana_id'] !== null
+                    ? (int)$resolved['campana_id']
+                    : null,
                 'telefono_e164' => $e164,
                 'kommo_talk_id' => $talkId,
                 'kommo_chat_id' => $chatId,
@@ -1360,9 +1523,12 @@ class WhatsappController {
                 $updates['kommo_chat_id'] = $chatId;
             }
             if (empty($conv['cliente_id'])) {
-                $clienteId = $this->convModel->findClienteIdByPhone($e164);
-                if ($clienteId) {
-                    $updates['cliente_id'] = $clienteId;
+                $resolved = $this->convModel->resolveClienteByPhone($e164);
+                if ($resolved) {
+                    $updates['cliente_id'] = (int)$resolved['id_cliente'];
+                    $updates['campana_id'] = $resolved['campana_id'] !== null
+                        ? (int)$resolved['campana_id']
+                        : null;
                     $updates['estado'] = 'abierta';
                 }
             }
@@ -1399,146 +1565,107 @@ class WhatsappController {
         ]);
     }
 
-    /**
-     * Procesa el payload oficial de WhatsApp Cloud API.
-     * Meta reintenta webhooks: external_message_id garantiza idempotencia.
-     */
-    private function procesarWebhookMeta(array $payload): array {
-        $received = 0;
-        $statuses = 0;
-        foreach (($payload['entry'] ?? []) as $entry) {
-            foreach (($entry['changes'] ?? []) as $change) {
-                $value = $change['value'] ?? [];
-                if (!is_array($value)) {
-                    continue;
-                }
-                $phoneNumberId = (string)($value['metadata']['phone_number_id'] ?? META_PHONE_NUMBER_ID);
-                foreach (($value['statuses'] ?? []) as $status) {
-                    $externalId = (string)($status['id'] ?? '');
-                    $state = strtolower((string)($status['status'] ?? ''));
-                    if ($externalId !== '' && in_array($state, ['sent', 'delivered', 'read', 'failed'], true)) {
-                        $this->msgModel->updateStatusByExternalId($externalId, $state);
-                        $statuses++;
-                    }
-                }
-                foreach (($value['messages'] ?? []) as $message) {
-                    if (!is_array($message)) {
-                        continue;
-                    }
-                    $externalId = (string)($message['id'] ?? '');
-                    if ($externalId !== '' && $this->msgModel->findByExternalMessageId($externalId)) {
-                        continue;
-                    }
-                    $phone = kommoNormalizePhoneE164((string)($message['from'] ?? ''));
-                    if (!$phone) {
-                        continue;
-                    }
-                    $type = strtolower((string)($message['type'] ?? 'text'));
-                    $content = $this->contenidoMensajeMeta($message, $type);
-                    $preview = $content['text'] !== ''
-                        ? $content['text']
-                        : $this->previewParaMedia($type, $type, (string)$content['media_name']);
-                    $conv = $this->convModel->getByTelefonoE164($phone);
-                    if (!$conv) {
-                        $clienteId = $this->convModel->findClienteIdByPhone($phone);
-                        $convId = $this->convModel->create([
-                            'cliente_id' => $clienteId,
-                            'telefono_e164' => $phone,
-                            'provider' => 'meta',
-                            'meta_phone_number_id' => $phoneNumberId,
-                            'estado' => $clienteId ? 'abierta' : 'sin_cliente',
-                            'wa_activo' => 'si',
-                            'no_leidos' => 1,
-                            'ultimo_mensaje_at' => date('Y-m-d H:i:s'),
-                            'ultimo_preview' => $preview,
-                        ]);
-                        $conv = $this->convModel->getById($convId);
-                    } else {
-                        $updates = [
-                            'provider' => 'meta',
-                            'meta_phone_number_id' => $phoneNumberId,
-                            'wa_activo' => 'si',
-                        ];
-                        if (empty($conv['cliente_id'])) {
-                            $clienteId = $this->convModel->findClienteIdByPhone($phone);
-                            if ($clienteId) {
-                                $updates['cliente_id'] = $clienteId;
-                                $updates['estado'] = 'abierta';
-                            }
-                        }
-                        $this->convModel->update((int)$conv['id'], $updates);
-                        $this->convModel->touchPreview(
-                            (int)$conv['id'],
-                            $preview,
-                            !empty($message['timestamp'])
-                                ? date('Y-m-d H:i:s', (int)$message['timestamp'])
-                                : null
-                        );
-                        $this->convModel->incrementNoLeidos((int)$conv['id']);
-                        $conv = $this->convModel->getById((int)$conv['id']);
-                    }
-                    if (!$conv) {
-                        continue;
-                    }
-                    $this->msgModel->create([
-                        'conversacion_id' => (int)$conv['id'],
-                        'direccion' => 'in',
-                        'tipo' => $type,
-                        'cuerpo' => $content['text'] !== '' ? $content['text'] : null,
-                        'media_id' => $content['media_id'] ?: null,
-                        'media_name' => $content['media_name'] ?: null,
-                        'external_message_id' => $externalId !== '' ? $externalId : null,
-                        'status' => 'recibido',
-                        'created_at' => !empty($message['timestamp'])
-                            ? date('Y-m-d H:i:s', (int)$message['timestamp'])
-                            : null,
-                    ]);
-                    $this->onInboundMessage($conv);
-                    $received++;
-                }
-            }
-        }
-        if ($received > 0) {
-            $this->dispatchColaAsignacion();
-        }
-        return ['messages' => $received, 'statuses' => $statuses];
-    }
-
-    /** @return array{text:string,media_id:string,media_name:string} */
-    private function contenidoMensajeMeta(array $message, string $type): array {
-        $text = '';
-        $mediaId = '';
-        $mediaName = '';
-        if ($type === 'text') {
-            $text = (string)($message['text']['body'] ?? '');
-        } elseif ($type === 'button') {
-            $text = (string)($message['button']['text'] ?? $message['button']['payload'] ?? '');
-        } elseif ($type === 'interactive') {
-            $reply = $message['interactive']['button_reply']
-                ?? $message['interactive']['list_reply']
-                ?? [];
-            $text = (string)($reply['title'] ?? $reply['id'] ?? '');
-        } elseif (in_array($type, ['image', 'audio', 'video', 'document', 'sticker'], true)) {
-            $media = is_array($message[$type] ?? null) ? $message[$type] : [];
-            $mediaId = (string)($media['id'] ?? '');
-            $mediaName = (string)($media['filename'] ?? '');
-            $text = (string)($media['caption'] ?? '');
-        } elseif ($type === 'location') {
-            $latitude = (string)($message['location']['latitude'] ?? '');
-            $longitude = (string)($message['location']['longitude'] ?? '');
-            $text = trim("Ubicación {$latitude}, {$longitude}");
-        } elseif ($type === 'contacts') {
-            $text = '[Contacto]';
-        } else {
-            $text = '[' . ($type !== '' ? $type : 'mensaje') . ']';
-        }
-        return ['text' => $text, 'media_id' => $mediaId, 'media_name' => $mediaName];
-    }
-
     public function sinCliente(): void {
         $this->requireRoles(['coordinador', 'administrador']);
+        $this->releaseSessionLock();
+        $syncMeta = null;
+        if ((int)($_GET['sync'] ?? 0) === 1 && kommoEnabled()) {
+            $syncMeta = $this->descubrirTalksNuevosKommo(
+                max(5, min(30, (int)($_GET['limit'] ?? 20))),
+                max(1, min(168, (int)($_GET['max_age_hours'] ?? 72)))
+            );
+        }
         $list = $this->convModel->listSinCliente(100);
-        $this->jsonOut(['success' => true, 'conversaciones' => $list]);
+        $this->jsonOut([
+            'success' => true,
+            'conversaciones' => $list,
+            'pendientes' => $this->convModel->countPendientesCoordinador(),
+            'sync' => $syncMeta,
+        ]);
+    }
+
+    /**
+     * Contador ligero para badge del navbar del coordinador.
+     */
+    public function notifCoordinador(): void {
+        $this->requireRoles(['coordinador', 'administrador']);
+        $this->releaseSessionLock();
+        $syncMeta = null;
+        if ((int)($_GET['sync'] ?? 0) === 1 && kommoEnabled()) {
+            $syncMeta = $this->descubrirTalksNuevosKommo(15, 72);
+        }
+        $this->jsonOut([
+            'success' => true,
+            'pendientes' => $this->convModel->countPendientesCoordinador(),
+            'sync' => $syncMeta,
+        ]);
+    }
+
+    /**
+     * Descubre talks/leads recientes en Kommo y crea filas locales faltantes.
+     */
+    public function descubrirLeads(): void {
+        $this->requireRoles(['coordinador', 'administrador']);
+        $this->releaseSessionLock();
+        if (!kommoEnabled()) {
+            $this->jsonOut(['success' => false, 'error' => 'Kommo no está habilitado'], 503);
+        }
+        $meta = $this->descubrirTalksNuevosKommo(
+            max(5, min(50, (int)($_GET['limit'] ?? $_POST['limit'] ?? 20))),
+            max(1, min(168, (int)($_GET['max_age_hours'] ?? 72)))
+        );
+        $this->jsonOut([
+            'success' => true,
+            'sync' => $meta,
+            'conversaciones' => $this->convModel->listSinCliente(100),
+        ]);
+    }
+
+    /**
+     * Historial paginado de eventos WA (masivos + emparejes).
+     */
+    public function historial(): void {
+        $this->requireRoles(['coordinador', 'administrador']);
+        $this->releaseSessionLock();
+        if (!$this->historialModel->ensureTableExists()) {
+            $this->jsonOut([
+                'success' => false,
+                'error' => 'Falta tabla wa_historial_eventos. Ejecute: php scripts/ejecutar_migracion_wa.php',
+            ], 503);
+        }
+        // Backfill perezoso de campañas masivas existentes (idempotente)
+        try {
+            $this->historialModel->backfillCampanasMasivas();
+        } catch (Throwable $e) {
+            error_log('wa historial backfill: ' . $e->getMessage());
+        }
+        $page = max(1, (int)($_GET['page'] ?? 1));
+        $perPage = max(1, min(50, (int)($_GET['per_page'] ?? 10)));
+        $role = $_SESSION['user_role'] ?? '';
+        if ($role === 'cordinador') {
+            $role = 'coordinador';
+        }
+        $actorFilter = null;
+        if ($role !== 'administrador') {
+            $actorFilter = (string)$_SESSION['user_id'];
+        }
+        $data = $this->historialModel->listPaginado($page, $perPage, $actorFilter);
+        $this->jsonOut(array_merge(['success' => true], $data));
+    }
+
+    public function lookupCedula(): void {
+        $this->requireRoles(['coordinador', 'administrador']);
+        $cedula = trim((string)($_GET['cedula'] ?? ''));
+        if ($cedula === '') {
+            $this->jsonOut(['success' => false, 'error' => 'Cédula requerida'], 400);
+        }
+        $baseIds = $this->baseIdsPermitidasParaCoordinador();
+        $clientes = $this->convModel->listClientesByCedula($cedula, $baseIds);
+        $this->jsonOut([
+            'success' => true,
+            'cedula' => $cedula,
+            'clientes' => $clientes,
+        ]);
     }
 
     public function emparejar(): void {
@@ -1546,7 +1673,6 @@ class WhatsappController {
         $body = $this->readJsonBody();
         $convId = (int)($body['conversacion_id'] ?? 0);
         $clienteId = (int)($body['cliente_id'] ?? 0);
-        $asesorId = isset($body['asesor_id']) ? (string)$body['asesor_id'] : null;
         if ($convId <= 0 || $clienteId <= 0) {
             $this->jsonOut(['success' => false, 'error' => 'conversacion_id y cliente_id requeridos'], 400);
         }
@@ -1554,31 +1680,85 @@ class WhatsappController {
         if (!$conv) {
             $this->jsonOut(['success' => false, 'error' => 'Conversación no encontrada'], 404);
         }
-        $fields = [
-            'cliente_id' => $clienteId,
-            'estado' => 'abierta',
-        ];
-        if ($asesorId !== null && $asesorId !== '') {
-            $fields['asesor_id'] = $asesorId;
-            $fields['asesor_notificacion_id'] = $asesorId;
-        }
-        $this->convModel->update($convId, $fields);
-        $asesorAsignacion = trim((string)($asesorId ?: ($conv['asesor_id'] ?? '')));
-        if ($asesorAsignacion !== '' && $asesorAsignacion !== '0') {
-            $stmt = $this->pdo->prepare(
-                'INSERT INTO wa_asignaciones (conversacion_id, asesor_id, asignado_por) VALUES (?, ?, ?)'
-            );
-            $stmt->execute([
-                $convId,
-                $asesorAsignacion,
-                $this->currentAsesorId(),
+        if (!empty($conv['cliente_id'])) {
+            if ((int)$conv['cliente_id'] !== $clienteId) {
+                $this->jsonOut(['success' => false, 'error' => 'La conversación ya está amarrada a otro cliente'], 409);
+            }
+            // Reintento idempotente: no borrar una asignación que pudo ocurrir tras el primer empareje.
+            $this->jsonOut([
+                'success' => true,
+                'conversacion' => $conv,
+                'open_url' => 'index.php?action=gestionar_cliente&id=' . $clienteId . '&wa=' . $convId,
             ]);
         }
+
+        $stmt = $this->pdo->prepare(
+            'SELECT c.id_cliente, c.base_id, b.campana_id
+             FROM clientes c
+             INNER JOIN base_clientes b ON b.id_base = c.base_id
+             WHERE c.id_cliente = ? LIMIT 1'
+        );
+        $stmt->execute([$clienteId]);
+        $cliente = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$cliente) {
+            $this->jsonOut(['success' => false, 'error' => 'Cliente no encontrado'], 404);
+        }
+
+        $permitidas = $this->baseIdsPermitidasParaCoordinador();
+        if ($permitidas && !in_array((int)$cliente['base_id'], $permitidas, true)) {
+            $this->jsonOut(['success' => false, 'error' => 'No tienes acceso a la base seleccionada'], 403);
+        }
+
+        try {
+            $this->pdo->beginTransaction();
+            // Solo modifica la fila cliente seleccionada, nunca las demás filas de la misma cédula.
+            $this->convModel->addPhoneToCliente($clienteId, (string)$conv['telefono_e164']);
+            $this->convModel->update($convId, [
+                'cliente_id' => $clienteId,
+                'campana_id' => $cliente['campana_id'] !== null ? (int)$cliente['campana_id'] : null,
+                'estado' => 'abierta',
+                'asesor_id' => null,
+                'asesor_notificacion_id' => null,
+            ]);
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            $this->jsonOut(['success' => false, 'error' => $e->getMessage()], 400);
+        }
+
+        $updated = $this->convModel->getById($convId);
+        $this->onInboundMessage($updated);
+        $this->dispatchColaAsignacion();
+        $final = $this->convModel->getById($convId);
+        $this->registrarHistorialEmpareje($final ?: $updated, $clienteId, (int)$cliente['base_id']);
         $this->jsonOut([
             'success' => true,
-            'conversacion' => $this->convModel->getById($convId),
+            'conversacion' => $final,
             'open_url' => 'index.php?action=gestionar_cliente&id=' . $clienteId . '&wa=' . $convId,
         ]);
+    }
+
+    /**
+     * [] significa sin filtro (administrador); coordinador recibe solo sus bases.
+     */
+    private function baseIdsPermitidasParaCoordinador(): array {
+        $role = $_SESSION['user_role'] ?? '';
+        if ($role === 'administrador') {
+            return [];
+        }
+        $model = new CargaExcelModel($this->pdo);
+        $bases = $model->getCargasByCoordinador((string)$_SESSION['user_id'], true);
+        $ids = [];
+        foreach ($bases as $base) {
+            $id = (int)($base['id_base'] ?? $base['id'] ?? 0);
+            if ($id > 0) {
+                $ids[] = $id;
+            }
+        }
+        // Un coordinador sin bases no debe convertir [] en acceso global.
+        return $ids ?: [-1];
     }
 
     // ─── Campañas masivas / plantillas / dispatcher ─────────────────────────
@@ -1615,52 +1795,15 @@ class WhatsappController {
 
     public function templatesList(): void {
         $this->requireRoles(['asesor', 'coordinador', 'administrador']);
-        $templates = waProvider() === 'meta'
-            ? $this->metaGateway->listTemplates()
-            : $this->listarPlantillasKommo();
+        $templates = $this->listarPlantillasKommo();
         $this->jsonOut([
             'success' => true,
             'templates' => $templates,
             'kommo_enabled' => kommoEnabled(),
-            'meta_enabled' => metaEnabled(),
-            'provider' => waProvider(),
             'hint' => empty($templates)
-                ? 'No hay plantillas visibles. Revisa las credenciales y el WABA en Meta.'
+                ? 'No hay plantillas aprobadas visibles aún. Cuando Meta/Kommo las publique aparecerán aquí.'
                 : null,
         ]);
-    }
-
-    public function templatesCrear(): void {
-        $this->requireRoles(['coordinador', 'administrador']);
-        if (waProvider() !== 'meta') {
-            $this->jsonOut([
-                'success' => false,
-                'error' => 'La creación directa de plantillas requiere WA_PROVIDER=meta',
-            ], 409);
-        }
-        $body = $this->readJsonBody();
-        $result = $this->metaGateway->createTemplate([
-            'name' => $body['name'] ?? '',
-            'language' => $body['language'] ?? 'es',
-            'category' => $body['category'] ?? 'UTILITY',
-            'body' => $body['body'] ?? '',
-            'examples' => $body['examples'] ?? [],
-        ]);
-        if (empty($result['ok'])) {
-            $this->jsonOut([
-                'success' => false,
-                'error' => (string)($result['error'] ?? 'No se pudo enviar la plantilla a Meta'),
-            ], 502);
-        }
-        $this->jsonOut([
-            'success' => true,
-            'template' => $result['template'] ?? null,
-            'message' => 'Plantilla enviada a revisión de Meta',
-        ]);
-    }
-
-    public function templatesSync(): void {
-        $this->templatesList();
     }
 
     /**
@@ -1755,10 +1898,7 @@ class WhatsappController {
 
             $this->releaseSessionLock();
 
-            if (waProvider() === 'meta' && !metaEnabled()) {
-                $this->jsonOut(['success' => false, 'error' => 'Meta Cloud API no está configurada'], 503);
-            }
-            if (waProvider() === 'kommo' && !kommoEnabled()) {
+            if (!kommoEnabled()) {
                 $this->jsonOut(['success' => false, 'error' => 'Kommo no está configurado'], 503);
             }
 
@@ -1772,12 +1912,12 @@ class WhatsappController {
                 'template_name' => $templateName !== '' ? $templateName : $templateId,
                 'template_language' => $templateLang !== '' ? $templateLang : 'es',
             ];
-            $send = $this->enviarPlantillaProveedor($conv, $cm, $params, $cliName);
+            $send = $this->enviarPlantillaKommo($conv, $cm, $params, $cliName);
             if (empty($send['ok'])) {
                 $this->jsonOut([
                     'success' => false,
                     'error' => (string)($send['error'] ?? 'No se pudo enviar la plantilla'),
-                    'needs_first_talk' => waProvider() === 'kommo' && !empty($send['needs_first_talk']),
+                    'needs_first_talk' => !empty($send['needs_first_talk']),
                     'kommo_contact_id' => $send['contact_id'] ?? null,
                     'conversacion' => $this->convModel->getById((int)$conv['id']),
                 ], 502);
@@ -1789,23 +1929,18 @@ class WhatsappController {
                 'direccion' => 'out',
                 'tipo' => 'template',
                 'cuerpo' => $preview,
-                'kommo_message_id' => waProvider() === 'kommo' ? ($send['external_message_id'] ?? null) : null,
-                'external_message_id' => $send['external_message_id'] ?? null,
+                'kommo_message_id' => $send['kommo_message_id'] ?? null,
                 'status' => 'enviado',
             ]);
             $this->convModel->touchPreview((int)$conv['id'], $preview);
-            $this->convModel->update((int)$conv['id'], [
-                'wa_activo' => 'si',
-                'provider' => waProvider(),
-                'meta_phone_number_id' => waProvider() === 'meta' ? META_PHONE_NUMBER_ID : null,
-            ]);
+            $this->convModel->update((int)$conv['id'], ['wa_activo' => 'si']);
 
             $conv = $this->convModel->getById((int)$conv['id']);
             $this->jsonOut([
                 'success' => true,
                 'mensaje_id' => $msgId,
                 'conversacion' => $conv,
-                'external_message_id' => $send['external_message_id'] ?? null,
+                'kommo_message_id' => $send['kommo_message_id'] ?? null,
             ]);
         } catch (Throwable $e) {
             $this->jsonOut(['success' => false, 'error' => $e->getMessage()], 500);
@@ -1916,6 +2051,7 @@ class WhatsappController {
         }
 
         $processed = $this->procesarLoteCampana($cmId, 15);
+        $this->upsertHistorialCampanaMasiva($cmId);
 
         $this->jsonOut([
             'success' => true,
@@ -1942,6 +2078,7 @@ class WhatsappController {
             $this->jsonOut(['success' => false, 'error' => 'Sin permiso'], 403);
         }
         $lote = $this->procesarLoteCampana($cmId, $limit);
+        $this->upsertHistorialCampanaMasiva($cmId);
         $this->jsonOut([
             'success' => true,
             'lote' => $lote,
@@ -1993,7 +2130,7 @@ class WhatsappController {
         $ok = 0;
         $err = 0;
         foreach ($pendientes as $dest) {
-            if (($dest['estado'] ?? '') === 'enviando' && !empty($dest['external_message_id'])) {
+            if (($dest['estado'] ?? '') === 'enviando' && !empty($dest['kommo_message_id'])) {
                 $this->campanaMasivaModel->updateDestinatario((int)$dest['id'], [
                     'estado' => 'enviado',
                     'enviado_at' => $dest['enviado_at'] ?: date('Y-m-d H:i:s'),
@@ -2040,13 +2177,11 @@ class WhatsappController {
                 // No borrar asesor_id si ya existía interacción previa; limpiar notif
                 $this->convModel->update((int)$conv['id'], $updates);
 
-                $send = $this->enviarPlantillaProveedor($conv, $cm, $params);
+                $send = $this->enviarPlantillaKommo($conv, $cm, $params);
                 if (!empty($send['ok'])) {
-                    $externalMessageId = $send['external_message_id'] ?? null;
                     $this->campanaMasivaModel->updateDestinatario((int)$dest['id'], [
                         'estado' => 'enviado',
-                        'kommo_message_id' => waProvider() === 'kommo' ? $externalMessageId : null,
-                        'external_message_id' => $externalMessageId,
+                        'kommo_message_id' => $send['kommo_message_id'] ?? null,
                         'conversacion_id' => (int)$conv['id'],
                         'enviado_at' => date('Y-m-d H:i:s'),
                     ]);
@@ -2056,8 +2191,7 @@ class WhatsappController {
                         'direccion' => 'out',
                         'tipo' => 'template',
                         'cuerpo' => $preview . ' · ' . ($dest['nombre'] ?? '') . ' / ' . ($dest['cedula'] ?? ''),
-                        'kommo_message_id' => waProvider() === 'kommo' ? $externalMessageId : null,
-                        'external_message_id' => $externalMessageId,
+                        'kommo_message_id' => $send['kommo_message_id'] ?? null,
                         'status' => 'enviado',
                     ]);
                     $this->convModel->touchPreview((int)$conv['id'], $preview);
@@ -2196,39 +2330,6 @@ class WhatsappController {
     /**
      * Envía plantilla HSM. Si Kommo aún no expone el endpoint, devolver error claro.
      */
-    private function enviarPlantillaProveedor(
-        array $conv,
-        array $cm,
-        array $params,
-        string $contactName = ''
-    ): array {
-        if (waProvider() === 'meta') {
-            $name = trim((string)($cm['template_name'] ?? ''));
-            if ($name === '') {
-                return ['ok' => false, 'error' => 'Meta requiere el nombre interno de la plantilla'];
-            }
-            $send = $this->metaGateway->sendTemplate(
-                (string)($conv['telefono_e164'] ?? ''),
-                $name,
-                (string)($cm['template_language'] ?? 'es'),
-                array_values($params)
-            );
-            if (!empty($send['ok'])) {
-                $this->convModel->update((int)$conv['id'], [
-                    'provider' => 'meta',
-                    'meta_phone_number_id' => META_PHONE_NUMBER_ID,
-                ]);
-            }
-            return $send;
-        }
-
-        $send = $this->enviarPlantillaKommo($conv, $cm, $params, $contactName);
-        if (!empty($send['kommo_message_id'])) {
-            $send['external_message_id'] = $send['kommo_message_id'];
-        }
-        return $send;
-    }
-
     private function enviarPlantillaKommo(array $conv, array $cm, array $params, string $contactName = ''): array {
         $talkId = trim((string)($conv['kommo_talk_id'] ?? ''));
         if ($talkId === '') {
@@ -2319,9 +2420,27 @@ class WhatsappController {
     }
 
     private function onInboundMessage(array $conv): void {
+        if (empty($conv['cliente_id']) && ($conv['origen'] ?? 'organico') !== 'campana_masiva') {
+            $resolved = $this->convModel->resolveClienteByPhone((string)($conv['telefono_e164'] ?? ''));
+            if ($resolved) {
+                $this->convModel->update((int)$conv['id'], [
+                    'cliente_id' => (int)$resolved['id_cliente'],
+                    'campana_id' => $resolved['campana_id'] !== null
+                        ? (int)$resolved['campana_id']
+                        : null,
+                    'estado' => 'abierta',
+                ]);
+                $conv = $this->convModel->getById((int)$conv['id']) ?: $conv;
+            }
+        }
+        if (empty($conv['cliente_id']) || ($conv['estado'] ?? '') === 'sin_cliente') {
+            // El coordinador debe elegir primero la base y el id_cliente concreto.
+            return;
+        }
         $notif = trim((string)($conv['asesor_notificacion_id'] ?? ''));
         if ($notif !== '') {
-            // Ya hay dueño de notificación: no reencolar
+            // Ya hay dueño: reabrir burbuja si la cerró, para que vea el inbound.
+            $this->colaModel->undismiss((int)$conv['id'], $notif);
             return;
         }
         $campanaId = isset($conv['campana_id']) ? (int)$conv['campana_id'] : null;
@@ -2347,16 +2466,18 @@ class WhatsappController {
         }
         $assignedThisTick = []; // asesor => true (máx 1)
         foreach ($waiting as $row) {
+            if (empty($row['cliente_id'])) {
+                continue;
+            }
             $campanaId = (int)($row['campana_id'] ?? 0);
             if ($campanaId <= 0 && !empty($row['cliente_id'])) {
                 $campanaId = (int)$this->campanaIdFromCliente((int)$row['cliente_id']);
             }
-            $online = [];
-            if ($campanaId > 0) {
+            // Primera opción: asesores asignados a la base y activos en su campaña.
+            $online = $this->asesoresEnLineaDeBaseYCampana((int)$row['cliente_id']);
+            // Fallback acordado: cualquier asesor en línea de la campaña de esa base.
+            if (!$online && $campanaId > 0) {
                 $online = $this->asesoresEnLineaDeCampana($campanaId);
-            }
-            if (!$online && !empty($row['cliente_id'])) {
-                $online = $this->asesoresEnLineaPorCliente((int)$row['cliente_id']);
             }
             if (!$online) {
                 continue;
@@ -2478,7 +2599,7 @@ class WhatsappController {
         return '';
     }
 
-    private function asesoresEnLineaPorCliente(int $clienteId): array {
+    private function asesoresEnLineaDeBaseYCampana(int $clienteId): array {
         $stmt = $this->pdo->prepare('SELECT base_id FROM clientes WHERE id_cliente = ? LIMIT 1');
         $stmt->execute([$clienteId]);
         $baseId = (int)$stmt->fetchColumn();
@@ -2486,7 +2607,7 @@ class WhatsappController {
             return [];
         }
         $tareaModel = new TareaModel($this->pdo);
-        $asesores = $tareaModel->getAsesoresByBase($baseId);
+        $asesores = $tareaModel->getAsesoresAsignadosABaseEnCampana($baseId);
         $online = [];
         foreach ($asesores as $a) {
             $ced = $this->cedulaAsesorCampana($a);
@@ -2535,5 +2656,116 @@ class WhatsappController {
             // sin call_log
         }
         return true;
+    }
+
+    private function nombreUsuarioPorCedula(string $cedula): string {
+        $cedula = trim($cedula);
+        if ($cedula === '') {
+            return '';
+        }
+        $stmt = $this->pdo->prepare('SELECT nombre FROM usuarios WHERE cedula = ? LIMIT 1');
+        $stmt->execute([$cedula]);
+        $nombre = trim((string)$stmt->fetchColumn());
+        return $nombre !== '' ? $nombre : $cedula;
+    }
+
+    private function upsertHistorialCampanaMasiva(int $cmId): void {
+        if ($cmId <= 0 || !$this->historialModel->ensureTableExists()) {
+            return;
+        }
+        $cm = $this->campanaMasivaModel->getById($cmId);
+        if (!$cm) {
+            return;
+        }
+        $actorCed = (string)($cm['coordinador_cedula'] ?? '');
+        $actorNombre = $this->nombreUsuarioPorCedula($actorCed);
+        $enviados = (int)($cm['enviados'] ?? 0);
+        $total = (int)($cm['total'] ?? 0);
+        $baseNombre = '';
+        $baseId = (int)($cm['base_id'] ?? 0);
+        if ($baseId > 0) {
+            $stmt = $this->pdo->prepare('SELECT nombre FROM base_clientes WHERE id_base = ? LIMIT 1');
+            $stmt->execute([$baseId]);
+            $baseNombre = (string)($stmt->fetchColumn() ?: ('Base #' . $baseId));
+        }
+        $resumen = sprintf(
+            'Masivo #%d · %d enviados de %d · %s',
+            $cmId,
+            $enviados,
+            $total,
+            $actorNombre !== '' ? $actorNombre : 'Coordinador'
+        );
+        $payload = [
+            'campana_masiva_id' => $cmId,
+            'base_id' => $baseId,
+            'base_nombre' => $baseNombre,
+            'template_name' => (string)($cm['template_name'] ?? ''),
+            'enviados' => $enviados,
+            'total' => $total,
+            'errores' => (int)($cm['errores'] ?? 0),
+            'estado' => (string)($cm['estado'] ?? ''),
+        ];
+        $existingId = $this->historialModel->findCampanaMasivaEventId($cmId);
+        if ($existingId) {
+            $this->historialModel->update($existingId, [
+                'resumen' => $resumen,
+                'payload' => $payload,
+                'actor_nombre' => $actorNombre,
+                'actor_cedula' => $actorCed,
+            ]);
+            return;
+        }
+        $this->historialModel->create([
+            'tipo' => 'campana_masiva',
+            'actor_cedula' => $actorCed,
+            'actor_nombre' => $actorNombre,
+            'resumen' => $resumen,
+            'payload' => $payload,
+        ]);
+    }
+
+    private function registrarHistorialEmpareje(?array $conv, int $clienteId, int $baseId): void {
+        if (!$conv || !$this->historialModel->ensureTableExists()) {
+            return;
+        }
+        $actorCed = $this->currentAsesorId();
+        $actorNombre = $this->nombreUsuarioPorCedula($actorCed);
+        $baseNombre = 'Base #' . $baseId;
+        if ($baseId > 0) {
+            $stmt = $this->pdo->prepare('SELECT nombre FROM base_clientes WHERE id_base = ? LIMIT 1');
+            $stmt->execute([$baseId]);
+            $bn = trim((string)$stmt->fetchColumn());
+            if ($bn !== '') {
+                $baseNombre = $bn;
+            }
+        }
+        $asesorCed = trim((string)($conv['asesor_notificacion_id'] ?? $conv['asesor_id'] ?? ''));
+        $asesorNombre = $asesorCed !== ''
+            ? $this->nombreUsuarioPorCedula($asesorCed)
+            : 'Sin asignar aún';
+        $telefono = (string)($conv['telefono_e164'] ?? '');
+        $resumen = sprintf(
+            '%s · %s · Asesor %s · Gestión: %s',
+            $telefono !== '' ? $telefono : ('Conv #' . (int)($conv['id'] ?? 0)),
+            $baseNombre,
+            $asesorNombre,
+            $actorNombre !== '' ? $actorNombre : 'Coordinador'
+        );
+        $this->historialModel->create([
+            'tipo' => 'empareje_sin_cliente',
+            'actor_cedula' => $actorCed,
+            'actor_nombre' => $actorNombre,
+            'resumen' => $resumen,
+            'payload' => [
+                'conversacion_id' => (int)($conv['id'] ?? 0),
+                'cliente_id' => $clienteId,
+                'telefono_e164' => $telefono,
+                'base_id' => $baseId,
+                'base_nombre' => $baseNombre,
+                'asesor_cedula' => $asesorCed !== '' ? $asesorCed : null,
+                'asesor_nombre' => $asesorNombre,
+                'gestionado_por' => $actorNombre,
+            ],
+        ]);
     }
 }

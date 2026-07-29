@@ -75,7 +75,13 @@ function getNavbar($currentPage = '', $userRole = '') {
     
     foreach ($menuItems as $label => $url) {
         $activeClass = ($currentPage === $label) ? 'active' : '';
-        $navbar .= '<li><a href="' . $url . '" class="' . $activeClass . '">' . $label . '</a></li>';
+        $extra = '';
+        if ($label === 'WhatsApp' && in_array($userRole, ['coordinador', 'administrador'], true)) {
+            $extra = '<span class="wa-coord-nav-badge" id="waCoordNavBadge" hidden aria-hidden="true">0</span>';
+        }
+        $navbar .= '<li><a href="' . $url . '" class="' . $activeClass . '"'
+            . ($label === 'WhatsApp' ? ' id="waCoordNavLink"' : '')
+            . '>' . $label . $extra . '</a></li>';
     }
     
     $navbar .= '
@@ -132,12 +138,23 @@ function includeNavbar($currentPage = '', $userRole = '') {
         static $waGlobalInjected = false;
         if (!$waGlobalInjected) {
             $waGlobalInjected = true;
-            echo '<link rel="stylesheet" href="assets/css/whatsapp-panel.css?v=9">' . "\n";
+            echo '<link rel="stylesheet" href="assets/css/whatsapp-panel.css?v=10">' . "\n";
             echo '<script>window.__waGlobal=' . json_encode([
                 'role' => $role,
                 'pollMs' => 5000,
             ], JSON_UNESCAPED_UNICODE) . ';</script>' . "\n";
-            echo '<script src="assets/js/whatsapp-bubbles.js?v=4"></script>' . "\n";
+            echo '<script src="assets/js/whatsapp-bubbles.js?v=6"></script>' . "\n";
+        }
+    }
+    if (in_array($role, ['coordinador', 'administrador'], true)) {
+        static $waCoordNavInjected = false;
+        if (!$waCoordNavInjected) {
+            $waCoordNavInjected = true;
+            echo '<script>window.__waCoordNav=' . json_encode([
+                'pollMs' => 15000,
+                'syncEvery' => 2,
+            ], JSON_UNESCAPED_UNICODE) . ';</script>' . "\n";
+            echo '<script src="assets/js/whatsapp-coord-nav.js?v=1"></script>' . "\n";
         }
     }
 }

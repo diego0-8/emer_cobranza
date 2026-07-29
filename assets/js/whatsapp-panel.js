@@ -1,5 +1,5 @@
 /**
- * Panel WhatsApp (Meta Cloud API / fallback Kommo) — gestionar_cliente
+ * Panel WhatsApp (espejo Kommo) — gestionar_cliente
  * Init no bloqueante: no congela softphone/buscador.
  */
 (function () {
@@ -328,11 +328,7 @@
         try {
             const data = await apiGet('wa_estado');
             if (els.mode) {
-                if (data.mode !== 'live') {
-                    els.mode.textContent = 'Configuración pendiente';
-                } else {
-                    els.mode.textContent = data.provider === 'meta' ? 'Meta Cloud API' : 'Kommo en vivo';
-                }
+                els.mode.textContent = data.kommo_enabled ? 'Kommo en vivo' : 'Modo demo';
             }
         } catch (e) { /* ignore */ }
     }
@@ -455,16 +451,14 @@
         if (!els.tplSelect) return;
         try {
             const data = await apiGet('wa_templates_list');
-            templatesCache = (data.templates || []).filter(function (t) {
-                return !t.status || String(t.status).toLowerCase() === 'approved';
-            });
+            templatesCache = data.templates || [];
             els.tplSelect.innerHTML = '';
             if (!templatesCache.length) {
                 els.tplSelect.innerHTML = '<option value="">— Sin plantillas WABA —</option>';
                 if (els.tplBtn) els.tplBtn.disabled = true;
                 if (els.tplPreview) {
                     els.tplPreview.hidden = false;
-                    els.tplPreview.textContent = data.hint || 'No hay plantillas aprobadas disponibles en Meta.';
+                    els.tplPreview.textContent = data.hint || 'No hay plantillas disponibles en Kommo.';
                 }
                 return;
             }
@@ -607,9 +601,9 @@
         els.btn = $('waComposeSend');
         els.error = $('waError');
         els.mode = $('waPanelMode');
-        els.tplSelect = $('waTemplateSelect');
-        els.tplBtn = $('waTemplateSend');
-        els.tplPreview = $('waTemplatePreview');
+        els.tplSelect = null;
+        els.tplBtn = null;
+        els.tplPreview = null;
 
         if (!els.panel || !clienteId) return;
 
@@ -617,9 +611,6 @@
             els.thread.innerHTML = '<div class="wa-empty">Cargando WhatsApp…</div>';
         }
         if (els.btn) els.btn.addEventListener('click', sendMessage);
-        if (els.tplSelect) els.tplSelect.addEventListener('change', updateTemplatePreview);
-        if (els.tplBtn) els.tplBtn.addEventListener('click', sendTemplate);
-        loadTemplates();
         if (els.input) {
             els.input.addEventListener('keydown', function (ev) {
                 if (ev.key === 'Enter' && !ev.shiftKey) {

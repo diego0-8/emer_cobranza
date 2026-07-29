@@ -2889,16 +2889,6 @@ $basePath = $basePath ?? '';
                             <select id="waPhoneSelect" aria-label="Número del perfil"></select>
                             <span class="wa-activo-badge desconocido" id="waActivoBadge" title="Estado WhatsApp">?</span>
                         </div>
-                        <div class="wa-template-row" id="waTemplateRow">
-                            <label for="waTemplateSelect"><i class="fas fa-file-alt"></i> Iniciar con plantilla</label>
-                            <select id="waTemplateSelect" aria-label="Plantilla WhatsApp">
-                                <option value="">Cargando plantillas…</option>
-                            </select>
-                            <button type="button" id="waTemplateSend" class="wa-tpl-send" title="Enviar plantilla aprobada" disabled>
-                                <i class="fas fa-paper-plane"></i> Enviar plantilla
-                            </button>
-                        </div>
-                        <div class="wa-template-preview" id="waTemplatePreview" hidden></div>
                         <div class="wa-thread" id="waThread">
                             <div class="wa-empty">Cargando conversación…</div>
                         </div>
@@ -5280,7 +5270,7 @@ $basePath = $basePath ?? '';
     </script>
     <?php endif; ?>
 
-    <script src="assets/js/whatsapp-panel.js?v=10"></script>
+    <script src="assets/js/whatsapp-panel.js?v=11"></script>
 
 </body>
 </html>

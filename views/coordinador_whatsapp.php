@@ -16,6 +16,7 @@ require_once __DIR__ . '/shared_navbar.php';
     <?php require_once __DIR__ . '/shared_styles.php'; ?>
     <link rel="stylesheet" href="css/common-styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         :root {
             --wa-green: #25d366;
@@ -37,9 +38,61 @@ require_once __DIR__ . '/shared_navbar.php';
         }
 
         .wa-coord-page {
-            max-width: 1100px;
+            max-width: 1400px;
             margin: 0 auto;
             padding: 28px 20px 48px;
+        }
+
+        .wa-hist-card .wa-card-body { padding: 0; }
+        .wa-hist-list { max-height: 720px; overflow-y: auto; }
+        .wa-hist-item {
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--wa-border);
+            font-size: 0.82rem;
+            color: var(--wa-text);
+        }
+        .wa-hist-item:last-child { border-bottom: 0; }
+        .wa-hist-item .wa-hist-tipo {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.68rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+            color: var(--wa-green-dark);
+            margin-bottom: 4px;
+        }
+        .wa-hist-item .wa-hist-tipo.is-empareje { color: #0369a1; }
+        .wa-hist-item .wa-hist-meta {
+            color: var(--wa-muted);
+            font-size: 0.72rem;
+            margin-top: 6px;
+        }
+        .wa-hist-pager {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 10px 12px;
+            border-top: 1px solid var(--wa-border);
+            background: #f8fafc;
+        }
+        .accordion-button:not(.collapsed) {
+            background: #f0fdf4;
+            color: var(--wa-green-deep);
+            box-shadow: none;
+        }
+        .accordion-button:focus {
+            box-shadow: 0 0 0 0.2rem rgba(37, 211, 102, 0.25);
+        }
+        .accordion-item {
+            border: 1px solid var(--wa-border);
+            border-radius: 14px !important;
+            overflow: hidden;
+            margin-bottom: 14px;
+            background: var(--wa-surface);
+            box-shadow: 0 4px 18px rgba(15, 23, 42, 0.05);
         }
 
         .wa-hero {
@@ -170,8 +223,8 @@ require_once __DIR__ . '/shared_navbar.php';
         }
 
         .wa-field select,
-        .wa-field input,
-        .wa-field textarea {
+        .wa-field textarea,
+        .wa-field input {
             width: 100%;
             box-sizing: border-box;
             border: 1.5px solid #dbe3ee;
@@ -184,7 +237,6 @@ require_once __DIR__ . '/shared_navbar.php';
         }
 
         .wa-field select:focus,
-        .wa-field input:focus,
         .wa-field textarea:focus {
             outline: none;
             border-color: var(--wa-green);
@@ -414,6 +466,91 @@ require_once __DIR__ . '/shared_navbar.php';
             margin-bottom: 8px;
             color: #94a3b8;
         }
+
+        .wa-inbox-card { margin-top: 18px; }
+        .wa-inbox-grid {
+            display: grid;
+            grid-template-columns: minmax(280px, 0.8fr) minmax(420px, 1.6fr);
+            min-height: 500px;
+        }
+        .wa-unknown-list {
+            border-right: 1px solid var(--wa-border);
+            max-height: 680px;
+            overflow-y: auto;
+        }
+        .wa-unknown-item {
+            width: 100%;
+            border: 0;
+            border-bottom: 1px solid #eef2f7;
+            background: #fff;
+            padding: 14px 16px;
+            text-align: left;
+            cursor: pointer;
+        }
+        .wa-unknown-item:hover,
+        .wa-unknown-item.is-active { background: #f0fdf4; }
+        .wa-unknown-item strong { display: block; color: var(--wa-text); }
+        .wa-unknown-item span,
+        .wa-unknown-item small {
+            display: block;
+            color: var(--wa-muted);
+            margin-top: 4px;
+        }
+        .wa-unknown-detail { padding: 18px; }
+        .wa-unknown-placeholder {
+            min-height: 430px;
+            display: grid;
+            place-content: center;
+            text-align: center;
+            color: var(--wa-muted);
+        }
+        .wa-chat-thread {
+            height: 250px;
+            overflow-y: auto;
+            padding: 12px;
+            border: 1px solid var(--wa-border);
+            border-radius: 12px;
+            background: #f8fafc;
+            margin: 12px 0;
+        }
+        .wa-chat-message {
+            max-width: 78%;
+            margin: 6px 0;
+            padding: 8px 10px;
+            border-radius: 10px;
+            background: #fff;
+            border: 1px solid var(--wa-border);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .wa-chat-message.is-out {
+            margin-left: auto;
+            background: var(--wa-mint);
+            border-color: #bbf7d0;
+        }
+        .wa-chat-compose { display: flex; gap: 8px; }
+        .wa-chat-compose input {
+            flex: 1;
+            border: 1.5px solid #dbe3ee;
+            border-radius: 10px;
+            padding: 10px 12px;
+        }
+        .wa-link-form {
+            margin-top: 18px;
+            padding-top: 16px;
+            border-top: 1px solid var(--wa-border);
+        }
+        .wa-inline-search { display: flex; gap: 8px; align-items: end; }
+        .wa-inline-search .wa-field { flex: 1; margin-bottom: 0; }
+        .wa-client-meta {
+            margin: 8px 0 12px;
+            color: var(--wa-muted);
+            font-size: 0.8rem;
+        }
+        @media (max-width: 820px) {
+            .wa-inbox-grid { grid-template-columns: 1fr; }
+            .wa-unknown-list { border-right: 0; border-bottom: 1px solid var(--wa-border); max-height: 260px; }
+        }
     </style>
 </head>
 <body>
@@ -428,206 +565,256 @@ require_once __DIR__ . '/shared_navbar.php';
     <header class="wa-hero">
         <div class="wa-hero-main">
             <div class="wa-hero-badge"><i class="fab fa-whatsapp"></i> Canal corporativo</div>
-            <h1>WhatsApp masivo</h1>
-            <p>
-                Envía plantillas aprobadas por Meta a cédulas de una base.
-                Personaliza automáticamente <strong>nombre</strong> y <strong>cédula</strong> por destinatario.
+            <h1>WhatsApp Corporativo</h1>
+            <p class="subtitle">
+                Realiza envíos masivos por WhatsApp a tus clientes registrados ingresando su <strong>nombre</strong> y <strong>cédula</strong>. 
+                E integra nuevos contactos, toda la información se guardará y asociará automáticamente en tu base de datos.
             </p>
         </div>
         <div class="wa-hero-icon" aria-hidden="true"><i class="fab fa-whatsapp"></i></div>
     </header>
 
-    <section class="wa-card" style="margin-bottom:18px">
-        <div class="wa-card-head">
-            <h2><i class="fas fa-file-circle-plus"></i> Plantillas de Meta</h2>
-            <button type="button" class="wa-btn wa-btn-ghost" id="waBtnSyncTemplates">
-                Actualizar estados
-            </button>
-        </div>
-        <div class="wa-card-body">
-            <div class="wa-row-2">
-                <div class="wa-field">
-                    <label for="waTplNewName">Nombre interno</label>
-                    <input id="waTplNewName" type="text" maxlength="512" placeholder="recordatorio_pago">
-                    <div class="wa-hint">Solo minúsculas, números y guion bajo.</div>
-                </div>
-                <div class="wa-field">
-                    <label for="waTplNewLang">Idioma</label>
-                    <select id="waTplNewLang">
-                        <option value="es">Español</option>
-                        <option value="es_CO">Español (Colombia)</option>
-                    </select>
-                </div>
-            </div>
-            <div class="wa-field">
-                <label for="waTplNewBody">Cuerpo Utility</label>
-                <textarea id="waTplNewBody" placeholder="Hola {{1}}, te recordamos que..."></textarea>
-                <div class="wa-hint">Meta revisa y aprueba la plantilla. El CRM solo la envía a revisión.</div>
-            </div>
-            <div class="wa-field">
-                <label for="waTplExamples">Ejemplos de variables (separados por |)</label>
-                <input id="waTplExamples" type="text" placeholder="María | 123456789">
-            </div>
-            <div class="wa-actions">
-                <button type="button" class="wa-btn wa-btn-primary" id="waBtnCreateTemplate">
-                    Enviar a revisión de Meta
-                </button>
-            </div>
-            <div id="waTplAdminMsg" class="wa-msg hint"></div>
-            <div class="wa-table-wrap" style="margin-top:14px">
-                <table class="wa-table" style="min-width:560px">
-                    <thead><tr><th>Plantilla</th><th>Idioma</th><th>Categoría</th><th>Estado Meta</th></tr></thead>
-                    <tbody id="waTemplatesStatus">
-                        <tr><td colspan="4">Cargando…</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </section>
+    <div class="row g-3 align-items-start">
+        <div class="col-lg-8">
+            <div class="accordion" id="waCoordAccordion">
+                <div class="accordion-item">
+                    <h2 class="accordion-header" id="waHeadingMasivos">
+                        <button class="accordion-button" type="button" data-bs-toggle="collapse"
+                                data-bs-target="#waCollapseMasivos" aria-expanded="true" aria-controls="waCollapseMasivos">
+                            <i class="fas fa-paper-plane me-2"></i> Envío masivo
+                        </button>
+                    </h2>
+                    <div id="waCollapseMasivos" class="accordion-collapse collapse show"
+                         aria-labelledby="waHeadingMasivos">
+                        <div class="accordion-body">
+                            <div class="wa-row-2">
+                                <div class="wa-field">
+                                    <label for="waBase"><i class="fas fa-database"></i> Base de datos</label>
+                                    <select id="waBase">
+                                        <option value="">— Selecciona base —</option>
+                                        <?php foreach (($bases ?? []) as $b): ?>
+                                            <option value="<?php echo (int)($b['id_base'] ?? $b['id'] ?? 0); ?>">
+                                                <?php
+                                                $bn = (string)($b['nombre'] ?? $b['nombre_cargue'] ?? ('Base #' . ($b['id_base'] ?? $b['id'] ?? '')));
+                                                echo htmlspecialchars($bn, ENT_QUOTES, 'UTF-8');
+                                                ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="wa-field">
+                                    <label for="waTemplate"><i class="fas fa-file-alt"></i> Plantilla Meta</label>
+                                    <select id="waTemplate">
+                                        <option value="">Cargando plantillas…</option>
+                                    </select>
+                                    <div class="wa-hint" id="waTplHint"></div>
+                                </div>
+                            </div>
 
-    <div class="wa-grid">
-        <section class="wa-card">
-            <div class="wa-card-head">
-                <h2><i class="fas fa-paper-plane"></i> Nueva campaña</h2>
-            </div>
-            <div class="wa-card-body">
-                <div class="wa-row-2">
-                    <div class="wa-field">
-                        <label for="waBase"><i class="fas fa-database"></i> Base de datos</label>
-                        <select id="waBase">
-                            <option value="">— Selecciona base —</option>
-                            <?php foreach (($bases ?? []) as $b): ?>
-                                <option value="<?php echo (int)($b['id_base'] ?? $b['id'] ?? 0); ?>">
-                                    <?php
-                                    $bn = (string)($b['nombre'] ?? $b['nombre_cargue'] ?? ('Base #' . ($b['id_base'] ?? $b['id'] ?? '')));
-                                    echo htmlspecialchars($bn, ENT_QUOTES, 'UTF-8');
-                                    ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="wa-field">
-                        <label for="waTemplate"><i class="fas fa-file-alt"></i> Plantilla Meta</label>
-                        <select id="waTemplate">
-                            <option value="">Cargando plantillas…</option>
-                        </select>
-                        <div class="wa-hint" id="waTplHint"></div>
-                    </div>
-                </div>
+                            <div class="wa-field">
+                                <label for="waCedulas"><i class="fas fa-id-card"></i> Cédulas (una por línea o separadas por coma)</label>
+                                <textarea id="waCedulas" placeholder="1234567890&#10;9876543210"></textarea>
+                            </div>
 
-                <div class="wa-field">
-                    <label for="waCedulas"><i class="fas fa-id-card"></i> Cédulas (una por línea o separadas por coma)</label>
-                    <textarea id="waCedulas" placeholder="1234567890&#10;9876543210"></textarea>
-                </div>
+                            <div class="wa-field">
+                                <label><i class="fas fa-sliders-h"></i> Variables de plantilla</label>
+                                <div class="wa-var-map" id="waVarMap">
+                                    <div class="wa-var-chip">
+                                        <span>{{1}}</span>
+                                        <select data-var="1">
+                                            <option value="nombre" selected>nombre</option>
+                                            <option value="cedula">cedula</option>
+                                        </select>
+                                    </div>
+                                    <div class="wa-var-chip">
+                                        <span>{{2}}</span>
+                                        <select data-var="2">
+                                            <option value="nombre">nombre</option>
+                                            <option value="cedula" selected>cedula</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
 
-                <div class="wa-field">
-                    <label><i class="fas fa-sliders-h"></i> Variables de plantilla</label>
-                    <div class="wa-var-map" id="waVarMap">
-                        <div class="wa-var-chip">
-                            <span>{{1}}</span>
-                            <select data-var="1">
-                                <option value="nombre" selected>nombre</option>
-                                <option value="cedula">cedula</option>
-                            </select>
+                            <div class="wa-actions">
+                                <button type="button" class="wa-btn wa-btn-secondary" id="waBtnPreview">
+                                    <i class="fas fa-eye"></i> Previsualizar
+                                </button>
+                                <button type="button" class="wa-btn wa-btn-primary" id="waBtnSend" disabled>
+                                    <i class="fas fa-paper-plane"></i> Crear y enviar lote
+                                </button>
+                            </div>
+
+                            <div id="waMsg" class="wa-msg hint"></div>
+
+                            <div class="wa-stats" id="waStats">
+                                <div class="wa-stat ok">
+                                    <strong id="stOk">0</strong>
+                                    <span>Con teléfono</span>
+                                </div>
+                                <div class="wa-stat warn">
+                                    <strong id="stNoTel">0</strong>
+                                    <span>Sin teléfono</span>
+                                </div>
+                                <div class="wa-stat bad">
+                                    <strong id="stMiss">0</strong>
+                                    <span>No en base</span>
+                                </div>
+                            </div>
+
+                            <div class="wa-side-note">
+                                <i class="fas fa-info-circle"></i>
+                                Si aún no hay plantillas aprobadas en Meta/Kommo, el selector aparecerá vacío.
+                            </div>
+
+                            <hr class="my-3">
+                            <h3 class="h6 mb-2"><i class="fas fa-history"></i> Campañas recientes</h3>
+                            <div class="wa-table-wrap">
+                                <?php if (!empty($campanas)): ?>
+                                <table class="wa-table">
+                                    <thead>
+                                        <tr>
+                                            <th>ID</th>
+                                            <th>Base</th>
+                                            <th>Plantilla</th>
+                                            <th>Estado</th>
+                                            <th>Enviados</th>
+                                            <th>Errores</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="waCampanasBody">
+                                        <?php foreach ($campanas as $cm): ?>
+                                            <?php $estado = (string)($cm['estado'] ?? ''); ?>
+                                            <tr data-id="<?php echo (int)$cm['id']; ?>">
+                                                <td><strong>#<?php echo (int)$cm['id']; ?></strong></td>
+                                                <td><?php echo htmlspecialchars((string)($cm['base_nombre'] ?? $cm['base_id']), ENT_QUOTES, 'UTF-8'); ?></td>
+                                                <td><?php echo htmlspecialchars((string)($cm['template_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
+                                                <td>
+                                                    <span class="wa-estado <?php echo htmlspecialchars($estado, ENT_QUOTES, 'UTF-8'); ?>">
+                                                        <?php echo htmlspecialchars($estado !== '' ? $estado : '—', ENT_QUOTES, 'UTF-8'); ?>
+                                                    </span>
+                                                </td>
+                                                <td><?php echo (int)($cm['enviados'] ?? 0); ?> / <?php echo (int)($cm['total'] ?? 0); ?></td>
+                                                <td><?php echo (int)($cm['errores'] ?? 0); ?></td>
+                                                <td>
+                                                    <?php if ($estado === 'procesando'): ?>
+                                                        <button type="button" class="wa-btn wa-btn-ghost wa-btn-lote" data-id="<?php echo (int)$cm['id']; ?>">
+                                                            Continuar
+                                                        </button>
+                                                    <?php endif; ?>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                                <?php else: ?>
+                                    <div class="wa-empty">
+                                        <i class="fas fa-inbox"></i>
+                                        Aún no hay campañas masivas.
+                                    </div>
+                                <?php endif; ?>
+                            </div>
                         </div>
-                        <div class="wa-var-chip">
-                            <span>{{2}}</span>
-                            <select data-var="2">
-                                <option value="nombre">nombre</option>
-                                <option value="cedula" selected>cedula</option>
-                            </select>
+                    </div>
+                </div>
+
+                <div class="accordion-item">
+                    <h2 class="accordion-header" id="waHeadingSinCedula">
+                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                                data-bs-target="#waCollapseSinCedula" aria-expanded="false" aria-controls="waCollapseSinCedula">
+                            <i class="fas fa-user-plus me-2"></i> WhatsApp nuevos sin cédula
+                        </button>
+                    </h2>
+                    <div id="waCollapseSinCedula" class="accordion-collapse collapse"
+                         aria-labelledby="waHeadingSinCedula">
+                        <div class="accordion-body p-0">
+                            <div class="wa-card-head border-0 border-bottom">
+                                <h2 class="mb-0" style="font-size:0.95rem"><i class="fas fa-comments"></i> Inbox</h2>
+                                <button type="button" class="wa-btn wa-btn-ghost" id="waUnknownRefresh">
+                                    <i class="fas fa-sync-alt"></i> Actualizar
+                                </button>
+                            </div>
+                            <div class="wa-inbox-grid">
+                                <div class="wa-unknown-list" id="waUnknownList">
+                                    <div class="wa-empty"><i class="fas fa-spinner fa-spin"></i>Cargando números nuevos…</div>
+                                </div>
+                                <div class="wa-unknown-detail">
+                                    <div class="wa-unknown-placeholder" id="waUnknownPlaceholder">
+                                        <div><i class="fab fa-whatsapp fa-2x"></i><br><br>Selecciona un número para pedir y asociar su cédula.</div>
+                                    </div>
+                                    <div id="waUnknownWorkspace" hidden>
+                                        <strong id="waUnknownPhone"></strong>
+                                        <div class="wa-hint" id="waUnknownPreview"></div>
+                                        <div class="wa-chat-thread" id="waUnknownMessages"></div>
+                                        <div class="wa-chat-compose">
+                                            <input type="text" id="waUnknownText" maxlength="4000" placeholder="Escribe al cliente para solicitar su cédula">
+                                            <button type="button" class="wa-btn wa-btn-primary" id="waUnknownSend">
+                                                <i class="fas fa-paper-plane"></i> Enviar
+                                            </button>
+                                        </div>
+                                        <div class="wa-link-form">
+                                            <h3>Agregar número a una base de clientes</h3>
+                                            <p class="wa-hint">El teléfono se guardará únicamente en el ID de cliente que selecciones.</p>
+                                            <div class="wa-inline-search">
+                                                <div class="wa-field">
+                                                    <label for="waUnknownCedula">Cédula</label>
+                                                    <input type="text" id="waUnknownCedula" autocomplete="off" placeholder="Número de cédula">
+                                                </div>
+                                                <button type="button" class="wa-btn wa-btn-secondary" id="waUnknownSearch">
+                                                    <i class="fas fa-search"></i> Buscar
+                                                </button>
+                                            </div>
+                                            <div class="wa-row-2" style="margin-top:14px">
+                                                <div class="wa-field">
+                                                    <label for="waUnknownBase">Base de clientes</label>
+                                                    <select id="waUnknownBase" disabled>
+                                                        <option value="">— Busca una cédula —</option>
+                                                    </select>
+                                                </div>
+                                                <div class="wa-field">
+                                                    <label for="waUnknownClient">ID de cliente específico</label>
+                                                    <select id="waUnknownClient" disabled>
+                                                        <option value="">— Selecciona base —</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <div class="wa-client-meta" id="waUnknownClientMeta"></div>
+                                            <button type="button" class="wa-btn wa-btn-primary" id="waUnknownLink" disabled>
+                                                <i class="fas fa-link"></i> Emparejar con este ID de cliente
+                                            </button>
+                                            <div class="wa-msg hint" id="waUnknownMsg"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
 
-                <div class="wa-actions">
-                    <button type="button" class="wa-btn wa-btn-secondary" id="waBtnPreview">
-                        <i class="fas fa-eye"></i> Previsualizar
-                    </button>
-                    <button type="button" class="wa-btn wa-btn-primary" id="waBtnSend" disabled>
-                        <i class="fas fa-paper-plane"></i> Crear y enviar lote
-                    </button>
+        <div class="col-lg-4">
+            <section class="wa-card wa-hist-card">
+                <div class="wa-card-head">
+                    <h2><i class="fas fa-stream"></i> Historial</h2>
                 </div>
-
-                <div id="waMsg" class="wa-msg hint"></div>
-
-                <div class="wa-stats" id="waStats">
-                    <div class="wa-stat ok">
-                        <strong id="stOk">0</strong>
-                        <span>Con teléfono</span>
+                <div class="wa-card-body">
+                    <div class="wa-hist-list" id="waHistList">
+                        <div class="wa-empty"><i class="fas fa-spinner fa-spin"></i>Cargando historial…</div>
                     </div>
-                    <div class="wa-stat warn">
-                        <strong id="stNoTel">0</strong>
-                        <span>Sin teléfono</span>
-                    </div>
-                    <div class="wa-stat bad">
-                        <strong id="stMiss">0</strong>
-                        <span>No en base</span>
+                    <div class="wa-hist-pager">
+                        <button type="button" class="wa-btn wa-btn-ghost" id="waHistPrev" disabled>Anterior</button>
+                        <span class="wa-hint mb-0" id="waHistPageLabel">Página 1 de 1</span>
+                        <button type="button" class="wa-btn wa-btn-ghost" id="waHistNext" disabled>Siguiente</button>
                     </div>
                 </div>
-
-                <div class="wa-side-note">
-                    <i class="fas fa-info-circle"></i>
-                    Si aún no hay plantillas aprobadas por Meta, el selector aparecerá vacío.
-                    Puedes preparar la base y las cédulas con anticipación.
-                </div>
-            </div>
-        </section>
-
-        <section class="wa-card">
-            <div class="wa-card-head">
-                <h2><i class="fas fa-history"></i> Campañas recientes</h2>
-            </div>
-            <div class="wa-table-wrap">
-                <?php if (!empty($campanas)): ?>
-                <table class="wa-table">
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Base</th>
-                            <th>Plantilla</th>
-                            <th>Estado</th>
-                            <th>Enviados</th>
-                            <th>Errores</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody id="waCampanasBody">
-                        <?php foreach ($campanas as $cm): ?>
-                            <?php $estado = (string)($cm['estado'] ?? ''); ?>
-                            <tr data-id="<?php echo (int)$cm['id']; ?>">
-                                <td><strong>#<?php echo (int)$cm['id']; ?></strong></td>
-                                <td><?php echo htmlspecialchars((string)($cm['base_nombre'] ?? $cm['base_id']), ENT_QUOTES, 'UTF-8'); ?></td>
-                                <td><?php echo htmlspecialchars((string)($cm['template_name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
-                                <td>
-                                    <span class="wa-estado <?php echo htmlspecialchars($estado, ENT_QUOTES, 'UTF-8'); ?>">
-                                        <?php echo htmlspecialchars($estado !== '' ? $estado : '—', ENT_QUOTES, 'UTF-8'); ?>
-                                    </span>
-                                </td>
-                                <td><?php echo (int)($cm['enviados'] ?? 0); ?> / <?php echo (int)($cm['total'] ?? 0); ?></td>
-                                <td><?php echo (int)($cm['errores'] ?? 0); ?></td>
-                                <td>
-                                    <?php if ($estado === 'procesando'): ?>
-                                        <button type="button" class="wa-btn wa-btn-ghost wa-btn-lote" data-id="<?php echo (int)$cm['id']; ?>">
-                                            Continuar
-                                        </button>
-                                    <?php endif; ?>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-                <?php else: ?>
-                    <div class="wa-empty">
-                        <i class="fas fa-inbox"></i>
-                        Aún no hay campañas masivas.
-                    </div>
-                <?php endif; ?>
-            </div>
-        </section>
+            </section>
+        </div>
     </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 (function () {
     const els = {
@@ -642,43 +829,40 @@ require_once __DIR__ . '/shared_navbar.php';
         stOk: document.getElementById('stOk'),
         stNoTel: document.getElementById('stNoTel'),
         stMiss: document.getElementById('stMiss'),
-        tplNewName: document.getElementById('waTplNewName'),
-        tplNewLang: document.getElementById('waTplNewLang'),
-        tplNewBody: document.getElementById('waTplNewBody'),
-        tplExamples: document.getElementById('waTplExamples'),
-        tplCreate: document.getElementById('waBtnCreateTemplate'),
-        tplSync: document.getElementById('waBtnSyncTemplates'),
-        tplAdminMsg: document.getElementById('waTplAdminMsg'),
-        tplStatus: document.getElementById('waTemplatesStatus'),
     };
     let lastPreviewOk = false;
     let templates = [];
+    let selectedUnknown = null;
+    let cedulaMatches = [];
+    let histPage = 1;
+    const hist = {
+        list: document.getElementById('waHistList'),
+        prev: document.getElementById('waHistPrev'),
+        next: document.getElementById('waHistNext'),
+        label: document.getElementById('waHistPageLabel'),
+    };
+    const unknown = {
+        list: document.getElementById('waUnknownList'),
+        refresh: document.getElementById('waUnknownRefresh'),
+        placeholder: document.getElementById('waUnknownPlaceholder'),
+        workspace: document.getElementById('waUnknownWorkspace'),
+        phone: document.getElementById('waUnknownPhone'),
+        preview: document.getElementById('waUnknownPreview'),
+        messages: document.getElementById('waUnknownMessages'),
+        text: document.getElementById('waUnknownText'),
+        send: document.getElementById('waUnknownSend'),
+        cedula: document.getElementById('waUnknownCedula'),
+        search: document.getElementById('waUnknownSearch'),
+        base: document.getElementById('waUnknownBase'),
+        client: document.getElementById('waUnknownClient'),
+        meta: document.getElementById('waUnknownClientMeta'),
+        link: document.getElementById('waUnknownLink'),
+        msg: document.getElementById('waUnknownMsg'),
+    };
 
     function setMsg(text, cls) {
         els.msg.className = 'wa-msg ' + (cls || 'hint') + (text ? ' is-visible' : '');
         els.msg.textContent = text || '';
-    }
-
-    function setTplAdminMsg(text, cls) {
-        els.tplAdminMsg.className = 'wa-msg ' + (cls || 'hint') + (text ? ' is-visible' : '');
-        els.tplAdminMsg.textContent = text || '';
-    }
-
-    function renderTemplateStatuses(allTemplates) {
-        els.tplStatus.innerHTML = '';
-        if (!allTemplates.length) {
-            els.tplStatus.innerHTML = '<tr><td colspan="4">No hay plantillas visibles.</td></tr>';
-            return;
-        }
-        allTemplates.forEach(function (t) {
-            const tr = document.createElement('tr');
-            [t.name, t.language || '—', t.category || '—', (t.status || '—').toUpperCase()].forEach(function (value) {
-                const td = document.createElement('td');
-                td.textContent = value;
-                tr.appendChild(td);
-            });
-            els.tplStatus.appendChild(tr);
-        });
     }
 
     async function api(action, opts) {
@@ -701,6 +885,307 @@ require_once __DIR__ . '/shared_navbar.php';
         return data;
     }
 
+    function setUnknownMsg(text, cls) {
+        unknown.msg.className = 'wa-msg ' + (cls || 'hint') + (text ? ' is-visible' : '');
+        unknown.msg.textContent = text || '';
+    }
+
+    function resetUnknownSelection() {
+        selectedUnknown = null;
+        cedulaMatches = [];
+        unknown.placeholder.hidden = false;
+        unknown.workspace.hidden = true;
+        unknown.base.disabled = true;
+        unknown.client.disabled = true;
+        unknown.link.disabled = true;
+    }
+
+    async function loadUnknownList(opts) {
+        opts = opts || {};
+        const withSync = !!opts.sync;
+        try {
+            const data = await api('wa_sin_cliente', {
+                query: withSync ? { sync: 1, limit: 20, max_age_hours: 72 } : {},
+            });
+            const rows = data.conversaciones || [];
+            if (typeof data.pendientes !== 'undefined') {
+                try {
+                    window.dispatchEvent(new CustomEvent('wa-coord-inbox-updated', {
+                        detail: { pendientes: Number(data.pendientes || 0) }
+                    }));
+                } catch (e) { /* ignore */ }
+                if (Number(data.pendientes || 0) > 0) {
+                    openSinCedulaAccordion();
+                }
+            }
+            if (data.sync && (data.sync.created || data.sync.updated)) {
+                setUnknownMsg(
+                    'Kommo: +' + (data.sync.created || 0) + ' nuevos, ' +
+                    (data.sync.updated || 0) + ' actualizados (' + (data.sync.ms || 0) + ' ms).',
+                    'ok'
+                );
+            }
+            unknown.list.innerHTML = '';
+            if (!rows.length) {
+                unknown.list.innerHTML = '<div class="wa-empty"><i class="fas fa-check-circle"></i>No hay números pendientes.</div>';
+                resetUnknownSelection();
+                return;
+            }
+            rows.forEach(function (row) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'wa-unknown-item' +
+                    (selectedUnknown && Number(selectedUnknown.id) === Number(row.id) ? ' is-active' : '');
+                const phone = document.createElement('strong');
+                phone.textContent = row.telefono_e164 || 'Número desconocido';
+                const preview = document.createElement('span');
+                preview.textContent = row.ultimo_preview || 'Sin vista previa';
+                const date = document.createElement('small');
+                date.textContent = row.ultimo_mensaje_at || row.created_at || '';
+                button.append(phone, preview, date);
+                button.addEventListener('click', function () { selectUnknown(row); });
+                unknown.list.appendChild(button);
+            });
+            if (selectedUnknown && !rows.some(function (row) {
+                return Number(row.id) === Number(selectedUnknown.id);
+            })) {
+                resetUnknownSelection();
+            }
+        } catch (e) {
+            unknown.list.innerHTML = '';
+            const errorBox = document.createElement('div');
+            errorBox.className = 'wa-empty';
+            errorBox.textContent = 'No se pudo cargar: ' + String(e.message || 'Error');
+            unknown.list.appendChild(errorBox);
+        }
+    }
+
+    async function selectUnknown(row) {
+        selectedUnknown = row;
+        cedulaMatches = [];
+        unknown.placeholder.hidden = true;
+        unknown.workspace.hidden = false;
+        unknown.phone.textContent = row.telefono_e164 || 'Número desconocido';
+        unknown.preview.textContent = row.ultimo_preview || '';
+        unknown.cedula.value = '';
+        unknown.base.innerHTML = '<option value="">— Busca una cédula —</option>';
+        unknown.client.innerHTML = '<option value="">— Selecciona base —</option>';
+        unknown.base.disabled = true;
+        unknown.client.disabled = true;
+        unknown.link.disabled = true;
+        unknown.meta.textContent = '';
+        setUnknownMsg('', 'hint');
+        await Promise.all([loadUnknownMessages(), loadUnknownList({ sync: false })]);
+    }
+
+    async function loadUnknownMessages() {
+        if (!selectedUnknown) return;
+        try {
+            const data = await api('wa_mensajes', {
+                query: { conversacion_id: selectedUnknown.id }
+            });
+            unknown.messages.innerHTML = '';
+            (data.mensajes || []).forEach(function (message) {
+                const bubble = document.createElement('div');
+                bubble.className = 'wa-chat-message' +
+                    (message.direccion === 'out' ? ' is-out' : '');
+                bubble.textContent = message.cuerpo || ('[' + (message.tipo || 'mensaje') + ']');
+                unknown.messages.appendChild(bubble);
+            });
+            if (!unknown.messages.children.length) {
+                unknown.messages.textContent = 'Aún no hay mensajes sincronizados.';
+            }
+            unknown.messages.scrollTop = unknown.messages.scrollHeight;
+        } catch (e) {
+            unknown.messages.textContent = e.message || 'No se pudo cargar el chat';
+        }
+    }
+
+    async function sendUnknownMessage() {
+        const text = unknown.text.value.trim();
+        if (!selectedUnknown || !text) return;
+        unknown.send.disabled = true;
+        try {
+            await api('wa_enviar', {
+                body: { conversacion_id: Number(selectedUnknown.id), texto: text }
+            });
+            unknown.text.value = '';
+            await loadUnknownMessages();
+        } catch (e) {
+            setUnknownMsg(e.message || 'No se pudo enviar', 'err');
+        } finally {
+            unknown.send.disabled = false;
+        }
+    }
+
+    async function lookupUnknownCedula() {
+        const cedula = unknown.cedula.value.trim();
+        if (!cedula) {
+            setUnknownMsg('Ingresa una cédula.', 'err');
+            return;
+        }
+        unknown.search.disabled = true;
+        try {
+            const data = await api('wa_lookup_cedula', { query: { cedula: cedula } });
+            cedulaMatches = data.clientes || [];
+            unknown.base.innerHTML = '<option value="">— Selecciona base —</option>';
+            unknown.client.innerHTML = '<option value="">— Selecciona base —</option>';
+            unknown.client.disabled = true;
+            unknown.link.disabled = true;
+            const bases = new Map();
+            cedulaMatches.forEach(function (client) {
+                if (!bases.has(String(client.base_id))) {
+                    bases.set(String(client.base_id), client.base_nombre || ('Base #' + client.base_id));
+                }
+            });
+            bases.forEach(function (name, id) {
+                const option = document.createElement('option');
+                option.value = id;
+                option.textContent = name;
+                unknown.base.appendChild(option);
+            });
+            unknown.base.disabled = bases.size === 0;
+            setUnknownMsg(
+                bases.size ? 'Selecciona la base y luego el ID de cliente.' : 'La cédula no aparece en tus bases.',
+                bases.size ? 'ok' : 'err'
+            );
+        } catch (e) {
+            setUnknownMsg(e.message || 'No se pudo buscar la cédula', 'err');
+        } finally {
+            unknown.search.disabled = false;
+        }
+    }
+
+    function fillUnknownClients() {
+        const baseId = Number(unknown.base.value || 0);
+        const rows = cedulaMatches.filter(function (client) {
+            return Number(client.base_id) === baseId;
+        });
+        unknown.client.innerHTML = '<option value="">— Selecciona ID de cliente —</option>';
+        rows.forEach(function (client) {
+            const option = document.createElement('option');
+            option.value = client.id_cliente;
+            option.textContent = '#' + client.id_cliente + ' · ' + (client.nombre || 'Sin nombre');
+            option.dataset.campana = client.campana_nombre || 'Sin campaña';
+            option.dataset.gestion = client.ultima_gestion || 'Sin gestión previa';
+            unknown.client.appendChild(option);
+        });
+        unknown.client.disabled = rows.length === 0;
+        unknown.link.disabled = true;
+        unknown.meta.textContent = '';
+        if (rows.length === 1) {
+            unknown.client.value = String(rows[0].id_cliente);
+            updateUnknownClientMeta();
+        }
+    }
+
+    function updateUnknownClientMeta() {
+        const option = unknown.client.options[unknown.client.selectedIndex];
+        const valid = !!(option && option.value);
+        unknown.link.disabled = !valid;
+        unknown.meta.textContent = valid
+            ? 'Campaña de la base: ' + option.dataset.campana +
+              ' · Última gestión: ' + option.dataset.gestion
+            : '';
+    }
+
+    async function linkUnknownClient() {
+        if (!selectedUnknown || !unknown.client.value) return;
+        unknown.link.disabled = true;
+        try {
+            const data = await api('wa_emparejar', {
+                body: {
+                    conversacion_id: Number(selectedUnknown.id),
+                    cliente_id: Number(unknown.client.value),
+                }
+            });
+            setUnknownMsg('Número amarrado únicamente al ID seleccionado y enviado a asignación.', 'ok');
+            resetUnknownSelection();
+            await loadUnknownList({ sync: false });
+            await loadHistorial(1);
+            if (data.open_url) {
+                // Mantener al coordinador en el inbox; la URL queda disponible para abrir la ficha después.
+                unknown.meta.dataset.openUrl = data.open_url;
+            }
+        } catch (e) {
+            setUnknownMsg(e.message || 'No se pudo emparejar', 'err');
+            unknown.link.disabled = false;
+        }
+    }
+
+    function openSinCedulaAccordion() {
+        const el = document.getElementById('waCollapseSinCedula');
+        if (!el || typeof bootstrap === 'undefined') return;
+        const collapse = bootstrap.Collapse.getOrCreateInstance(el, { toggle: false });
+        collapse.show();
+    }
+
+    function formatHistDate(value) {
+        if (!value) return '';
+        try {
+            const d = new Date(String(value).replace(' ', 'T'));
+            if (isNaN(d.getTime())) return String(value);
+            return d.toLocaleString('es-CO', {
+                day: '2-digit', month: '2-digit', year: 'numeric',
+                hour: '2-digit', minute: '2-digit'
+            });
+        } catch (e) {
+            return String(value);
+        }
+    }
+
+    async function loadHistorial(page) {
+        histPage = Math.max(1, Number(page || 1));
+        if (!hist.list) return;
+        try {
+            const data = await api('wa_historial', {
+                query: { page: histPage, per_page: 10 }
+            });
+            const items = data.items || [];
+            const totalPages = Math.max(1, Number(data.total_pages || 1));
+            histPage = Math.min(histPage, totalPages);
+            hist.list.innerHTML = '';
+            if (!items.length) {
+                hist.list.innerHTML = '<div class="wa-empty"><i class="fas fa-stream"></i>Aún no hay eventos en el historial.</div>';
+            } else {
+                items.forEach(function (item) {
+                    const row = document.createElement('div');
+                    row.className = 'wa-hist-item';
+                    const tipo = item.tipo === 'empareje_sin_cliente' ? 'Sin cédula' : 'Masivo';
+                    const tipoClass = item.tipo === 'empareje_sin_cliente' ? ' is-empareje' : '';
+                    const payload = item.payload || {};
+                    let detail = '';
+                    if (item.tipo === 'campana_masiva') {
+                        detail = (payload.base_nombre ? ('Base: ' + payload.base_nombre + ' · ') : '') +
+                            (payload.template_name ? ('Plantilla: ' + payload.template_name) : '');
+                    } else {
+                        detail = [
+                            payload.base_nombre ? ('Base: ' + payload.base_nombre) : '',
+                            payload.asesor_nombre ? ('Asesor: ' + payload.asesor_nombre) : '',
+                            payload.gestionado_por ? ('Gestión: ' + payload.gestionado_por) : ''
+                        ].filter(Boolean).join(' · ');
+                    }
+                    row.innerHTML =
+                        '<div class="wa-hist-tipo' + tipoClass + '">' + tipo + '</div>' +
+                        '<div>' + String(item.resumen || '') + '</div>' +
+                        (detail ? '<div class="wa-hist-meta">' + detail + '</div>' : '') +
+                        '<div class="wa-hist-meta">' + formatHistDate(item.created_at) +
+                        (item.actor_nombre ? (' · ' + item.actor_nombre) : '') + '</div>';
+                    hist.list.appendChild(row);
+                });
+            }
+            if (hist.label) {
+                hist.label.textContent = 'Página ' + histPage + ' de ' + totalPages +
+                    ' · ' + Number(data.total || 0) + ' evento(s)';
+            }
+            if (hist.prev) hist.prev.disabled = histPage <= 1;
+            if (hist.next) hist.next.disabled = histPage >= totalPages;
+        } catch (e) {
+            hist.list.innerHTML = '<div class="wa-empty">No se pudo cargar el historial: ' +
+                String(e.message || 'Error') + '</div>';
+        }
+    }
+
     function varMap() {
         const map = {};
         document.querySelectorAll('#waVarMap select[data-var]').forEach(function (s) {
@@ -712,23 +1197,11 @@ require_once __DIR__ . '/shared_navbar.php';
     async function loadTemplates() {
         try {
             const data = await api('wa_templates_list');
-            const metaActive = data.provider === 'meta';
-            els.tplCreate.disabled = !metaActive;
-            if (!metaActive) {
-                setTplAdminMsg(
-                    'Gestión directa de plantillas pendiente: completa config/meta.local.php y activa WA_PROVIDER=meta.',
-                    'hint'
-                );
-            }
-            const allTemplates = data.templates || [];
-            renderTemplateStatuses(allTemplates);
-            templates = allTemplates.filter(function (t) {
-                return !t.status || String(t.status).toLowerCase() === 'approved';
-            });
+            templates = data.templates || [];
             els.tpl.innerHTML = '';
             if (!templates.length) {
                 els.tpl.innerHTML = '<option value="">— Sin plantillas aprobadas aún —</option>';
-                els.hint.textContent = data.hint || 'Cuando Meta apruebe plantillas aparecerán aquí.';
+                els.hint.textContent = data.hint || 'Cuando Meta apruebe plantillas en Kommo aparecerán aquí.';
                 return;
             }
             els.tpl.innerHTML = '<option value="">— Selecciona plantilla —</option>';
@@ -741,52 +1214,12 @@ require_once __DIR__ . '/shared_navbar.php';
                 opt.dataset.body = t.body || '';
                 els.tpl.appendChild(opt);
             });
-            els.hint.textContent = templates.length + ' plantilla(s) aprobadas disponibles.';
+            els.hint.textContent = templates.length + ' plantilla(s) disponibles.';
         } catch (e) {
             els.tpl.innerHTML = '<option value="">— Error al cargar —</option>';
             els.hint.textContent = e.message || 'No se pudieron listar plantillas';
         }
     }
-
-    els.tplSync.addEventListener('click', function () {
-        els.tplSync.disabled = true;
-        loadTemplates().finally(function () { els.tplSync.disabled = false; });
-    });
-
-    els.tplCreate.addEventListener('click', async function () {
-        const name = (els.tplNewName.value || '').trim();
-        const body = (els.tplNewBody.value || '').trim();
-        if (!name || !body) {
-            setTplAdminMsg('Nombre y cuerpo son requeridos.', 'err');
-            return;
-        }
-        els.tplCreate.disabled = true;
-        setTplAdminMsg('Enviando plantilla Utility a revisión…', 'hint');
-        try {
-            const examples = (els.tplExamples.value || '')
-                .split('|')
-                .map(function (v) { return v.trim(); })
-                .filter(Boolean);
-            const data = await api('wa_templates_crear', {
-                body: {
-                    name: name,
-                    language: els.tplNewLang.value || 'es',
-                    category: 'UTILITY',
-                    body: body,
-                    examples: examples,
-                },
-            });
-            setTplAdminMsg(data.message || 'Plantilla enviada a Meta.', 'ok');
-            els.tplNewName.value = '';
-            els.tplNewBody.value = '';
-            els.tplExamples.value = '';
-            await loadTemplates();
-        } catch (e) {
-            setTplAdminMsg(e.message || 'No se pudo crear la plantilla.', 'err');
-        } finally {
-            els.tplCreate.disabled = false;
-        }
-    });
 
     els.preview.addEventListener('click', async function () {
         setMsg('Previsualizando…', 'hint');
@@ -848,6 +1281,7 @@ require_once __DIR__ . '/shared_navbar.php';
                 (lote.pendientes || 0) + ' pendientes. Usa «Continuar» si quedan.',
                 'ok'
             );
+            loadHistorial(1);
             setTimeout(function () { location.reload(); }, 1200);
         } catch (e) {
             setMsg(e.message || 'Error al crear campaña', 'err');
@@ -874,7 +1308,47 @@ require_once __DIR__ . '/shared_navbar.php';
         });
     });
 
+    unknown.refresh.addEventListener('click', function () {
+        loadUnknownList({ sync: true });
+    });
+    unknown.send.addEventListener('click', sendUnknownMessage);
+    unknown.text.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            sendUnknownMessage();
+        }
+    });
+    unknown.search.addEventListener('click', lookupUnknownCedula);
+    unknown.cedula.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            lookupUnknownCedula();
+        }
+    });
+    unknown.base.addEventListener('change', fillUnknownClients);
+    unknown.client.addEventListener('change', updateUnknownClientMeta);
+    unknown.link.addEventListener('click', linkUnknownClient);
+    if (hist.prev) {
+        hist.prev.addEventListener('click', function () {
+            if (histPage > 1) loadHistorial(histPage - 1);
+        });
+    }
+    if (hist.next) {
+        hist.next.addEventListener('click', function () {
+            loadHistorial(histPage + 1);
+        });
+    }
+
     loadTemplates();
+    loadUnknownList({ sync: true });
+    loadHistorial(1);
+    let unknownPollTick = 0;
+    setInterval(function () {
+        unknownPollTick++;
+        // Cada ~30s sincroniza talks nuevos de Kommo; el resto solo refresca BD local.
+        loadUnknownList({ sync: unknownPollTick % 3 === 0 });
+        if (selectedUnknown) loadUnknownMessages();
+    }, 10000);
 })();
 </script>
 </body>

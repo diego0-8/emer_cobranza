@@ -1,6 +1,6 @@
 <?php
 /**
- * Campañas WhatsApp masivas (Meta Cloud API o fallback Kommo).
+ * Campañas WhatsApp masivas (plantillas Meta vía Kommo).
  */
 class WhatsappCampanaMasivaModel {
     private $pdo;
@@ -115,7 +115,7 @@ class WhatsappCampanaMasivaModel {
             "UPDATE wa_campana_destinatarios
              SET estado = 'pendiente'
              WHERE campana_masiva_id = ? AND estado = 'enviando'
-               AND (external_message_id IS NULL OR external_message_id = '')"
+               AND (kommo_message_id IS NULL OR kommo_message_id = '')"
         );
         $requeue->execute([$campanaMasivaId]);
 
@@ -129,10 +129,7 @@ class WhatsappCampanaMasivaModel {
     }
 
     public function updateDestinatario(int $id, array $fields): bool {
-        $allowed = [
-            'estado', 'kommo_message_id', 'external_message_id', 'error_msg',
-            'enviado_at', 'conversacion_id', 'telefono_e164',
-        ];
+        $allowed = ['estado', 'kommo_message_id', 'error_msg', 'enviado_at', 'conversacion_id', 'telefono_e164'];
         $sets = [];
         $params = [];
         foreach ($fields as $k => $v) {

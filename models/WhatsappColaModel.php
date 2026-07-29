@@ -33,6 +33,8 @@ class WhatsappColaModel {
              INNER JOIN wa_conversaciones c ON c.id = q.conversacion_id
              WHERE q.estado = 'esperando_asesor'
                AND (c.asesor_notificacion_id IS NULL OR c.asesor_notificacion_id = '')
+               AND c.cliente_id IS NOT NULL
+               AND c.estado IN ('abierta', 'cerrada')
              ORDER BY q.id ASC
              LIMIT {$limit}"
         );

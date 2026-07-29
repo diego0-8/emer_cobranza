@@ -46,8 +46,7 @@ $accionesAPI = [
     'obtener_historial_completo',
     'obtener_estado_tiempo_asesores',
     'obtener_detalle_pausas_asesor_tmo',
-    // WhatsApp (Meta Cloud API / fallback Kommo)
-    'wa_webhook',
+    // WhatsApp + Kommo
     'wa_webhook_kommo',
     'wa_mis_chats',
     'wa_mensajes',
@@ -55,13 +54,15 @@ $accionesAPI = [
     'wa_conversacion_cliente',
     'wa_emparejar',
     'wa_sin_cliente',
+    'wa_lookup_cedula',
+    'wa_descubrir_leads',
+    'wa_coord_notif',
+    'wa_historial',
     'wa_estado',
     'wa_media',
     'wa_burbuja_dismiss',
     'wa_burbuja_restore',
     'wa_templates_list',
-    'wa_templates_crear',
-    'wa_templates_sync',
     'wa_enviar_plantilla',
     'wa_campana_preview_cedulas',
     'wa_campana_crear',
@@ -126,7 +127,7 @@ $user_role = isset($_SESSION['user_role']) ? $_SESSION['user_role'] : '';
 
 // Control de sesión
 // Permitir acciones públicas sin sesión (login + procesamiento del login).
-$accionesPublicas = ['login', 'process_login', 'wa_webhook', 'wa_webhook_kommo'];
+$accionesPublicas = ['login', 'process_login', 'wa_webhook_kommo'];
 if (!isset($_SESSION['user_id']) && !in_array($action, $accionesPublicas, true)) {
     header('Location: index.php?action=login');
     exit;
@@ -226,7 +227,7 @@ switch ($action) {
         $controller = new AdminController($pdo);
         $controller->login();
         break;
-        
+
     case 'logout':
         $controller = new AdminController($pdo);
         $controller->logout();
@@ -415,7 +416,7 @@ switch ($action) {
         $wa = new WhatsappController($pdo);
         $wa->vistaCoordWhatsapp();
         break;
-        
+
     // Acciones de asesor
     case 'mis_clientes':
     case 'mis_tareas':
@@ -618,8 +619,7 @@ switch ($action) {
         exit;
         break;
 
-    // WhatsApp (Meta Cloud API / fallback Kommo)
-    case 'wa_webhook':
+    // WhatsApp + Kommo
     case 'wa_webhook_kommo':
         $wa = new WhatsappController($pdo);
         $wa->webhookKommo();
@@ -648,6 +648,22 @@ switch ($action) {
         $wa = new WhatsappController($pdo);
         $wa->sinCliente();
         break;
+    case 'wa_descubrir_leads':
+        $wa = new WhatsappController($pdo);
+        $wa->descubrirLeads();
+        break;
+    case 'wa_coord_notif':
+        $wa = new WhatsappController($pdo);
+        $wa->notifCoordinador();
+        break;
+    case 'wa_historial':
+        $wa = new WhatsappController($pdo);
+        $wa->historial();
+        break;
+    case 'wa_lookup_cedula':
+        $wa = new WhatsappController($pdo);
+        $wa->lookupCedula();
+        break;
     case 'wa_emparejar':
         $wa = new WhatsappController($pdo);
         $wa->emparejar();
@@ -667,14 +683,6 @@ switch ($action) {
     case 'wa_templates_list':
         $wa = new WhatsappController($pdo);
         $wa->templatesList();
-        break;
-    case 'wa_templates_crear':
-        $wa = new WhatsappController($pdo);
-        $wa->templatesCrear();
-        break;
-    case 'wa_templates_sync':
-        $wa = new WhatsappController($pdo);
-        $wa->templatesSync();
         break;
     case 'wa_enviar_plantilla':
         $wa = new WhatsappController($pdo);

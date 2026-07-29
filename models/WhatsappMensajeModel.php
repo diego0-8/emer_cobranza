@@ -40,18 +40,6 @@ class WhatsappMensajeModel {
         return $row ?: null;
     }
 
-    public function findByExternalMessageId(string $externalMessageId): ?array {
-        if ($externalMessageId === '') {
-            return null;
-        }
-        $stmt = $this->pdo->prepare(
-            'SELECT * FROM wa_mensajes WHERE external_message_id = ? OR kommo_message_id = ? LIMIT 1'
-        );
-        $stmt->execute([$externalMessageId, $externalMessageId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $row ?: null;
-    }
-
     public function getById(int $id): ?array {
         if ($id <= 0) {
             return null;
@@ -64,9 +52,8 @@ class WhatsappMensajeModel {
 
     public function create(array $data): int {
         $sql = "INSERT INTO wa_mensajes
-                (conversacion_id, direccion, tipo, cuerpo, media_url, media_id, media_name,
-                 kommo_message_id, external_message_id, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))";
+                (conversacion_id, direccion, tipo, cuerpo, media_url, media_name, kommo_message_id, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([
             (int)$data['conversacion_id'],
@@ -74,10 +61,8 @@ class WhatsappMensajeModel {
             $data['tipo'] ?? 'text',
             $data['cuerpo'] ?? null,
             $data['media_url'] ?? null,
-            $data['media_id'] ?? null,
             $data['media_name'] ?? null,
             $data['kommo_message_id'] ?? null,
-            $data['external_message_id'] ?? ($data['kommo_message_id'] ?? null),
             $data['status'] ?? 'pendiente_envio',
             $data['created_at'] ?? null,
         ]);
@@ -87,23 +72,5 @@ class WhatsappMensajeModel {
     public function updateStatus(int $id, string $status): bool {
         $stmt = $this->pdo->prepare('UPDATE wa_mensajes SET status = ? WHERE id = ?');
         return $stmt->execute([$status, $id]);
-    }
-
-    public function updateStatusByExternalId(string $externalMessageId, string $status): bool {
-        $stmt = $this->pdo->prepare(
-            'UPDATE wa_mensajes SET status = ? WHERE external_message_id = ? OR kommo_message_id = ?'
-        );
-        return $stmt->execute([$status, $externalMessageId, $externalMessageId]);
-    }
-
-    public function lastInboundAt(int $conversacionId): ?string {
-        $stmt = $this->pdo->prepare(
-            "SELECT created_at FROM wa_mensajes
-             WHERE conversacion_id = ? AND direccion = 'in'
-             ORDER BY id DESC LIMIT 1"
-        );
-        $stmt->execute([$conversacionId]);
-        $value = $stmt->fetchColumn();
-        return $value !== false ? (string)$value : null;
     }
 }

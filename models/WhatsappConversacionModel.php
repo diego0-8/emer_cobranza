@@ -3,7 +3,6 @@
  * Conversaciones WhatsApp (espejo Kommo).
  */
 require_once __DIR__ . '/../config/kommo.php';
-require_once __DIR__ . '/../config/meta.php';
 
 class WhatsappConversacionModel {
     private $pdo;
@@ -22,6 +21,17 @@ class WhatsappConversacionModel {
     public function getByTelefonoE164(string $e164): ?array {
         $stmt = $this->pdo->prepare('SELECT * FROM wa_conversaciones WHERE telefono_e164 = ? LIMIT 1');
         $stmt->execute([$e164]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ?: null;
+    }
+
+    public function getByKommoTalkId(string $talkId): ?array {
+        $talkId = trim($talkId);
+        if ($talkId === '') {
+            return null;
+        }
+        $stmt = $this->pdo->prepare('SELECT * FROM wa_conversaciones WHERE kommo_talk_id = ? LIMIT 1');
+        $stmt->execute([$talkId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row ?: null;
     }
@@ -52,10 +62,20 @@ class WhatsappConversacionModel {
 
     /**
      * Burbujas activas (no dismissed) para el asesor, máx $limit.
+     * Incluye pendiente_respuesta=1 si el último mensaje es del cliente.
      */
     public function listBubblesActivas(string $asesorId, int $limit = 10): array {
         $limit = max(1, min(50, $limit));
-        $sql = "SELECT c.*, cl.nombre AS cliente_nombre, cl.cedula AS cliente_cedula
+        $sql = "SELECT c.*, cl.nombre AS cliente_nombre, cl.cedula AS cliente_cedula,
+                       CASE
+                         WHEN (
+                           SELECT m.direccion FROM wa_mensajes m
+                           WHERE m.conversacion_id = c.id
+                           ORDER BY COALESCE(m.created_at, '1970-01-01') DESC, m.id DESC
+                           LIMIT 1
+                         ) = 'in' THEN 1
+                         ELSE 0
+                       END AS pendiente_respuesta
                 FROM wa_conversaciones c
                 LEFT JOIN clientes cl ON cl.id_cliente = c.cliente_id
                 LEFT JOIN wa_burbuja_dismiss d
@@ -64,7 +84,10 @@ class WhatsappConversacionModel {
                   AND c.estado IN ('abierta', 'cerrada')
                   AND c.cliente_id IS NOT NULL
                   AND d.conversacion_id IS NULL
-                ORDER BY COALESCE(c.ultimo_mensaje_at, c.updated_at) DESC
+                ORDER BY
+                  pendiente_respuesta DESC,
+                  COALESCE(c.no_leidos, 0) DESC,
+                  COALESCE(c.ultimo_mensaje_at, c.updated_at) DESC
                 LIMIT {$limit}";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([$asesorId, $asesorId]);
@@ -81,7 +104,16 @@ class WhatsappConversacionModel {
         $visibleIds = array_map(static fn($r) => (int)$r['id'], $visible);
 
         $sql = "SELECT c.*, cl.nombre AS cliente_nombre, cl.cedula AS cliente_cedula,
-                       CASE WHEN d.conversacion_id IS NULL THEN 0 ELSE 1 END AS dismissed
+                       CASE WHEN d.conversacion_id IS NULL THEN 0 ELSE 1 END AS dismissed,
+                       CASE
+                         WHEN (
+                           SELECT m.direccion FROM wa_mensajes m
+                           WHERE m.conversacion_id = c.id
+                           ORDER BY COALESCE(m.created_at, '1970-01-01') DESC, m.id DESC
+                           LIMIT 1
+                         ) = 'in' THEN 1
+                         ELSE 0
+                       END AS pendiente_respuesta
                 FROM wa_conversaciones c
                 LEFT JOIN clientes cl ON cl.id_cliente = c.cliente_id
                 LEFT JOIN wa_burbuja_dismiss d
@@ -92,7 +124,9 @@ class WhatsappConversacionModel {
                     COALESCE(c.asesor_notificacion_id, c.asesor_id) = ?
                     OR c.ultimo_interactuante_id = ?
                   )
-                ORDER BY COALESCE(c.ultimo_mensaje_at, c.updated_at) DESC
+                ORDER BY
+                  pendiente_respuesta DESC,
+                  COALESCE(c.ultimo_mensaje_at, c.updated_at) DESC
                 LIMIT 100";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([$asesorId, $asesorId, $asesorId]);
@@ -136,6 +170,32 @@ class WhatsappConversacionModel {
         );
         $stmt->execute([$asesorId]);
         return (int)$stmt->fetchColumn();
+    }
+
+    /**
+     * Conversaciones del asesor a sincronizar con Kommo (activas Y dismissed).
+     * Sin esto, un chat cerrado en burbuja nunca recibe inbound ni reabre notificación.
+     */
+    public function listParaSyncBurbujas(string $asesorId, int $limit = 20): array {
+        $limit = max(1, min(40, $limit));
+        $sql = "SELECT c.*, cl.nombre AS cliente_nombre, cl.cedula AS cliente_cedula,
+                       CASE WHEN d.conversacion_id IS NULL THEN 0 ELSE 1 END AS dismissed
+                FROM wa_conversaciones c
+                LEFT JOIN clientes cl ON cl.id_cliente = c.cliente_id
+                LEFT JOIN wa_burbuja_dismiss d
+                  ON d.conversacion_id = c.id AND d.asesor_id = ?
+                WHERE COALESCE(c.asesor_notificacion_id, c.asesor_id) = ?
+                  AND c.estado IN ('abierta', 'cerrada')
+                  AND c.cliente_id IS NOT NULL
+                  AND c.kommo_talk_id IS NOT NULL
+                  AND c.kommo_talk_id <> ''
+                ORDER BY
+                  CASE WHEN d.conversacion_id IS NOT NULL THEN 0 ELSE 1 END ASC,
+                  COALESCE(c.ultimo_mensaje_at, c.updated_at) DESC
+                LIMIT {$limit}";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([$asesorId, $asesorId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
     /**
@@ -188,15 +248,31 @@ class WhatsappConversacionModel {
     }
 
     /**
-     * Busca cliente por últimos 10 dígitos en tel1..tel10.
+     * Chats nuevos sin cédula pendientes de atender/amarrar en el inbox del coordinador.
      */
-    public function findClienteIdByPhone(string $phoneRaw): ?int {
+    public function countPendientesCoordinador(): int {
+        $stmt = $this->pdo->query(
+            "SELECT COUNT(*) FROM wa_conversaciones WHERE estado = 'sin_cliente'"
+        );
+        return (int)$stmt->fetchColumn();
+    }
+
+    /**
+     * Resuelve un teléfono a una sola fila cliente.
+     * Si hay varias filas, solo decide cuando alguna tiene una gestión previa;
+     * en caso contrario devuelve null para que el coordinador elija la base.
+     */
+    public function resolveClienteByPhone(string $phoneRaw): ?array {
         $last10 = kommoPhoneLast10($phoneRaw);
         if ($last10 === '' || strlen($last10) < 7) {
             return null;
         }
-        $like = '%' . $last10;
-        $sql = "SELECT id_cliente FROM clientes
+        $sql = "SELECT c.id_cliente, c.base_id, c.cedula, c.nombre,
+                       b.nombre AS base_nombre, b.campana_id,
+                       MAX(hg.fecha_creacion) AS ultima_gestion
+                FROM clientes c
+                LEFT JOIN base_clientes b ON b.id_base = c.base_id
+                LEFT JOIN historial_gestiones hg ON hg.cliente_id = c.id_cliente
                 WHERE RIGHT(REPLACE(REPLACE(REPLACE(tel1,' ',''),'-',''),'+',''), 10) = ?
                    OR RIGHT(REPLACE(REPLACE(REPLACE(tel2,' ',''),'-',''),'+',''), 10) = ?
                    OR RIGHT(REPLACE(REPLACE(REPLACE(tel3,' ',''),'-',''),'+',''), 10) = ?
@@ -207,12 +283,102 @@ class WhatsappConversacionModel {
                    OR RIGHT(REPLACE(REPLACE(REPLACE(tel8,' ',''),'-',''),'+',''), 10) = ?
                    OR RIGHT(REPLACE(REPLACE(REPLACE(tel9,' ',''),'-',''),'+',''), 10) = ?
                    OR RIGHT(REPLACE(REPLACE(REPLACE(tel10,' ',''),'-',''),'+',''), 10) = ?
-                LIMIT 1";
+                GROUP BY c.id_cliente, c.base_id, c.cedula, c.nombre,
+                         b.nombre, b.campana_id
+                ORDER BY (MAX(hg.fecha_creacion) IS NOT NULL) DESC,
+                         MAX(hg.fecha_creacion) DESC,
+                         c.id_cliente DESC";
         $params = array_fill(0, 10, $last10);
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
-        $id = $stmt->fetchColumn();
-        return $id !== false ? (int)$id : null;
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        if (count($rows) === 1) {
+            return $rows[0];
+        }
+        if (!$rows) {
+            return null;
+        }
+
+        // Un teléfono presente en cédulas distintas nunca se decide automáticamente.
+        $cedulas = array_unique(array_map(static fn($row) => trim((string)$row['cedula']), $rows));
+        if (count($cedulas) !== 1 || empty($rows[0]['ultima_gestion'])) {
+            return null;
+        }
+        return $rows[0];
+    }
+
+    public function findClienteIdByPhone(string $phoneRaw): ?int {
+        $row = $this->resolveClienteByPhone($phoneRaw);
+        return $row ? (int)$row['id_cliente'] : null;
+    }
+
+    /**
+     * Filas concretas de una cédula, una por base/cliente, para empareje manual.
+     */
+    public function listClientesByCedula(string $cedula, array $baseIds = []): array {
+        $cedula = trim($cedula);
+        if ($cedula === '') {
+            return [];
+        }
+        $params = [$cedula];
+        $baseFilter = '';
+        if ($baseIds) {
+            $baseIds = array_values(array_unique(array_filter(array_map('intval', $baseIds))));
+            if (!$baseIds) {
+                return [];
+            }
+            $baseFilter = ' AND c.base_id IN (' . implode(',', array_fill(0, count($baseIds), '?')) . ')';
+            $params = array_merge($params, $baseIds);
+        }
+        $stmt = $this->pdo->prepare(
+            "SELECT c.id_cliente, c.base_id, c.cedula, c.nombre,
+                    b.nombre AS base_nombre, b.campana_id,
+                    cp.nombre AS campana_nombre,
+                    MAX(hg.fecha_creacion) AS ultima_gestion
+             FROM clientes c
+             INNER JOIN base_clientes b ON b.id_base = c.base_id
+             LEFT JOIN campanas cp ON cp.id_campana = b.campana_id
+             LEFT JOIN historial_gestiones hg ON hg.cliente_id = c.id_cliente
+             WHERE c.cedula = ?{$baseFilter}
+             GROUP BY c.id_cliente, c.base_id, c.cedula, c.nombre,
+                      b.nombre, b.campana_id, cp.nombre
+             ORDER BY b.nombre ASC, c.id_cliente ASC"
+        );
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    /**
+     * Agrega el E.164 únicamente a la fila cliente elegida.
+     */
+    public function addPhoneToCliente(int $clienteId, string $phoneRaw): string {
+        $e164 = kommoNormalizePhoneE164($phoneRaw);
+        if (!$e164) {
+            throw new InvalidArgumentException('Teléfono inválido');
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT tel1, tel2, tel3, tel4, tel5, tel6, tel7, tel8, tel9, tel10
+             FROM clientes WHERE id_cliente = ? FOR UPDATE'
+        );
+        $stmt->execute([$clienteId]);
+        $phones = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$phones) {
+            throw new RuntimeException('Cliente no encontrado');
+        }
+        foreach ($phones as $value) {
+            if (kommoNormalizePhoneE164((string)$value) === $e164) {
+                return $e164;
+            }
+        }
+        foreach (array_keys($phones) as $column) {
+            $value = trim((string)$phones[$column]);
+            if ($value === '' || $value === '0') {
+                $this->pdo->prepare("UPDATE clientes SET `{$column}` = ? WHERE id_cliente = ?")
+                    ->execute([$e164, $clienteId]);
+                return $e164;
+            }
+        }
+        throw new RuntimeException('El cliente seleccionado no tiene un campo de teléfono disponible');
     }
 
     /**
@@ -254,11 +420,10 @@ class WhatsappConversacionModel {
 
     public function create(array $data): int {
         $sql = "INSERT INTO wa_conversaciones
-                (cliente_id, campana_id, origen, campana_masiva_id, telefono_e164, provider, meta_phone_number_id,
-                 kommo_talk_id, kommo_chat_id,
+                (cliente_id, campana_id, origen, campana_masiva_id, telefono_e164, kommo_talk_id, kommo_chat_id,
                  asesor_id, asesor_notificacion_id, ultimo_interactuante_id, estado, wa_activo, no_leidos,
                  ultimo_mensaje_at, ultimo_preview)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         $stmt = $this->pdo->prepare($sql);
         $asesor = $data['asesor_id'] ?? null;
         $notif = $data['asesor_notificacion_id'] ?? $asesor;
@@ -268,8 +433,6 @@ class WhatsappConversacionModel {
             $data['origen'] ?? 'organico',
             $data['campana_masiva_id'] ?? null,
             $data['telefono_e164'],
-            $data['provider'] ?? waProvider(),
-            $data['meta_phone_number_id'] ?? (waProvider() === 'meta' ? META_PHONE_NUMBER_ID : null),
             $data['kommo_talk_id'] ?? null,
             $data['kommo_chat_id'] ?? null,
             $asesor,
@@ -290,7 +453,7 @@ class WhatsappConversacionModel {
         }
         $allowed = [
             'cliente_id', 'campana_id', 'origen', 'campana_masiva_id',
-            'telefono_e164', 'provider', 'meta_phone_number_id', 'kommo_talk_id', 'kommo_chat_id',
+            'telefono_e164', 'kommo_talk_id', 'kommo_chat_id',
             'asesor_id', 'asesor_notificacion_id', 'ultimo_interactuante_id',
             'estado', 'wa_activo', 'no_leidos',
             'ultimo_mensaje_at', 'ultimo_preview',

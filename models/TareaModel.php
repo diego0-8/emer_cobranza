@@ -577,6 +577,35 @@ class TareaModel {
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /**
+     * Asesores que cumplen simultáneamente asignación a la base y a su campaña.
+     */
+    public function getAsesoresAsignadosABaseEnCampana($baseId) {
+        $stmt = $this->pdo->prepare("
+            SELECT DISTINCT
+                u.cedula as id,
+                u.cedula,
+                u.nombre as nombre_completo,
+                u.nombre
+            FROM base_clientes b
+            INNER JOIN asignacion_base_asesores aba
+                ON aba.base_id = b.id_base AND aba.estado = 'activa'
+            INNER JOIN campana_asesores ca
+                ON ca.campana_id = b.campana_id
+               AND ca.asesor_cedula = aba.asesor_cedula
+               AND ca.estado = 'activo'
+            INNER JOIN usuarios u
+                ON u.cedula = aba.asesor_cedula
+            WHERE b.id_base = ?
+              AND b.campana_id IS NOT NULL
+              AND u.rol = 'asesor'
+              AND u.estado = 'activo'
+            ORDER BY u.nombre ASC
+        ");
+        $stmt->execute([(int)$baseId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     public function getAsesoresByBase($baseId) {
         $sql = "
             SELECT

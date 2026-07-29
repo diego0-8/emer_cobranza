@@ -62,6 +62,32 @@
         background: rgba(255,255,255,0.1);
         border-bottom-color: #3b82f6;
     }
+
+    .nav-menu a#waCoordNavLink {
+        position: relative;
+        padding-right: 34px;
+    }
+
+    .wa-coord-nav-badge {
+        position: absolute;
+        top: 12px;
+        right: 10px;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        border-radius: 999px;
+        background: #ef4444;
+        color: #fff;
+        font-size: 0.68rem;
+        font-weight: 700;
+        line-height: 18px;
+        text-align: center;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+    }
+
+    .wa-coord-nav-badge[hidden] {
+        display: none !important;
+    }
     
     .user-section {
         display: flex;

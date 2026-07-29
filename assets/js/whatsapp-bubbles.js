@@ -110,13 +110,15 @@
         const next = {};
         (chats || []).forEach(function (c) {
             const id = String(c.id || '');
-            const n = Number(c.no_leidos || 0);
+            const n = badgeCount(c);
             next[id] = n;
             const prev = Number(lastUnreadMap[id] || 0);
             if (alertArmed && n > prev) {
                 raised = true;
             }
         });
+        // Conservar ids que ya no están en este tick no es necesario:
+        // si un chat sale del set, al volver a subir el badge debe alertar.
         lastUnreadMap = next;
         if (!alertArmed) {
             alertArmed = true;
@@ -125,12 +127,33 @@
         return raised;
     }
 
+    /** Badge: chats cuyo último mensaje es del cliente (sin respuesta del asesor). */
+    function badgeCount(c) {
+        const unread = Number(c.no_leidos || 0);
+        const pendiente = Number(c.pendiente_respuesta || 0) === 1
+            || String(c.ultima_direccion || '') === 'in';
+        if (pendiente) {
+            return unread > 0 ? unread : 1;
+        }
+        return unread > 0 ? unread : 0;
+    }
+
+    function countOverflowPending(overflow) {
+        let n = 0;
+        (overflow || []).forEach(function (c) {
+            if (badgeCount(c) > 0) n += 1;
+        });
+        return n;
+    }
+
     function renderBubbles(data) {
         const rail = ensureRail();
         const chats = data.chats || [];
         const overflow = data.overflow || [];
         const overflowCount = Number(data.overflow_count || data.extra || 0);
-        const hasNew = detectNewUnread(chats);
+        // Alertar también por overflow (+N): un chat cerrado que recibe inbound
+        // debe sonar aunque aún no esté en el rail (o acaba de reabrirse).
+        const hasNew = detectNewUnread(chats.concat(overflow));
 
         rail.innerHTML = '';
         chats.forEach(function (c) {
@@ -141,7 +164,7 @@
             a.title = (c.cliente_nombre || c.telefono_e164 || 'Chat') +
                 (c.ultimo_preview ? '\n' + c.ultimo_preview : '');
             a.innerHTML = '<span class="wa-bubble-ini">' + escapeHtml(initials(c.cliente_nombre || c.telefono_e164)) + '</span>';
-            const n = Number(c.no_leidos || 0);
+            const n = badgeCount(c);
             if (n > 0) {
                 const badge = document.createElement('span');
                 badge.className = 'wa-bubble-badge';
@@ -170,7 +193,16 @@
             more.type = 'button';
             more.className = 'wa-bubble wa-bubble-more';
             more.textContent = '+' + overflowCount;
-            more.title = 'Cola de chats WhatsApp';
+            const overflowPending = countOverflowPending(overflow);
+            if (overflowPending > 0) {
+                more.classList.add('wa-bubble--unread');
+                const badge = document.createElement('span');
+                badge.className = 'wa-bubble-badge';
+                badge.textContent = overflowPending > 99 ? '99+' : String(overflowPending);
+                more.appendChild(badge);
+            }
+            more.title = 'Cola de chats WhatsApp' +
+                (overflowPending > 0 ? (' · ' + overflowPending + ' con mensaje sin responder') : '');
             more.addEventListener('click', function () {
                 overflowOpen = !overflowOpen;
                 renderOverflow(overflow, overflowOpen);
@@ -190,7 +222,8 @@
             }, 1800);
             try {
                 if (window.Notification && Notification.permission === 'granted') {
-                    const unread = (chats || []).filter(function (c) { return Number(c.no_leidos || 0) > 0; })[0];
+                    const pool = (chats || []).concat(overflow || []);
+                    const unread = pool.filter(function (c) { return badgeCount(c) > 0; })[0];
                     if (unread) {
                         new Notification('WhatsApp — mensaje nuevo', {
                             body: (unread.cliente_nombre || unread.telefono_e164 || 'Cliente') +
@@ -220,10 +253,14 @@
             const row = document.createElement('div');
             row.className = 'wa-overflow-item';
             const name = c.cliente_nombre || c.telefono_e164 || ('Chat #' + c.id);
+            const n = badgeCount(c);
+            const badgeHtml = n > 0
+                ? '<span class="wa-overflow-badge">' + (n > 99 ? '99+' : String(n)) + '</span>'
+                : '';
             row.innerHTML =
                 '<a href="index.php?action=gestionar_cliente&id=' + encodeURIComponent(c.cliente_id || '') +
                 '&wa=' + encodeURIComponent(c.id || '') + '&claim=1">' +
-                escapeHtml(name) +
+                escapeHtml(name) + badgeHtml +
                 '</a>' +
                 '<button type="button" data-id="' + Number(c.id) + '">Mostrar</button>';
             row.querySelector('button').addEventListener('click', function () {
