@@ -15,10 +15,12 @@ Desktop.ini
 # Datos / migraciones / scripts de prueba (no subir)
 *.csv
 *.sql
+*.md
 sql/
 scripts/
 tests/
 test/
+whatssap_handoff/
 
 # Secretos Kommo / WhatsApp / entorno local
 config/kommo.local.php
@@ -26,3 +28,7 @@ config/kommo.local.php
 .env.*
 *.pem
 *.key
+
+# Adjuntos WhatsApp locales
+uploads/wa/
+

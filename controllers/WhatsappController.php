@@ -113,6 +113,9 @@ class WhatsappController {
 
         // Dispatcher después de soltar sesión (solo DB local)
         $this->dispatchColaAsignacion();
+        $this->colaModel->ensureSchema();
+        // Seguridad: si el cliente escribió DESPUÉS del dismiss, reabrir rail.
+        $promoted = $this->promoverPendientesARail($asesorId);
 
         $chats = $this->convModel->listBubblesActivas($asesorId, $limit);
         $overflow = $this->convModel->listOverflowCola($asesorId, $limit);
@@ -125,6 +128,7 @@ class WhatsappController {
             'overflow_count' => count($overflow),
             'overflow' => array_slice($overflow, 0, 30),
             'sync' => $syncMeta,
+            'promoted' => $promoted,
         ]);
     }
 
@@ -166,6 +170,66 @@ class WhatsappController {
             ]);
         }
         $this->jsonOut(['success' => true]);
+    }
+
+    /**
+     * mode=cola   → Liberar: saca de Cola WhatsApp (+N) SOLO los que están ahí
+     *               (no toca burbujas del rail).
+     * mode=leidas → Ocultar atendidas: del rail al +N (siguen en Cola).
+     * mode=todas  → alias de cola (compat).
+     */
+    public function burbujaLiberar(): void {
+        $this->requireRoles(['asesor', 'coordinador', 'administrador']);
+        $body = $this->readJsonBody();
+        $mode = strtolower(trim((string)($body['mode'] ?? 'cola')));
+        if (!in_array($mode, ['leidas', 'todas', 'cola'], true)) {
+            $mode = 'cola';
+        }
+        $asesorId = $this->currentAsesorId();
+        $hidden = 0;
+        $kept = 0;
+        $railKept = 0;
+
+        if ($mode === 'leidas') {
+            // Ocultar del rail → quedan en Cola (+N)
+            $activas = $this->convModel->listBubblesActivas($asesorId, 50);
+            foreach ($activas as $c) {
+                $pend = (int)($c['pendiente_respuesta'] ?? 0) === 1 || (int)($c['no_leidos'] ?? 0) > 0;
+                if ($pend) {
+                    $kept++;
+                    continue;
+                }
+                $this->colaModel->dismiss((int)$c['id'], $asesorId);
+                $hidden++;
+            }
+        } else {
+            // Liberar Cola (+N): no aparecen más ahí. Rail intacto.
+            $railIds = array_map(
+                static fn($r) => (int)$r['id'],
+                $this->convModel->listBubblesActivas($asesorId, 50)
+            );
+            $overflow = $this->convModel->listOverflowCola($asesorId, 10);
+            foreach ($overflow as $c) {
+                $id = (int)$c['id'];
+                if (in_array($id, $railIds, true)) {
+                    // Defensa: nunca liberar lo que está en el rail
+                    $railKept++;
+                    continue;
+                }
+                $this->colaModel->liberarCola($id, $asesorId);
+                $hidden++;
+            }
+        }
+
+        $this->jsonOut([
+            'success' => true,
+            'mode' => $mode === 'todas' ? 'cola' : $mode,
+            'hidden' => $hidden,
+            'kept_pending' => $kept,
+            'rail_untouched' => $railKept,
+            'activas' => $this->convModel->countBubblesActivas($asesorId),
+            'overflow_count' => count($this->convModel->listOverflowCola($asesorId, 10)),
+        ]);
     }
 
     public function conversacionCliente(): void {
@@ -345,6 +409,35 @@ class WhatsappController {
         }
 
         $url = trim((string)$msg['media_url']);
+        // Adjunto local (enviado desde el CRM)
+        if ($url !== '' && strpos($url, 'uploads/wa/') === 0) {
+            $local = dirname(__DIR__) . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $url);
+            $realBase = realpath(dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'wa');
+            $realFile = realpath($local);
+            if ($realBase && $realFile && strpos($realFile, $realBase) === 0 && is_file($realFile)) {
+                $bin = file_get_contents($realFile);
+                $ctype = mime_content_type($realFile) ?: 'application/octet-stream';
+                $name = trim((string)($msg['media_name'] ?? basename($realFile)));
+                if (ob_get_level()) {
+                    ob_clean();
+                }
+                header('Content-Type: ' . $ctype);
+                header('Content-Length: ' . strlen($bin));
+                header('Cache-Control: private, max-age=300');
+                header('X-Content-Type-Options: nosniff');
+                if ($name !== '') {
+                    $safe = str_replace(['"', "\r", "\n"], '', $name);
+                    header('Content-Disposition: inline; filename="' . $safe . '"');
+                }
+                echo $bin;
+                exit;
+            }
+            http_response_code(404);
+            header('Content-Type: text/plain; charset=UTF-8');
+            echo 'Archivo local no encontrado';
+            exit;
+        }
+
         $parts = parse_url($url);
         if (!$parts || empty($parts['scheme']) || !in_array(strtolower($parts['scheme']), ['http', 'https'], true)) {
             http_response_code(400);
@@ -543,6 +636,160 @@ class WhatsappController {
     }
 
     /**
+     * Envía audio / imagen / PDF / archivo por WhatsApp vía Kommo Drive + send_message.
+     * multipart: archivo, conversacion_id, cliente_id, telefono?, caption?, as_voice?
+     */
+    public function enviarMedia(): void {
+        $this->requireRoles(['asesor', 'coordinador', 'administrador']);
+        $convId = (int)($_POST['conversacion_id'] ?? 0);
+        $clienteId = (int)($_POST['cliente_id'] ?? 0);
+        $telefono = trim((string)($_POST['telefono'] ?? ''));
+        $caption = trim((string)($_POST['caption'] ?? ''));
+        $asVoice = (int)($_POST['as_voice'] ?? 0) === 1;
+
+        if (empty($_FILES['archivo']) || !is_array($_FILES['archivo'])) {
+            $this->jsonOut(['success' => false, 'error' => 'Archivo requerido'], 400);
+        }
+        $file = $_FILES['archivo'];
+        if ((int)($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            $this->jsonOut(['success' => false, 'error' => 'Error al subir el archivo (código ' . (int)$file['error'] . ')'], 400);
+        }
+        $tmp = (string)($file['tmp_name'] ?? '');
+        $origName = basename((string)($file['name'] ?? 'archivo'));
+        $size = (int)($file['size'] ?? 0);
+        if ($tmp === '' || !is_uploaded_file($tmp)) {
+            $this->jsonOut(['success' => false, 'error' => 'Upload inválido'], 400);
+        }
+        if ($size <= 0 || $size > 16 * 1024 * 1024) {
+            $this->jsonOut(['success' => false, 'error' => 'El archivo debe pesar entre 1 byte y 16 MB'], 400);
+        }
+        if (mb_strlen($caption) > 1000) {
+            $this->jsonOut(['success' => false, 'error' => 'Texto demasiado largo'], 400);
+        }
+
+        $finfo = new finfo(FILEINFO_MIME_TYPE);
+        $mime = (string)($finfo->file($tmp) ?: ($file['type'] ?? 'application/octet-stream'));
+        $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
+        if ($ext === '' || $ext === 'blob') {
+            $ext = $this->extensionFromMime($mime);
+            if ($ext !== '') {
+                $origName .= '.' . $ext;
+            }
+        }
+        if (!$this->mimePermitidoWa($mime, $ext)) {
+            $this->jsonOut([
+                'success' => false,
+                'error' => 'Tipo no permitido. Usa imagen, audio, video, PDF u Office.',
+            ], 400);
+        }
+
+        try {
+            if ($convId <= 0 && $clienteId > 0 && $telefono !== '') {
+                $conv = $this->convModel->getOrCreateForCliente(
+                    $clienteId,
+                    $telefono,
+                    $this->currentAsesorId()
+                );
+                $convId = (int)$conv['id'];
+            } else {
+                $conv = $this->convModel->getById($convId);
+            }
+            if (!$conv) {
+                $this->jsonOut(['success' => false, 'error' => 'Conversación no encontrada'], 404);
+            }
+            if ($clienteId > 0 && (int)($conv['cliente_id'] ?? 0) !== $clienteId) {
+                $this->jsonOut(['success' => false, 'error' => 'cliente_id no coincide'], 403);
+            }
+
+            $role = $_SESSION['user_role'] ?? '';
+            if ($role === 'asesor') {
+                if (!$this->asesorPuedeLeerCliente((int)($conv['cliente_id'] ?? $clienteId))) {
+                    $this->jsonOut(['success' => false, 'error' => 'Sin acceso a la base de este cliente'], 403);
+                }
+                if (!$this->asesorPuedeEnviar($conv)) {
+                    $this->jsonOut([
+                        'success' => false,
+                        'error' => 'Otro asesor tiene la notificación activa de este chat.',
+                    ], 403);
+                }
+                $this->claimNotificacion((int)$conv['id'], $this->currentAsesorId(), true);
+                $conv = $this->convModel->getById((int)$conv['id']) ?: $conv;
+            }
+
+            $this->releaseSessionLock();
+
+            $localRel = $this->guardarAdjuntoLocal((int)$conv['id'], $tmp, $origName);
+            $attachType = $this->kommoAttachmentType($mime, $ext, $asVoice);
+            $msgTipo = $this->mensajeTipoLocal($mime, $ext, $asVoice, $attachType);
+
+            $status = 'pendiente_envio';
+            $kommoMsgId = null;
+            $send = null;
+            $mediaUrl = $localRel;
+            $waActivo = $conv['wa_activo'] ?? 'desconocido';
+
+            if (kommoEnabled()) {
+                $upload = $this->uploadFileToKommoDrive($tmp, $origName, $mime);
+                if (empty($upload['ok'])) {
+                    $this->jsonOut([
+                        'success' => false,
+                        'error' => $upload['error'] ?? 'No se pudo subir el archivo a Kommo Drive',
+                    ], 502);
+                }
+                $send = $this->enviarMediaViaKommo($conv, [
+                    'drive_uuid' => (string)$upload['uuid'],
+                    'drive_version_uuid' => (string)$upload['version_uuid'],
+                    'type' => $attachType,
+                    'text' => $caption,
+                ]);
+                if (!empty($send['ok'])) {
+                    $status = 'enviado';
+                    $kommoMsgId = $send['kommo_message_id'] ?? null;
+                    $waActivo = 'si';
+                    if (!empty($upload['download_url'])) {
+                        $mediaUrl = (string)$upload['download_url'];
+                    }
+                } else {
+                    $status = 'error_envio';
+                }
+            } else {
+                $status = 'enviado';
+            }
+
+            $preview = $caption !== ''
+                ? $caption
+                : $this->previewParaMedia($msgTipo, $attachType, $origName);
+
+            $msgId = $this->msgModel->create([
+                'conversacion_id' => (int)$conv['id'],
+                'direccion' => 'out',
+                'tipo' => $msgTipo,
+                'cuerpo' => $caption,
+                'media_url' => $mediaUrl,
+                'media_name' => $origName,
+                'kommo_message_id' => $kommoMsgId,
+                'status' => $status,
+            ]);
+            $this->convModel->touchPreview((int)$conv['id'], $preview);
+            if ($waActivo !== ($conv['wa_activo'] ?? '')) {
+                $this->convModel->update((int)$conv['id'], ['wa_activo' => $waActivo]);
+            }
+
+            $conv = $this->convModel->getById((int)$conv['id']);
+            $this->jsonOut([
+                'success' => $status !== 'error_envio',
+                'mensaje_id' => $msgId,
+                'status' => $status,
+                'conversacion' => $conv,
+                'tipo' => $msgTipo,
+                'error' => $status === 'error_envio' ? ($send['error'] ?? 'Error al enviar adjunto') : null,
+            ]);
+        } catch (Throwable $e) {
+            $this->jsonOut(['success' => false, 'error' => $e->getMessage()], 400);
+        }
+    }
+
+    /**
      * Envía por Kommo API v4. Si falta talk_id, lo resuelve por teléfono → contacto → talks.
      * @see https://developers.kommo.com/reference/send-message-to-conversation
      */
@@ -600,6 +847,336 @@ class WhatsappController {
         $msg = is_array($data) ? (string)($data['detail'] ?? $data['title'] ?? $resp) : (string)$resp;
         $invalid = stripos($msg, 'invalid') !== false || stripos($msg, 'not a whatsapp') !== false;
         return ['ok' => false, 'error' => "Kommo HTTP {$http}: {$msg}", 'invalid_number' => $invalid];
+    }
+
+    private function enviarMediaViaKommo(array $conv, array $attachment): array {
+        $talkId = trim((string)($conv['kommo_talk_id'] ?? ''));
+        $chatId = trim((string)($conv['kommo_chat_id'] ?? ''));
+        if ($talkId === '') {
+            $resolved = $this->resolverTalkKommoPorTelefono((string)($conv['telefono_e164'] ?? ''));
+            if (empty($resolved['ok'])) {
+                return [
+                    'ok' => false,
+                    'error' => $resolved['error'] ?? 'No se pudo vincular la conversación con Kommo',
+                ];
+            }
+            $talkId = (string)$resolved['talk_id'];
+            $chatId = (string)($resolved['chat_id'] ?? $chatId);
+            $updates = ['kommo_talk_id' => $talkId];
+            if ($chatId !== '') {
+                $updates['kommo_chat_id'] = $chatId;
+            }
+            $this->convModel->update((int)$conv['id'], $updates);
+        }
+
+        $body = [
+            'attachment' => [
+                'drive_uuid' => (string)$attachment['drive_uuid'],
+                'drive_version_uuid' => (string)$attachment['drive_version_uuid'],
+                'type' => (string)$attachment['type'],
+            ],
+        ];
+        $text = trim((string)($attachment['text'] ?? ''));
+        if ($text !== '') {
+            $body['text'] = $text;
+        }
+
+        $url = kommoApiBaseUrl() . '/api/v4/talks/' . rawurlencode($talkId) . '/send_message';
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => [
+                'Content-Type: application/json',
+                'Authorization: Bearer ' . KOMMO_LONG_LIVED_TOKEN,
+            ],
+            CURLOPT_POSTFIELDS => json_encode($body, JSON_UNESCAPED_UNICODE),
+            CURLOPT_TIMEOUT => 45,
+        ]);
+        $resp = curl_exec($ch);
+        $http = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err = curl_error($ch);
+        curl_close($ch);
+        if ($resp === false) {
+            return ['ok' => false, 'error' => $err ?: 'curl error'];
+        }
+        $data = json_decode((string)$resp, true);
+        if ($http >= 200 && $http < 300) {
+            return [
+                'ok' => true,
+                'kommo_message_id' => (string)($data['id'] ?? $data['message_id'] ?? ('kommo-media-' . time())),
+                'talk_id' => $talkId,
+            ];
+        }
+        $msg = is_array($data) ? (string)($data['detail'] ?? $data['title'] ?? $resp) : (string)$resp;
+        if (is_array($data) && !empty($data['validation-errors'][0]['errors'][0]['detail'])) {
+            $msg .= ' — ' . $data['validation-errors'][0]['errors'][0]['detail'];
+            if (!empty($data['validation-errors'][0]['errors'][0]['path'])) {
+                $msg .= ' (' . $data['validation-errors'][0]['errors'][0]['path'] . ')';
+            }
+        }
+        return ['ok' => false, 'error' => "Kommo HTTP {$http}: {$msg}"];
+    }
+
+    private function resolveKommoDriveUrl(): string {
+        static $cached = null;
+        if ($cached !== null) {
+            return $cached;
+        }
+        if (defined('KOMMO_DRIVE_URL') && KOMMO_DRIVE_URL !== '') {
+            $cached = rtrim((string)KOMMO_DRIVE_URL, '/');
+            return $cached;
+        }
+        [$code, $body] = $this->kommoApiRequest('GET', '/api/v4/account?with=drive_url');
+        $data = json_decode((string)$body, true);
+        $drive = is_array($data) ? rtrim((string)($data['drive_url'] ?? ''), '/') : '';
+        if ($code >= 200 && $code < 300 && $drive !== '') {
+            $cached = $drive;
+            return $cached;
+        }
+        $cached = '';
+        return $cached;
+    }
+
+    /**
+     * Sube un archivo a Kommo Drive (sesión + partes) y devuelve uuid/version_uuid.
+     */
+    private function uploadFileToKommoDrive(string $filePath, string $fileName, string $contentType): array {
+        $drive = $this->resolveKommoDriveUrl();
+        if ($drive === '') {
+            return ['ok' => false, 'error' => 'No se pudo obtener drive_url de Kommo'];
+        }
+        $size = filesize($filePath);
+        if ($size === false || $size <= 0) {
+            return ['ok' => false, 'error' => 'Archivo vacío'];
+        }
+        $payload = json_encode([
+            'file_name' => $fileName,
+            'file_size' => (int)$size,
+            'content_type' => $contentType !== '' ? $contentType : 'application/octet-stream',
+            'with_preview' => true,
+        ], JSON_UNESCAPED_UNICODE);
+
+        $ch = curl_init($drive . '/v1.0/sessions');
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer ' . KOMMO_LONG_LIVED_TOKEN,
+                'Content-Type: application/json',
+                'Accept: application/json',
+            ],
+            CURLOPT_POSTFIELDS => $payload,
+            CURLOPT_TIMEOUT => 30,
+        ]);
+        $resp = curl_exec($ch);
+        $http = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err = curl_error($ch);
+        curl_close($ch);
+        if ($resp === false || $http < 200 || $http >= 300) {
+            return ['ok' => false, 'error' => 'Sesión Drive HTTP ' . $http . ': ' . ($err ?: (string)$resp)];
+        }
+        $sess = json_decode((string)$resp, true);
+        $uploadUrl = is_array($sess) ? (string)($sess['upload_url'] ?? '') : '';
+        $maxPart = max(64 * 1024, (int)($sess['max_part_size'] ?? 524288));
+        if ($uploadUrl === '') {
+            return ['ok' => false, 'error' => 'Drive no devolvió upload_url'];
+        }
+
+        $fh = fopen($filePath, 'rb');
+        if (!$fh) {
+            return ['ok' => false, 'error' => 'No se pudo leer el archivo'];
+        }
+        $fileMeta = null;
+        try {
+            while (!feof($fh)) {
+                $chunk = fread($fh, $maxPart);
+                if ($chunk === false || $chunk === '') {
+                    break;
+                }
+                $ch = curl_init($uploadUrl);
+                curl_setopt_array($ch, [
+                    CURLOPT_POST => true,
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_HTTPHEADER => [
+                        'Authorization: Bearer ' . KOMMO_LONG_LIVED_TOKEN,
+                        'Content-Type: application/octet-stream',
+                        'Accept: application/json',
+                    ],
+                    CURLOPT_POSTFIELDS => $chunk,
+                    CURLOPT_TIMEOUT => 120,
+                ]);
+                $upResp = curl_exec($ch);
+                $upHttp = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                $upErr = curl_error($ch);
+                curl_close($ch);
+                if ($upResp === false || $upHttp < 200 || $upHttp >= 300) {
+                    return ['ok' => false, 'error' => 'Upload Drive HTTP ' . $upHttp . ': ' . ($upErr ?: (string)$upResp)];
+                }
+                $upData = json_decode((string)$upResp, true);
+                if (!is_array($upData)) {
+                    return ['ok' => false, 'error' => 'Respuesta Drive inválida'];
+                }
+                if (!empty($upData['next_url'])) {
+                    $uploadUrl = (string)$upData['next_url'];
+                    continue;
+                }
+                if (!empty($upData['uuid']) && !empty($upData['version_uuid'])) {
+                    $fileMeta = $upData;
+                    break;
+                }
+                // A veces el archivo completo viene en la última respuesta sin next_url
+                if (!empty($upData['uuid'])) {
+                    $fileMeta = $upData;
+                    break;
+                }
+            }
+        } finally {
+            fclose($fh);
+        }
+
+        if (!$fileMeta || empty($fileMeta['uuid']) || empty($fileMeta['version_uuid'])) {
+            return ['ok' => false, 'error' => 'Drive no devolvió uuid/version_uuid del archivo'];
+        }
+        $download = '';
+        if (!empty($fileMeta['_links']['download']['href'])) {
+            $download = (string)$fileMeta['_links']['download']['href'];
+        } elseif (!empty($fileMeta['_links']['download_version']['href'])) {
+            $download = (string)$fileMeta['_links']['download_version']['href'];
+        }
+        return [
+            'ok' => true,
+            'uuid' => (string)$fileMeta['uuid'],
+            'version_uuid' => (string)$fileMeta['version_uuid'],
+            'type' => (string)($fileMeta['type'] ?? 'file'),
+            'download_url' => $download,
+        ];
+    }
+
+    private function guardarAdjuntoLocal(int $convId, string $tmpPath, string $origName): string {
+        $safe = preg_replace('/[^a-zA-Z0-9._\-]+/', '_', $origName) ?: 'archivo';
+        $dirRel = 'uploads/wa/' . date('Ym') . '/' . max(1, $convId);
+        $dirAbs = dirname(__DIR__) . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $dirRel);
+        if (!is_dir($dirAbs) && !mkdir($dirAbs, 0775, true) && !is_dir($dirAbs)) {
+            throw new RuntimeException('No se pudo crear carpeta de adjuntos');
+        }
+        $destName = uniqid('wa_', true) . '_' . $safe;
+        $destAbs = $dirAbs . DIRECTORY_SEPARATOR . $destName;
+        if (!copy($tmpPath, $destAbs)) {
+            throw new RuntimeException('No se pudo guardar el adjunto local');
+        }
+        return $dirRel . '/' . $destName;
+    }
+
+    private function mimePermitidoWa(string $mime, string $ext): bool {
+        $mime = strtolower($mime);
+        $ext = strtolower($ext);
+        if (strpos($mime, 'image/') === 0) {
+            return true;
+        }
+        if (strpos($mime, 'audio/') === 0 || strpos($mime, 'video/') === 0) {
+            return true;
+        }
+        $okMime = [
+            'application/pdf',
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/zip',
+            'application/octet-stream',
+            'image/jpg',
+            'image/pjpeg',
+            'text/plain',
+            'text/csv',
+        ];
+        if (in_array($mime, $okMime, true)) {
+            return true;
+        }
+        $okExt = [
+            'jpg', 'jpeg', 'jpe', 'png', 'gif', 'webp', 'bmp',
+            'mp3', 'ogg', 'oga', 'opus', 'wav', 'm4a', 'aac', 'amr', 'webm',
+            'mp4', '3gp', 'mov',
+            'pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt', 'zip',
+        ];
+        return in_array($ext, $okExt, true);
+    }
+
+    private function extensionFromMime(string $mime): string {
+        $map = [
+            'image/jpeg' => 'jpg',
+            'image/jpg' => 'jpg',
+            'image/pjpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/gif' => 'gif',
+            'image/webp' => 'webp',
+            'audio/ogg' => 'ogg',
+            'audio/mpeg' => 'mp3',
+            'audio/mp4' => 'm4a',
+            'audio/webm' => 'webm',
+            'audio/wav' => 'wav',
+            'video/webm' => 'webm',
+            'video/mp4' => 'mp4',
+            'application/pdf' => 'pdf',
+        ];
+        return $map[strtolower($mime)] ?? '';
+    }
+
+    /**
+     * Tipos válidos en Kommo send_message.attachment.type:
+     * picture | video | file | document
+     * (voice/audio/image NO son choices válidos → HTTP 400)
+     */
+    private function kommoAttachmentType(string $mime, string $ext, bool $asVoice): string {
+        $mime = strtolower($mime);
+        $ext = strtolower($ext);
+
+        if (strpos($mime, 'image/') === 0 || in_array($ext, ['jpg', 'jpeg', 'jpe', 'png', 'gif', 'webp', 'bmp'], true)) {
+            return 'picture';
+        }
+
+        // Nota de voz / audio del navegador (webm/ogg) → file (WhatsApp lo descarga como audio)
+        if ($asVoice
+            || strpos($mime, 'audio/') === 0
+            || in_array($ext, ['mp3', 'wav', 'm4a', 'aac', 'amr', 'ogg', 'oga', 'opus', 'webm'], true)
+        ) {
+            // webm puede ser video; si asVoice o mime audio → file
+            if ($ext === 'webm' && strpos($mime, 'video/') === 0 && !$asVoice) {
+                return 'video';
+            }
+            return 'file';
+        }
+
+        if (strpos($mime, 'video/') === 0 || in_array($ext, ['mp4', '3gp', 'mov'], true)) {
+            return 'video';
+        }
+
+        if (in_array($ext, ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt'], true)
+            || $mime === 'application/pdf'
+            || strpos($mime, 'application/msword') === 0
+            || strpos($mime, 'application/vnd.') === 0
+        ) {
+            return 'document';
+        }
+
+        return 'file';
+    }
+
+    /** Tipo local del mensaje en BD/UI (independiente del enum Kommo). */
+    private function mensajeTipoLocal(string $mime, string $ext, bool $asVoice, string $kommoAttachType): string {
+        if ($asVoice || strpos($mime, 'audio/') === 0 || in_array($ext, ['ogg', 'oga', 'opus', 'mp3', 'wav', 'm4a', 'aac', 'amr'], true)) {
+            return 'voice';
+        }
+        if ($ext === 'webm' && (strpos($mime, 'audio/') === 0 || $asVoice)) {
+            return 'voice';
+        }
+        if ($kommoAttachType === 'picture') {
+            return 'picture';
+        }
+        if ($kommoAttachType === 'video') {
+            return 'video';
+        }
+        return 'file';
     }
 
     /**
@@ -1061,11 +1638,19 @@ class WhatsappController {
                     ]);
                     if ($direction === 'in') {
                         $age = time() - (int)($message['created_at'] ?? time());
-                        // Solo notificar/encolar mensajes recientes (evita flood al primer sync histórico)
-                        if ($age >= 0 && $age <= 900) {
+                        $isRecent = ($age >= 0 && $age <= 900);
+                        // Badge solo si es reciente (evita flood al primer sync histórico).
+                        if ($isRecent) {
                             $this->convModel->incrementNoLeidos((int)$conv['id']);
-                            $this->onInboundMessage($conv);
                             $newInbound++;
+                        }
+                        // Siempre encolar/undismiss ante inbound NUEVO insertado,
+                        // aunque el sync llegue tarde (>15 min). Si no, el chat
+                        // queda sin burbuja hasta que llegue otro mensaje nuevo.
+                        $this->onInboundMessage($conv);
+                        $fresh = $this->convModel->getById((int)$conv['id']);
+                        if ($fresh) {
+                            $conv = $fresh;
                         }
                     }
                 } catch (PDOException $e) {
@@ -2419,6 +3004,48 @@ class WhatsappController {
         return ['ok' => false, 'error' => "Kommo plantilla: {$lastError}"];
     }
 
+    /**
+     * Reabre en el rail las burbujas dismissed cuyo último mensaje es del cliente
+     * (o tienen no_leidos > 0). Evita el caso "+N con badge" sin ver quién escribió.
+     * @return int cantidad promovida
+     */
+    private function promoverPendientesARail(string $asesorId): int {
+        if ($asesorId === '') {
+            return 0;
+        }
+        // Solo reabrir si el cliente escribió DESPUÉS del dismiss manual.
+        // Sin esto, "Liberar espacio" / "Ocultar todas" / X se deshacen
+        // en el siguiente misChats porque el último msg sigue siendo 'in'.
+        $sql = "SELECT c.id
+                FROM wa_conversaciones c
+                INNER JOIN wa_burbuja_dismiss d
+                  ON d.conversacion_id = c.id AND d.asesor_id = ?
+                WHERE COALESCE(c.asesor_notificacion_id, c.asesor_id) = ?
+                  AND c.cliente_id IS NOT NULL
+                  AND c.estado IN ('abierta', 'cerrada')
+                  AND COALESCE(c.ultimo_mensaje_at, c.updated_at) > d.dismissed_at
+                  AND (
+                    COALESCE(c.no_leidos, 0) > 0
+                    OR (
+                      SELECT m.direccion FROM wa_mensajes m
+                      WHERE m.conversacion_id = c.id
+                      ORDER BY COALESCE(m.created_at, '1970-01-01') DESC, m.id DESC
+                      LIMIT 1
+                    ) = 'in'
+                  )
+                ORDER BY COALESCE(c.ultimo_mensaje_at, c.updated_at) DESC
+                LIMIT 20";
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([$asesorId, $asesorId]);
+        $ids = $stmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
+        $n = 0;
+        foreach ($ids as $id) {
+            $this->colaModel->undismiss((int)$id, $asesorId);
+            $n++;
+        }
+        return $n;
+    }
+
     private function onInboundMessage(array $conv): void {
         if (empty($conv['cliente_id']) && ($conv['origen'] ?? 'organico') !== 'campana_masiva') {
             $resolved = $this->convModel->resolveClienteByPhone((string)($conv['telefono_e164'] ?? ''));
@@ -2438,9 +3065,18 @@ class WhatsappController {
             return;
         }
         $notif = trim((string)($conv['asesor_notificacion_id'] ?? ''));
+        if ($notif === '') {
+            $notif = trim((string)($conv['asesor_id'] ?? ''));
+        }
         if ($notif !== '') {
             // Ya hay dueño: reabrir burbuja si la cerró, para que vea el inbound.
             $this->colaModel->undismiss((int)$conv['id'], $notif);
+            // Si solo había asesor_id, asegurar también notificacion_id
+            if (trim((string)($conv['asesor_notificacion_id'] ?? '')) === '') {
+                $this->convModel->update((int)$conv['id'], [
+                    'asesor_notificacion_id' => $notif,
+                ]);
+            }
             return;
         }
         $campanaId = isset($conv['campana_id']) ? (int)$conv['campana_id'] : null;
@@ -2739,18 +3375,24 @@ class WhatsappController {
                 $baseNombre = $bn;
             }
         }
+        $clienteCedula = '';
+        $clienteNombre = '';
+        if ($clienteId > 0) {
+            $cst = $this->pdo->prepare(
+                'SELECT cedula, nombre FROM clientes WHERE id_cliente = ? LIMIT 1'
+            );
+            $cst->execute([$clienteId]);
+            $crow = $cst->fetch(PDO::FETCH_ASSOC) ?: [];
+            $clienteCedula = preg_replace('/\D+/', '', (string)($crow['cedula'] ?? '')) ?: trim((string)($crow['cedula'] ?? ''));
+            $clienteNombre = trim((string)($crow['nombre'] ?? ''));
+        }
         $asesorCed = trim((string)($conv['asesor_notificacion_id'] ?? $conv['asesor_id'] ?? ''));
         $asesorNombre = $asesorCed !== ''
             ? $this->nombreUsuarioPorCedula($asesorCed)
             : 'Sin asignar aún';
         $telefono = (string)($conv['telefono_e164'] ?? '');
-        $resumen = sprintf(
-            '%s · %s · Asesor %s · Gestión: %s',
-            $telefono !== '' ? $telefono : ('Conv #' . (int)($conv['id'] ?? 0)),
-            $baseNombre,
-            $asesorNombre,
-            $actorNombre !== '' ? $actorNombre : 'Coordinador'
-        );
+        $ccLabel = $clienteCedula !== '' ? ('CC ' . $clienteCedula) : ('Cliente #' . $clienteId);
+        $resumen = $ccLabel . ' → ' . $baseNombre;
         $this->historialModel->create([
             'tipo' => 'empareje_sin_cliente',
             'actor_cedula' => $actorCed,
@@ -2759,6 +3401,8 @@ class WhatsappController {
             'payload' => [
                 'conversacion_id' => (int)($conv['id'] ?? 0),
                 'cliente_id' => $clienteId,
+                'cliente_cedula' => $clienteCedula,
+                'cliente_nombre' => $clienteNombre,
                 'telefono_e164' => $telefono,
                 'base_id' => $baseId,
                 'base_nombre' => $baseNombre,

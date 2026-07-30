@@ -102,6 +102,9 @@ class WhatsappHistorialModel {
                 $decoded = json_decode($row['payload'], true);
                 $row['payload'] = is_array($decoded) ? $decoded : null;
             }
+            if (($row['tipo'] ?? '') === 'empareje_sin_cliente') {
+                $row = $this->enrichEmparejeRow($row);
+            }
         }
         unset($row);
 
@@ -112,6 +115,54 @@ class WhatsappHistorialModel {
             'per_page' => $perPage,
             'total_pages' => max(1, (int)ceil($total / $perPage)),
         ];
+    }
+
+    /**
+     * Completa cédula/base en eventos viejos y normaliza resumen a "CC x → Base".
+     */
+    private function enrichEmparejeRow(array $row): array {
+        $payload = is_array($row['payload'] ?? null) ? $row['payload'] : [];
+        $cedula = preg_replace('/\D+/', '', (string)($payload['cliente_cedula'] ?? ''));
+        $baseNombre = trim((string)($payload['base_nombre'] ?? ''));
+        $clienteId = (int)($payload['cliente_id'] ?? 0);
+
+        if (($cedula === '' || $baseNombre === '') && $clienteId > 0) {
+            $st = $this->pdo->prepare(
+                'SELECT c.cedula, c.nombre, b.nombre AS base_nombre, c.base_id
+                 FROM clientes c
+                 LEFT JOIN base_clientes b ON b.id_base = c.base_id
+                 WHERE c.id_cliente = ? LIMIT 1'
+            );
+            $st->execute([$clienteId]);
+            $cli = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+            if ($cedula === '') {
+                $cedula = preg_replace('/\D+/', '', (string)($cli['cedula'] ?? '')) ?: '';
+            }
+            if ($baseNombre === '') {
+                $baseNombre = trim((string)($cli['base_nombre'] ?? ''));
+            }
+            if (empty($payload['cliente_nombre']) && !empty($cli['nombre'])) {
+                $payload['cliente_nombre'] = trim((string)$cli['nombre']);
+            }
+            if (empty($payload['base_id']) && !empty($cli['base_id'])) {
+                $payload['base_id'] = (int)$cli['base_id'];
+            }
+        }
+
+        if ($cedula !== '') {
+            $payload['cliente_cedula'] = $cedula;
+        }
+        if ($baseNombre !== '') {
+            $payload['base_nombre'] = $baseNombre;
+        }
+
+        $ccLabel = $cedula !== '' ? ('CC ' . $cedula) : (
+            $clienteId > 0 ? ('Cliente #' . $clienteId) : 'Cédula no registrada'
+        );
+        $baseLabel = $baseNombre !== '' ? $baseNombre : 'Base no registrada';
+        $row['resumen'] = $ccLabel . ' → ' . $baseLabel;
+        $row['payload'] = $payload;
+        return $row;
     }
 
     /**

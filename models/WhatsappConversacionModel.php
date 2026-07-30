@@ -95,16 +95,17 @@ class WhatsappConversacionModel {
     }
 
     /**
-     * Overflow: dismissed o más allá del top-N activo, donde el asesor es notificado o último interactuante.
+     * Overflow: dismissed (no liberados) o más allá del top-N activo.
+     * liberado=1 → fuera del rail Y de la Cola (+N) hasta nuevo inbound.
      */
     public function listOverflowCola(string $asesorId, int $visibleLimit = 10): array {
         $visibleLimit = max(1, min(50, $visibleLimit));
-        // IDs de las burbujas visibles
         $visible = $this->listBubblesActivas($asesorId, $visibleLimit);
         $visibleIds = array_map(static fn($r) => (int)$r['id'], $visible);
 
         $sql = "SELECT c.*, cl.nombre AS cliente_nombre, cl.cedula AS cliente_cedula,
                        CASE WHEN d.conversacion_id IS NULL THEN 0 ELSE 1 END AS dismissed,
+                       COALESCE(d.liberado, 0) AS liberado,
                        CASE
                          WHEN (
                            SELECT m.direccion FROM wa_mensajes m
@@ -124,6 +125,7 @@ class WhatsappConversacionModel {
                     COALESCE(c.asesor_notificacion_id, c.asesor_id) = ?
                     OR c.ultimo_interactuante_id = ?
                   )
+                  AND COALESCE(d.liberado, 0) = 0
                 ORDER BY
                   pendiente_respuesta DESC,
                   COALESCE(c.ultimo_mensaje_at, c.updated_at) DESC
@@ -139,7 +141,6 @@ class WhatsappConversacionModel {
             if ($isVisible && !$dismissed) {
                 continue;
             }
-            // Solo contar en +N si dismissed O si no cabía en el top 10
             if ($dismissed || !$isVisible) {
                 $out[] = $row;
             }

@@ -64,6 +64,11 @@ require_once __DIR__ . '/shared_navbar.php';
             margin-bottom: 4px;
         }
         .wa-hist-item .wa-hist-tipo.is-empareje { color: #0369a1; }
+        .wa-hist-item .wa-hist-title {
+            font-weight: 600;
+            color: var(--wa-text);
+            word-break: break-word;
+        }
         .wa-hist-item .wa-hist-meta {
             color: var(--wa-muted);
             font-size: 0.72rem;
@@ -1120,6 +1125,15 @@ require_once __DIR__ . '/shared_navbar.php';
         collapse.show();
     }
 
+    function escapeHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     function formatHistDate(value) {
         if (!value) return '';
         try {
@@ -1151,26 +1165,34 @@ require_once __DIR__ . '/shared_navbar.php';
                 items.forEach(function (item) {
                     const row = document.createElement('div');
                     row.className = 'wa-hist-item';
-                    const tipo = item.tipo === 'empareje_sin_cliente' ? 'Sin cédula' : 'Masivo';
-                    const tipoClass = item.tipo === 'empareje_sin_cliente' ? ' is-empareje' : '';
+                    const isEmpareje = item.tipo === 'empareje_sin_cliente';
+                    const tipo = isEmpareje ? 'Asignado' : 'Masivo';
+                    const tipoClass = isEmpareje ? ' is-empareje' : '';
                     const payload = item.payload || {};
+                    let titulo = String(item.resumen || '');
                     let detail = '';
                     if (item.tipo === 'campana_masiva') {
                         detail = (payload.base_nombre ? ('Base: ' + payload.base_nombre + ' · ') : '') +
                             (payload.template_name ? ('Plantilla: ' + payload.template_name) : '');
                     } else {
+                        const ced = String(payload.cliente_cedula || '').replace(/\D+/g, '');
+                        const base = String(payload.base_nombre || '').trim();
+                        if (ced || base) {
+                            titulo = (ced ? ('CC ' + ced) : 'CC —') + ' → ' + (base || 'Base —');
+                        }
                         detail = [
-                            payload.base_nombre ? ('Base: ' + payload.base_nombre) : '',
+                            payload.cliente_nombre ? ('Cliente: ' + payload.cliente_nombre) : '',
+                            payload.telefono_e164 ? ('Tel: ' + payload.telefono_e164) : '',
                             payload.asesor_nombre ? ('Asesor: ' + payload.asesor_nombre) : '',
                             payload.gestionado_por ? ('Gestión: ' + payload.gestionado_por) : ''
                         ].filter(Boolean).join(' · ');
                     }
                     row.innerHTML =
                         '<div class="wa-hist-tipo' + tipoClass + '">' + tipo + '</div>' +
-                        '<div>' + String(item.resumen || '') + '</div>' +
-                        (detail ? '<div class="wa-hist-meta">' + detail + '</div>' : '') +
+                        '<div class="wa-hist-title">' + escapeHtml(titulo) + '</div>' +
+                        (detail ? '<div class="wa-hist-meta">' + escapeHtml(detail) + '</div>' : '') +
                         '<div class="wa-hist-meta">' + formatHistDate(item.created_at) +
-                        (item.actor_nombre ? (' · ' + item.actor_nombre) : '') + '</div>';
+                        (item.actor_nombre ? (' · ' + escapeHtml(item.actor_nombre)) : '') + '</div>';
                     hist.list.appendChild(row);
                 });
             }

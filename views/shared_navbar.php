@@ -143,7 +143,7 @@ function includeNavbar($currentPage = '', $userRole = '') {
                 'role' => $role,
                 'pollMs' => 5000,
             ], JSON_UNESCAPED_UNICODE) . ';</script>' . "\n";
-            echo '<script src="assets/js/whatsapp-bubbles.js?v=6"></script>' . "\n";
+            echo '<script src="assets/js/whatsapp-bubbles.js?v=11"></script>' . "\n";
         }
     }
     if (in_array($role, ['coordinador', 'administrador'], true)) {

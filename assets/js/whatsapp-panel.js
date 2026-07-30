@@ -16,6 +16,9 @@
     let sending = false;
     let sendingTpl = false;
     let templatesCache = [];
+    let pendingFile = null;
+    let pendingAsVoice = false;
+    let canSend = true;
 
     const els = {};
 
@@ -286,14 +289,109 @@
     }
 
     function setPuedeEnviar(puede) {
-        const allowed = puede !== false;
-        if (els.input) els.input.disabled = !allowed;
-        if (els.btn) els.btn.disabled = !allowed || sending;
-        if (!allowed && els.input) {
+        canSend = puede !== false;
+        if (els.input) els.input.disabled = !canSend;
+        if (els.btn) els.btn.disabled = !canSend || sending;
+        if (els.attachBtn) els.attachBtn.disabled = !canSend || sending;
+        if (els.imageBtn) els.imageBtn.disabled = !canSend || sending;
+        if (!canSend && els.input) {
             els.input.placeholder = 'Otro asesor tiene este chat activo';
         } else if (els.input) {
             els.input.placeholder = 'Escribe un mensaje…';
         }
+    }
+
+    function clearPendingFile() {
+        pendingFile = null;
+        pendingAsVoice = false;
+        if (els.fileInput) els.fileInput.value = '';
+        if (els.imageInput) els.imageInput.value = '';
+        if (els.attachChip) els.attachChip.hidden = true;
+        if (els.attachChipName) els.attachChipName.textContent = '';
+        if (els.attachPreview) {
+            if (els.attachPreview.dataset.url) {
+                try { URL.revokeObjectURL(els.attachPreview.dataset.url); } catch (e) { /* ignore */ }
+            }
+            els.attachPreview.hidden = true;
+            els.attachPreview.removeAttribute('src');
+            delete els.attachPreview.dataset.url;
+        }
+        if (els.attachChipIcon) els.attachChipIcon.hidden = false;
+    }
+
+    function setPendingFile(file, asVoice) {
+        pendingFile = file || null;
+        pendingAsVoice = !!asVoice;
+        if (!pendingFile) {
+            clearPendingFile();
+            return;
+        }
+        if (els.attachChip) els.attachChip.hidden = false;
+        if (els.attachChipName) {
+            els.attachChipName.textContent = (asVoice ? 'Audio: ' : '') + (pendingFile.name || 'archivo');
+        }
+        const isImage = /^image\//.test(pendingFile.type || '')
+            || /\.(jpe?g|png|gif|webp)$/i.test(pendingFile.name || '');
+        if (els.attachChipIcon) {
+            els.attachChipIcon.className = 'fas ' + (asVoice || /^audio\//.test(pendingFile.type || '')
+                ? 'fa-microphone'
+                : (isImage ? 'fa-image' : 'fa-file'));
+            els.attachChipIcon.hidden = !!(isImage && els.attachPreview);
+        }
+        if (els.attachPreview) {
+            if (els.attachPreview.dataset.url) {
+                try { URL.revokeObjectURL(els.attachPreview.dataset.url); } catch (e) { /* ignore */ }
+            }
+            if (isImage) {
+                const url = URL.createObjectURL(pendingFile);
+                els.attachPreview.dataset.url = url;
+                els.attachPreview.src = url;
+                els.attachPreview.hidden = false;
+            } else {
+                els.attachPreview.hidden = true;
+                els.attachPreview.removeAttribute('src');
+                delete els.attachPreview.dataset.url;
+            }
+        }
+    }
+
+    function pickFileFromInput(input, forceImage) {
+        const f = input && input.files && input.files[0];
+        if (!f) return;
+        if (f.size > 16 * 1024 * 1024) {
+            setError('Máximo 16 MB por archivo');
+            input.value = '';
+            return;
+        }
+        const name = String(f.name || '').toLowerCase();
+        const isImage = /^image\//.test(f.type || '') || /\.(jpe?g|png|gif|webp|bmp)$/i.test(name);
+        if (forceImage && !isImage) {
+            setError('Selecciona una imagen JPG, PNG, GIF o WEBP');
+            input.value = '';
+            return;
+        }
+        setPendingFile(f, false);
+        setError('');
+    }
+
+    async function apiPostForm(action, formData) {
+        const res = await fetch('index.php?action=' + encodeURIComponent(action), {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json' },
+            body: formData,
+        });
+        const text = await res.text();
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (e) {
+            throw new Error('Respuesta no JSON');
+        }
+        if (!res.ok || data.success === false) {
+            throw new Error(data.error || ('HTTP ' + res.status));
+        }
+        return data;
     }
 
     function fillTelefonos(telefonos, selectedE164) {
@@ -326,10 +424,7 @@
 
     async function loadEstado() {
         try {
-            const data = await apiGet('wa_estado');
-            if (els.mode) {
-                els.mode.textContent = data.kommo_enabled ? 'Kommo en vivo' : 'Modo demo';
-            }
+            await apiGet('wa_estado');
         } catch (e) { /* ignore */ }
     }
 
@@ -388,37 +483,59 @@
     }
 
     async function sendMessage() {
-        if (sending) return;
+        if (sending || !canSend) return;
         const texto = (els.input && els.input.value || '').trim();
-        if (!texto) return;
         const telefono = els.select ? els.select.value : '';
         if (!telefono) {
             setError('Selecciona un número del perfil');
             return;
         }
+        if (!texto && !pendingFile) return;
+
         sending = true;
         if (els.btn) els.btn.disabled = true;
+        if (els.attachBtn) els.attachBtn.disabled = true;
         setError('');
         try {
             if (!conversacionId) await ensureConversacion(telefono);
-            const data = await apiPost('wa_enviar', {
-                conversacion_id: conversacionId,
-                cliente_id: clienteId,
-                telefono: telefono,
-                texto: texto,
-            });
-            if (data.conversacion) {
-                conversacionId = Number(data.conversacion.id);
-                updateWaActivo(data.conversacion.wa_activo);
+
+            if (pendingFile) {
+                const fd = new FormData();
+                fd.append('archivo', pendingFile, pendingFile.name || 'archivo');
+                fd.append('conversacion_id', String(conversacionId || 0));
+                fd.append('cliente_id', String(clienteId));
+                fd.append('telefono', telefono);
+                if (texto) fd.append('caption', texto);
+                const data = await apiPostForm('wa_enviar_media', fd);
+                if (data.conversacion) {
+                    conversacionId = Number(data.conversacion.id);
+                    updateWaActivo(data.conversacion.wa_activo);
+                }
+                clearPendingFile();
+                if (els.input) els.input.value = '';
+            } else {
+                const data = await apiPost('wa_enviar', {
+                    conversacion_id: conversacionId,
+                    cliente_id: clienteId,
+                    telefono: telefono,
+                    texto: texto,
+                });
+                if (data.conversacion) {
+                    conversacionId = Number(data.conversacion.id);
+                    updateWaActivo(data.conversacion.wa_activo);
+                }
+                els.input.value = '';
             }
-            els.input.value = '';
             await loadMensajes(true);
             syncInBackground();
+            if (typeof window.__waBubblesRefresh === 'function') {
+                window.__waBubblesRefresh();
+            }
         } catch (e) {
             setError(e.message || 'Error al enviar');
         } finally {
             sending = false;
-            if (els.btn) els.btn.disabled = false;
+            setPuedeEnviar(canSend);
         }
     }
 
@@ -600,7 +717,15 @@
         els.input = $('waComposeInput');
         els.btn = $('waComposeSend');
         els.error = $('waError');
-        els.mode = $('waPanelMode');
+        els.attachBtn = $('waAttachBtn');
+        els.imageBtn = $('waImageBtn');
+        els.fileInput = $('waFileInput');
+        els.imageInput = $('waImageInput');
+        els.attachChip = $('waAttachChip');
+        els.attachChipName = $('waAttachChipName');
+        els.attachChipIcon = $('waAttachChipIcon');
+        els.attachPreview = $('waAttachPreview');
+        els.attachClear = $('waAttachClear');
         els.tplSelect = null;
         els.tplBtn = null;
         els.tplPreview = null;
@@ -611,6 +736,29 @@
             els.thread.innerHTML = '<div class="wa-empty">Cargando WhatsApp…</div>';
         }
         if (els.btn) els.btn.addEventListener('click', sendMessage);
+        if (els.imageBtn && els.imageInput) {
+            els.imageBtn.addEventListener('click', function () {
+                if (!canSend || sending) return;
+                els.imageInput.click();
+            });
+            els.imageInput.addEventListener('change', function () {
+                pickFileFromInput(els.imageInput, true);
+            });
+        }
+        if (els.attachBtn && els.fileInput) {
+            els.attachBtn.addEventListener('click', function () {
+                if (!canSend || sending) return;
+                els.fileInput.click();
+            });
+            els.fileInput.addEventListener('change', function () {
+                pickFileFromInput(els.fileInput, false);
+            });
+        }
+        if (els.attachClear) {
+            els.attachClear.addEventListener('click', function () {
+                clearPendingFile();
+            });
+        }
         if (els.input) {
             els.input.addEventListener('keydown', function (ev) {
                 if (ev.key === 'Enter' && !ev.shiftKey) {

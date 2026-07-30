@@ -79,8 +79,59 @@
         panel.id = 'waOverflowPanel';
         panel.className = 'wa-overflow-panel';
         panel.hidden = true;
-        panel.innerHTML = '<div class="wa-overflow-head">Cola WhatsApp</div><div class="wa-overflow-list" id="waOverflowList"></div>';
+        panel.innerHTML =
+            '<div class="wa-overflow-head">' +
+            '<span>Cola WhatsApp</span>' +
+            '<div class="wa-overflow-actions">' +
+            '<button type="button" id="waLiberarCola" title="Sacar de esta Cola (+N) los chats listados aquí. No toca las burbujas del rail.">Liberar espacio</button>' +
+            '<button type="button" id="waOcultarAtendidas" title="Bajar del rail al +N las ya atendidas (siguen en Cola)">Ocultar atendidas</button>' +
+            '</div></div>' +
+            '<div class="wa-overflow-hint">Liberar = salen de +N. Ocultar = van a +N. Las burbujas del rail no se tocan con Liberar (salen al gestionar o con la X).</div>' +
+            '<div class="wa-overflow-list" id="waOverflowList"></div>';
         document.body.appendChild(panel);
+        const liberar = panel.querySelector('#waLiberarCola');
+        const ocultarAtendidas = panel.querySelector('#waOcultarAtendidas');
+        if (liberar) {
+            liberar.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                if (!window.confirm('¿Quitar de la Cola WhatsApp (+N) los chats que ves aquí?\n\nNo toca las burbujas del rail. Si el cliente escribe de nuevo, pueden reaparecer.')) {
+                    return;
+                }
+                apiPost('wa_burbuja_liberar', { mode: 'cola' })
+                    .then(function (data) {
+                        overflowOpen = true;
+                        return refresh(true).then(function () {
+                            var hidden = data && Number(data.hidden || 0);
+                            if (!hidden) {
+                                alert('No había chats en la Cola para liberar.');
+                            }
+                        });
+                    })
+                    .catch(function (e) { alert(e.message || 'No se pudo liberar'); });
+            });
+        }
+        if (ocultarAtendidas) {
+            ocultarAtendidas.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                apiPost('wa_burbuja_liberar', { mode: 'leidas' })
+                    .then(function (data) {
+                        overflowOpen = true;
+                        return refresh(true).then(function () {
+                            var hidden = data && Number(data.hidden || 0);
+                            var kept = data && Number(data.kept_pending || 0);
+                            if (!hidden) {
+                                alert(
+                                    'No se ocultó ninguna del rail: ' + kept +
+                                    ' siguen pendientes.\n\nUsa la X de cada burbuja para bajarlas a +N.'
+                                );
+                            }
+                        });
+                    })
+                    .catch(function (e) { alert(e.message || 'No se pudo ocultar'); });
+            });
+        }
         return panel;
     }
 
@@ -251,20 +302,35 @@
         }
         items.forEach(function (c) {
             const row = document.createElement('div');
-            row.className = 'wa-overflow-item';
-            const name = c.cliente_nombre || c.telefono_e164 || ('Chat #' + c.id);
             const n = badgeCount(c);
+            row.className = 'wa-overflow-item' + (n > 0 ? ' is-pending' : '');
+            const name = c.cliente_nombre || c.telefono_e164 || ('Chat #' + c.id);
+            const preview = c.ultimo_preview
+                ? '<div class="wa-overflow-preview">' + escapeHtml(String(c.ultimo_preview).slice(0, 80)) + '</div>'
+                : '';
             const badgeHtml = n > 0
                 ? '<span class="wa-overflow-badge">' + (n > 99 ? '99+' : String(n)) + '</span>'
                 : '';
+            const label = n > 0 ? '<span class="wa-overflow-tag">Te escribió</span>' : '';
             row.innerHTML =
+                '<div class="wa-overflow-main">' +
                 '<a href="index.php?action=gestionar_cliente&id=' + encodeURIComponent(c.cliente_id || '') +
                 '&wa=' + encodeURIComponent(c.id || '') + '&claim=1">' +
-                escapeHtml(name) + badgeHtml +
-                '</a>' +
-                '<button type="button" data-id="' + Number(c.id) + '">Mostrar</button>';
+                '<span class="wa-overflow-name">' + escapeHtml(name) + '</span>' +
+                label + badgeHtml +
+                '</a>' + preview +
+                '</div>' +
+                '<button type="button" data-id="' + Number(c.id) + '">' +
+                (n > 0 ? 'Gestionar' : 'Mostrar') + '</button>';
             row.querySelector('button').addEventListener('click', function () {
-                apiPost('wa_burbuja_restore', { conversacion_id: Number(c.id) })
+                const id = Number(c.id);
+                if (n > 0 && c.cliente_id) {
+                    // Ir directo a gestionar el cliente que escribió
+                    window.location.href = 'index.php?action=gestionar_cliente&id=' +
+                        encodeURIComponent(c.cliente_id) + '&wa=' + encodeURIComponent(id) + '&claim=1';
+                    return;
+                }
+                apiPost('wa_burbuja_restore', { conversacion_id: id })
                     .then(function () {
                         overflowOpen = false;
                         return refresh();

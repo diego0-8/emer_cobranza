@@ -27,7 +27,7 @@ $basePath = $basePath ?? '';
     <?php require_once 'shared_styles.php'; ?>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="assets/css/softphone-web.css">
-    <link rel="stylesheet" href="assets/css/whatsapp-panel.css?v=10">
+    <link rel="stylesheet" href="assets/css/whatsapp-panel.css?v=16">
     <script>
         // Contexto global para que el softphone pueda registrar call_log incluso si se marca desde el dialpad.
         window.__callLogContext = {
@@ -697,8 +697,8 @@ $basePath = $basePath ?? '';
         
         /* Estilos para Canales Autorizados */
         .canales-autorizados-section {
-            margin-top: 25px;
-            padding: 20px;
+            margin-top: 0;
+            padding: 16px;
             background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
             border-radius: 12px;
             border: 1px solid #dee2e6;
@@ -707,53 +707,119 @@ $basePath = $basePath ?? '';
         
         .canales-title {
             color: #495057;
-            font-size: 1.1rem;
+            font-size: 1rem;
             font-weight: 600;
-            margin-bottom: 15px;
+            margin-bottom: 8px;
             display: flex;
             align-items: center;
             gap: 8px;
         }
+
+        .canales-dropdown {
+            position: relative;
+            width: 100%;
+        }
+
+        .canales-dropdown-trigger {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 10px 14px;
+            background: #fff;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: #495057;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            text-align: left;
+        }
+
+        .canales-dropdown-trigger:hover,
+        .canales-dropdown.open .canales-dropdown-trigger {
+            border-color: #007bff;
+            box-shadow: 0 2px 8px rgba(0,123,255,0.15);
+        }
+
+        .canales-dropdown-trigger-text {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .canales-dropdown-trigger .fa-chevron-down {
+            font-size: 0.75rem;
+            color: #6b7280;
+            transition: transform 0.2s ease;
+            flex-shrink: 0;
+        }
+
+        .canales-dropdown.open .canales-dropdown-trigger .fa-chevron-down {
+            transform: rotate(180deg);
+        }
+
+        .canales-dropdown-panel {
+            display: none;
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            right: 0;
+            z-index: 40;
+            background: #fff;
+            border: 1px solid #dee2e6;
+            border-radius: 10px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+            padding: 10px;
+        }
+
+        .canales-dropdown.open .canales-dropdown-panel {
+            display: block;
+        }
         
         .canales-checkboxes {
-            display: flex;
-            justify-content: center;
+            display: block;
         }
         
         .checkbox-group {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 12px;
-            max-width: 800px;
+            display: flex;
+            flex-direction: row;
+            flex-wrap: wrap;
+            gap: 8px;
             width: 100%;
         }
         
         .checkbox-label {
-            display: flex;
+            display: inline-flex;
             align-items: center;
-            padding: 12px 16px;
+            padding: 8px 12px;
             background: white;
             border: 2px solid #e9ecef;
             border-radius: 8px;
             cursor: pointer;
-            transition: all 0.3s ease;
-            font-size: 0.9rem;
+            transition: all 0.2s ease;
+            font-size: 0.8rem;
             font-weight: 500;
+            white-space: nowrap;
+            flex: 0 0 auto;
         }
         
         .checkbox-label:hover {
             border-color: #007bff;
             background-color: #f8f9fa;
-            transform: translateY(-1px);
             box-shadow: 0 2px 8px rgba(0,123,255,0.15);
         }
         
         .canal-checkbox {
-            margin-right: 10px;
-            width: 18px;
-            height: 18px;
+            margin-right: 8px;
+            width: 16px;
+            height: 16px;
             accent-color: #007bff;
             cursor: pointer;
+            flex-shrink: 0;
         }
         
         .checkbox-text {
@@ -1557,16 +1623,17 @@ $basePath = $basePath ?? '';
             border-bottom: 2px solid #e2e8f0;
         }
         
-        /* Ajustar canales autorizados para que se vean en columna */
+        /* Canales autorizados: layout horizontal en el desplegable */
         .canales-checkboxes .checkbox-group {
             display: flex !important;
-            flex-direction: column !important;
+            flex-direction: row !important;
+            flex-wrap: wrap !important;
             gap: 8px !important;
         }
         
         .canales-checkboxes .checkbox-label {
-            width: 100% !important;
-            margin-bottom: 5px !important;
+            width: auto !important;
+            margin-bottom: 0 !important;
         }
          
          /* Estilos para el modal */
@@ -2065,20 +2132,18 @@ $basePath = $basePath ?? '';
      }
      
      .canales-checkboxes {
-         display: grid;
-         grid-template-columns: 1fr 1fr;
-         gap: 10px;
-         margin-top: 10px;
+         display: block;
+         margin-top: 0;
      }
      
      .checkbox-label {
-         display: flex;
+         display: inline-flex;
          align-items: center;
          cursor: pointer;
-         padding: 8px;
-         border: 1px solid #e2e8f0;
-         border-radius: 6px;
-         transition: all 0.3s ease;
+         padding: 8px 12px;
+         border: 2px solid #e9ecef;
+         border-radius: 8px;
+         transition: all 0.2s ease;
      }
      
      .checkbox-label:hover {
@@ -2106,10 +2171,6 @@ $basePath = $basePath ?? '';
      }
 
      @media (max-width: 768px) {
-         .canales-checkboxes {
-             grid-template-columns: 1fr;
-         }
-         
          .form-actions {
              flex-direction: column;
          }
@@ -2881,7 +2942,6 @@ $basePath = $basePath ?? '';
                 <div id="waPanel" class="cliente-info-card" style="padding: 0; overflow: hidden;">
                     <div class="wa-panel-header">
                         <h5><i class="fab fa-whatsapp"></i> WhatsApp</h5>
-                        <span class="wa-panel-mode" id="waPanelMode">…</span>
                     </div>
                     <div class="wa-panel-body">
                         <div class="wa-write-row">
@@ -2893,7 +2953,27 @@ $basePath = $basePath ?? '';
                             <div class="wa-empty">Cargando conversación…</div>
                         </div>
                         <div class="wa-compose">
-                            <textarea id="waComposeInput" rows="2" placeholder="Escribe un mensaje… (solo si el cliente ya escribió / ventana 24h)" maxlength="4000"></textarea>
+                            <div class="wa-compose-tools">
+                                <button type="button" id="waImageBtn" class="wa-tool-btn" title="Enviar imagen JPG/PNG">
+                                    <i class="fas fa-image"></i>
+                                </button>
+                                <button type="button" id="waAttachBtn" class="wa-tool-btn" title="Adjuntar archivo">
+                                    <i class="fas fa-paperclip"></i>
+                                </button>
+                                <input type="file" id="waImageInput" hidden
+                                       accept="image/jpeg,image/jpg,image/png,image/gif,image/webp,.jpg,.jpeg,.png,.gif,.webp">
+                                <input type="file" id="waFileInput" hidden
+                                       accept="image/*,image/jpeg,.jpg,.jpeg,.png,.gif,.webp,video/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip">
+                            </div>
+                            <div class="wa-compose-main">
+                                <div class="wa-attach-chip" id="waAttachChip" hidden>
+                                    <img id="waAttachPreview" class="wa-attach-preview" alt="" hidden>
+                                    <i class="fas fa-file" id="waAttachChipIcon"></i>
+                                    <span id="waAttachChipName">archivo</span>
+                                    <button type="button" id="waAttachClear" title="Quitar">&times;</button>
+                                </div>
+                                <textarea id="waComposeInput" rows="2" placeholder="Escribe un mensaje… (solo si el cliente ya escribió / ventana 24h)" maxlength="4000"></textarea>
+                            </div>
                             <button type="button" id="waComposeSend" title="Enviar">
                                 <i class="fas fa-paper-plane"></i>
                             </button>
@@ -2906,37 +2986,45 @@ $basePath = $basePath ?? '';
                 <!-- Canales de Comunicación Autorizados -->
                 <div class="cliente-info-card">
                     <div class="canales-autorizados-section">
-                        <h5 class="canales-title" style="margin-bottom: 15px;">
+                        <h5 class="canales-title">
                             <i class="fas fa-broadcast-tower"></i> Canales de Comunicación Autorizados
                         </h5>
-                        <p style="font-size: 12px; color: #6b7280; margin-bottom: 15px;"><em>Seleccione los canales autorizados por la empresa para futuras comunicaciones</em></p>
-                        
-                        <div class="canales-checkboxes">
-                            <div class="checkbox-group" style="display: flex; flex-direction: column; gap: 10px;">
-                                <label class="checkbox-label">
-                                    <input type="checkbox" name="canales_autorizados[]" value="llamada" class="canal-checkbox">
-                                    <span class="checkbox-text">📞 Llamada Telefónica</span>
-                                </label>
-                                <label class="checkbox-label">
-                                    <input type="checkbox" name="canales_autorizados[]" value="whatsapp" class="canal-checkbox">
-                                    <span class="checkbox-text">📱 WhatsApp</span>
-                                </label>
-                                <label class="checkbox-label">
-                                    <input type="checkbox" name="canales_autorizados[]" value="correo_electronico" class="canal-checkbox">
-                                    <span class="checkbox-text">📧 Correo Electrónico</span>
-                                </label>
-                                <label class="checkbox-label">
-                                    <input type="checkbox" name="canales_autorizados[]" value="sms" class="canal-checkbox">
-                                    <span class="checkbox-text">💬 SMS</span>
-                                </label>
-                                <label class="checkbox-label">
-                                    <input type="checkbox" name="canales_autorizados[]" value="correo_fisico" class="canal-checkbox">
-                                    <span class="checkbox-text">📮 Correo Físico</span>
-                                </label>
-                                <label class="checkbox-label">
-                                    <input type="checkbox" name="canales_autorizados[]" value="mensajeria_aplicaciones" class="canal-checkbox">
-                                    <span class="checkbox-text">📱 Mensajería por Aplicaciones</span>
-                                </label>
+                        <p style="font-size: 12px; color: #6b7280; margin-bottom: 12px;"><em>Seleccione los canales autorizados por la empresa para futuras comunicaciones</em></p>
+
+                        <div class="canales-dropdown" id="canalesDropdown">
+                            <button type="button" class="canales-dropdown-trigger" id="canalesDropdownTrigger" aria-expanded="false" aria-controls="canalesDropdownPanel">
+                                <span class="canales-dropdown-trigger-text" id="canalesDropdownLabel">Seleccionar canales</span>
+                                <i class="fas fa-chevron-down"></i>
+                            </button>
+                            <div class="canales-dropdown-panel" id="canalesDropdownPanel" role="listbox" aria-multiselectable="true">
+                                <div class="canales-checkboxes">
+                                    <div class="checkbox-group">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" name="canales_autorizados[]" value="llamada" class="canal-checkbox">
+                                            <span class="checkbox-text">📞 Llamada Telefónica</span>
+                                        </label>
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" name="canales_autorizados[]" value="whatsapp" class="canal-checkbox">
+                                            <span class="checkbox-text">📱 WhatsApp</span>
+                                        </label>
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" name="canales_autorizados[]" value="correo_electronico" class="canal-checkbox">
+                                            <span class="checkbox-text">📧 Correo Electrónico</span>
+                                        </label>
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" name="canales_autorizados[]" value="sms" class="canal-checkbox">
+                                            <span class="checkbox-text">💬 SMS</span>
+                                        </label>
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" name="canales_autorizados[]" value="correo_fisico" class="canal-checkbox">
+                                            <span class="checkbox-text">📮 Correo Físico</span>
+                                        </label>
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" name="canales_autorizados[]" value="mensajeria_aplicaciones" class="canal-checkbox">
+                                            <span class="checkbox-text">📱 Mensajería por Aplicaciones</span>
+                                        </label>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -4548,6 +4636,59 @@ $basePath = $basePath ?? '';
             return div.innerHTML;
         }
         
+        // Desplegable horizontal de canales autorizados
+        document.addEventListener('DOMContentLoaded', function() {
+            const canalesDropdown = document.getElementById('canalesDropdown');
+            const canalesTrigger = document.getElementById('canalesDropdownTrigger');
+            const canalesLabel = document.getElementById('canalesDropdownLabel');
+            if (!canalesDropdown || !canalesTrigger || !canalesLabel) return;
+
+            const canalLabels = {
+                llamada: 'Llamada Telefónica',
+                whatsapp: 'WhatsApp',
+                correo_electronico: 'Correo Electrónico',
+                sms: 'SMS',
+                correo_fisico: 'Correo Físico',
+                mensajeria_aplicaciones: 'Mensajería por Aplicaciones'
+            };
+
+            function actualizarEtiquetaCanales() {
+                const seleccionados = Array.from(
+                    canalesDropdown.querySelectorAll('.canal-checkbox:checked')
+                ).map(cb => canalLabels[cb.value] || cb.value);
+
+                if (seleccionados.length === 0) {
+                    canalesLabel.textContent = 'Seleccionar canales';
+                } else if (seleccionados.length <= 2) {
+                    canalesLabel.textContent = seleccionados.join(', ');
+                } else {
+                    canalesLabel.textContent = `${seleccionados.length} canales seleccionados`;
+                }
+            }
+
+            canalesTrigger.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const abierto = canalesDropdown.classList.toggle('open');
+                canalesTrigger.setAttribute('aria-expanded', abierto ? 'true' : 'false');
+            });
+
+            canalesDropdown.addEventListener('change', function(e) {
+                if (e.target && e.target.classList.contains('canal-checkbox')) {
+                    actualizarEtiquetaCanales();
+                }
+            });
+
+            document.addEventListener('click', function(e) {
+                if (!canalesDropdown.contains(e.target)) {
+                    canalesDropdown.classList.remove('open');
+                    canalesTrigger.setAttribute('aria-expanded', 'false');
+                }
+            });
+
+            actualizarEtiquetaCanales();
+        });
+
         // Funcionalidad del desplegable de teléfonos
         document.addEventListener('DOMContentLoaded', function() {
             const telefonoDropdown = document.getElementById('telefonoDropdown');
@@ -5270,7 +5411,7 @@ $basePath = $basePath ?? '';
     </script>
     <?php endif; ?>
 
-    <script src="assets/js/whatsapp-panel.js?v=11"></script>
+    <script src="assets/js/whatsapp-panel.js?v=15"></script>
 
 </body>
 </html>

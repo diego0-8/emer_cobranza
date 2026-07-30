@@ -51,6 +51,7 @@ $accionesAPI = [
     'wa_mis_chats',
     'wa_mensajes',
     'wa_enviar',
+    'wa_enviar_media',
     'wa_conversacion_cliente',
     'wa_emparejar',
     'wa_sin_cliente',
@@ -62,6 +63,7 @@ $accionesAPI = [
     'wa_media',
     'wa_burbuja_dismiss',
     'wa_burbuja_restore',
+    'wa_burbuja_liberar',
     'wa_templates_list',
     'wa_enviar_plantilla',
     'wa_campana_preview_cedulas',
@@ -644,6 +646,10 @@ switch ($action) {
         $wa = new WhatsappController($pdo);
         $wa->enviar();
         break;
+    case 'wa_enviar_media':
+        $wa = new WhatsappController($pdo);
+        $wa->enviarMedia();
+        break;
     case 'wa_sin_cliente':
         $wa = new WhatsappController($pdo);
         $wa->sinCliente();
@@ -679,6 +685,10 @@ switch ($action) {
     case 'wa_burbuja_restore':
         $wa = new WhatsappController($pdo);
         $wa->burbujaRestore();
+        break;
+    case 'wa_burbuja_liberar':
+        $wa = new WhatsappController($pdo);
+        $wa->burbujaLiberar();
         break;
     case 'wa_templates_list':
         $wa = new WhatsappController($pdo);
